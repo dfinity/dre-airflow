@@ -1,0 +1,11 @@
+---
+ref: dre-st2-pack
+name: DRE StackStorm pack
+description: the StackStorm pack with objects used by the Distributed Reliability Team
+keywords:
+  - release
+version: 0.1.0
+author: Manuel Amador
+email: manuel.amador@dfinity.org
+dependencies:
+  - core
