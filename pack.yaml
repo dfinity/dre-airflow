@@ -1,5 +1,5 @@
 ---
-ref: dre-st2-pack
+ref: dre_st2_pack
 name: DRE StackStorm pack
 description: the StackStorm pack with objects used by the Distributed Reliability Team
 keywords:
