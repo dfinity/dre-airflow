@@ -11,6 +11,10 @@ General information on packs:
 
 ## Local development environment
 
+The following instructions aid you in setting the Python libraries up to
+develop the StackStorm actions made available through this pack to our
+StackStorm instances.
+
 With `pip3` on your system, run:
 
 ```
@@ -29,3 +33,29 @@ cd -
 ```
 
 You can also do this to a pyenv of your choice using its own `pip3`.
+
+## Local server
+
+The local StackStorm server can be installed in a virtual machine
+(a CentOS Stream 8 instance) by following these instructions
+(as root):
+
+* `dnf install -y centos-release-ansible-29`
+* `dnf --enablerepo=centos-ansible-29 install -y ansible`
+* `ln -sf /usr/bin/pip3 /usr/bin/pip3.8`
+* `ansible-galaxy collection install community.rabbitmq`
+* `ansible-galaxy collection install community.authorized_keys`
+* `git clone` the repository https://github.com/StackStorm/ansible-st2
+  then change into that directory
+* `echo 127.0.0.1 ansible_conneection=local > hosts`
+* `ansible-playbook -i hosts stackstorm.yml`
+
+The StackStorm server will then be running on port 443 (HTTPS with
+self-signed certificate), and you can port-forward this from your
+host machine to the VM.  You will have to turn off the firewall
+in the VM (`systemctl disable --now firewalld`) to make use of this
+setup from your host machine.
+
+You can log into the StackStorm user interface using user name
+`testu` and password `testp` (the defaults from the Ansible playbook
+that sets up StackStorm, which you cloned in previous steps).
