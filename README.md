@@ -59,3 +59,19 @@ setup from your host machine.
 You can log into the StackStorm user interface using user name
 `testu` and password `testp` (the defaults from the Ansible playbook
 that sets up StackStorm, which you cloned in previous steps).
+
+## How to install this pack in the server
+
+* Create a GitLab access token for your user name here:
+  https://gitlab.com/dfinity-lab/core/dre-st2-pack/-/settings/access_tokens
+  and make sure the token has `read_repository` access under Developer role.
+* Launch the StackStorm server and log into it.
+* On the tab above, go to *Actions* then on the left sidebar, select
+  *Packs*, and click *install*.
+* In the form, on the *packs* field, enter the URL of the pack
+  as follows:
+  `https://<your GitLab username>:<your GitLab access token>@gitlab.com/dfinity-lab/core/dre-st2-pack`
+* Push the blue button labeled *Run*.
+
+This will install the most up-to-date version of the pack as per the
+primary branch of the repository.
