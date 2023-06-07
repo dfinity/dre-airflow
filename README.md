@@ -71,6 +71,12 @@ TBD:
 * local testing story (unit tests)
 * CI/CD pipeline story
 
+## Continuous integration and deployment
+
+*TBD*.  We do not yet have a pipeline to run automated tests or to
+create artifacts that will be deployed to production, largely because
+we do not have a production Airflow setup yet.
+
 ## Local development environment setup
 
 To get the right libraries loaded into your IDE:
