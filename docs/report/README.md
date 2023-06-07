@@ -1,5 +1,9 @@
 # Apache Airflow report
 
+Airflow is a natively distributed Python-based distributed execution engine.
+
+Airflow is stable, mature, it has a decent user interface, it has an API, it has a story for deployment of custom artifacts, and it is well-designed around a robust distributed execution model.  It is absolutely hands-down superior to StackStorm.
+
 ## Main documentation site
 
 * https://airflow.apache.org/docs/
