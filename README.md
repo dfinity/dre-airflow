@@ -71,11 +71,28 @@ TBD:
 * local testing story (unit tests)
 * CI/CD pipeline story
 
-## Continuous integration and deployment
+## Quality assurance
 
-*TBD*.  We do not yet have a pipeline to run automated tests or to
-create artifacts that will be deployed to production, largely because
-we do not have a production Airflow setup yet.
+*TBD*.  We do not yet have a pipeline to run automated tests.
+
+Targets:
+
+* ruff validation and fixups
+* mypy validation
+* automated unit tests
+* git presubmit implementing all the above
+* integration tests
+* Gitlab pipeline validating all the above
+
+## Continuous delivery
+
+*TBD*.  We do not yet have a pipeline to create artifacts that
+will be deployed to production, largely because we do not have
+a production Airflow setup yet.
+
+* Settle on artifact format and repository.
+* Come up with pipeline to build artifacts and upload them.
+* Come up with workflow to deploy artifacts.
 
 ## Local development environment setup
 
