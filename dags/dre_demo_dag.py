@@ -26,8 +26,6 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 
-from airflow.models import DagBag
-
 with DAG(
     dag_id="dre_demo_dag",
     schedule=None,
