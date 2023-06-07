@@ -4,9 +4,20 @@ Airflow is a natively distributed Python-based distributed execution engine.
 
 Airflow is stable, mature, it has a decent user interface, it has an API, it has a story for deployment of custom artifacts, and it is well-designed around a robust distributed execution model.  It is absolutely hands-down superior to StackStorm.
 
+The purpose of the work behind this report is to discover the answers
+to the following questions:
+
+* How usable, in practice, is Airflow?
+* How does one extend / build functionality with Airflow?  How easy are these tasks?
+* Does Airflow have fault tolerance?  If so, to what extent?
+* What is the deployment story for Airflow-powered functionality (such as workflows)?
+* How does it compare to the previous workflow engine we researched (StackStorm)?
+* What is the architecture of Airflow, and what are the production implications of that architecture?
+
 Most of the practical findings discovered during the production of this report
 are not not directly in the report -- they are in the main [README.md](../../README.md)
-file of this repository.
+file of this repository, as instructions to the users and maintainers of the Airflow
+stack within our team.
 
 ## Main documentation site
 
@@ -71,7 +82,8 @@ can create own custom operators.
 
 DAGs appear to be discovered and loaded from the Python `sys.path` environment.
 There is also a folder specified by configuration where DAGs are loaded from.
-The DRE Airflow repository contains specifics.
+The DRE Airflow repository that contains this document also contains
+custom DAGs.
 
 DAGs appear to be reloaded automatically when files in the DAGs folder are
 changed.  Renamed DAGs leave an old DAG behind which must be deleted by hand.
