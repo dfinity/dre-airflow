@@ -23,6 +23,18 @@ venv/bin/python -c "from airflow.models import DagBag; d = DagBag();"
 If you rename a DAG or its ID, you will have to delete the old DAG
 through the CLI or the web interface.
 
+### Editing operators
+
+Operators are Python classes defined in standalone files under the
+[operators](plugins/operators) folder.
+
+* Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
+
+A local Airflow instance will **not** reload the operator code when
+modifications are made, unless you change configuration key
+`webserver.reload_on_plugin_change` to True in `airflow.cfg`, then
+restart your Airflow instance once.
+
 ### Testing DAGs
 
 By convention, DAGs can be tested by running them under the Python
@@ -46,6 +58,18 @@ actually testing everything in an integrated fashion.
 
 Test DAG runs are recorded in the local development environment's
 database as well.  You can browse DAG runs using the web interface.
+
+TBD:
+
+* local mock testing story (test DAG dependencies and dry-run)
+* CI/CD pipeline story
+
+### Testing operators
+
+TBD:
+
+* local testing story (unit tests)
+* CI/CD pipeline story
 
 ## Local development environment
 

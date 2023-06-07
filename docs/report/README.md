@@ -9,8 +9,8 @@
 * Learn about Airflow deployment in Kubernetes.
   * Finish SVG graph. https://github.com/apache/airflow/tree/main/chart/templates
 * Decide on a method and pipeline to redeploy custom operators and DAGs.
-* Test the reliability of partial outages of the system (kill executor pod e.g.)
-* Figure out testability story for workflows.
+* Hard test reliability of partial outages of the system (kill executor pod / scheduler)
+* Document and implement testability story for workflows.  Local test and CI/CD.
 * Rename dre-st2-pack repo to dre-airflow. 
 
 ## Deployment of trial Airflow instance
@@ -124,7 +124,8 @@ Operator classes can be packaged as PyPI packages too.
 
 This all implies that the Operator must be available on both the
 scheduler and the workers, under its Python path.  The second-order
-implication is that we must redeploy these custom operators somehow:
+implication is that we must redeploy and reload these custom operators
+on changes:
 
 * rebuild container images containing any custom operators we build,
   and redeploy them to the Kubernetes cluster (at least for the
@@ -132,6 +133,12 @@ implication is that we must redeploy these custom operators somehow:
 * distribute the custom operators as a folder that can be downloaded
   by a sidecar in the relevant pods to the plugins folder (specified
   in `airflow.cfg`).
+
+It is unclear yet if anything special needs to run to reload operator
+code in workers or the scheduler when the operator code has changed.
+`webserver.reload_on_plugin_change` appears to be a setting for the
+webserver component only.  Need to investigate whether the setting
+also affects the scheduler and the workers.
 
 * Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
 * Packaging operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
