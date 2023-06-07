@@ -22,26 +22,6 @@ file of this repository.
 * Document and implement testability story for workflows.  Local test and CI/CD.
 * Rename dre-st2-pack repo to dre-airflow. 
 
-## Deployment of trial Airflow instance
-
-The trial instance of Airflow was [deployed using the PyPI method](https://airflow.apache.org/docs/apache-airflow/stable/installation/index.html#using-pypi) on a VM running locally.  The process is documented in this repository's [README.md file](../../README.md).
-
-Everything ran in a Fedora 38 minimal VM under QEMU (specifically using the Virtual
-Machine Manager connected to a local session QEMU libvirt  driver), with port
-forwardings on a separate network interface just for local use.  The necessary
-libvirt XML to get the port forwarding going on the VM is:
-
-```
-  <qemu:commandline>
-    <qemu:arg value="-netdev"/>
-    <qemu:arg value="user,id=localnet0,net=192.168.32.0/24,hostfwd=tcp::22222-:22,hostfwd=tcp::8080-:8080"/>
-    <qemu:arg value="-device"/>
-    <qemu:arg value="e1000,netdev=localnet0"/>
-  </qemu:commandline>
-```
-
-The firewall was shut off: `systemctl disable --now firewalld`.
-
 ## Architecture
 
 A minimal Airflow setup works as follows:
@@ -179,3 +159,26 @@ fault-tolerant out of the box.
 ## Production recommendations:
 
 * https://airflow.apache.org/docs/helm-chart/stable/production-guide.html
+
+## Appendix A: deployment of trial Airflow instance
+
+For the purposes of testing different aspects of the Airflow deployment,
+a test VM was set up.  These are the details on how that was accomplished.
+
+The trial instance of Airflow was [deployed using the PyPI method](https://airflow.apache.org/docs/apache-airflow/stable/installation/index.html#using-pypi) on a VM running locally.  The process is documented in this repository's [README.md file](../../README.md).
+
+Everything ran in a Fedora 38 minimal VM under QEMU (specifically using the Virtual
+Machine Manager connected to a local session QEMU libvirt  driver), with port
+forwardings on a separate network interface just for local use.  The necessary
+libvirt XML to get the port forwarding going on the VM is:
+
+```
+  <qemu:commandline>
+    <qemu:arg value="-netdev"/>
+    <qemu:arg value="user,id=localnet0,net=192.168.32.0/24,hostfwd=tcp::22222-:22,hostfwd=tcp::8080-:8080"/>
+    <qemu:arg value="-device"/>
+    <qemu:arg value="e1000,netdev=localnet0"/>
+  </qemu:commandline>
+```
+
+The firewall was shut off: `systemctl disable --now firewalld`.

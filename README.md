@@ -71,13 +71,13 @@ TBD:
 * local testing story (unit tests)
 * CI/CD pipeline story
 
-## Local development environment
+## Local development environment setup
 
 To get the right libraries loaded into your IDE:
 
 * Create a virtual environment using your local Python interpreter.
   * Customarily you can use the folder `venv` in this project.
-  * See example below where how to install Airflow to a VM is explained.
+  * `cd path/to/this/folder ; python -m venv venv`
 * Run the installation on the venv.  The following sample command gets you
   going with the Airflow instance.  Note that the version may vary as we move
   forward, and you may be required to update it later.
@@ -89,10 +89,12 @@ venv/bin/pip3 install "apache-airflow[celery]==2.6.1" \
 
 Now you can tell your IDE to use the specific venv `python` binary.
 
-To actually run tests, you will have to create an Airflow home directory,
-from which you can then run Airflow or tests, and set a few environment
-variables.  By convention the folder is `airflow` under this repository.
-Here is how you do that:
+### Running Airflow or its code
+
+To actually run tests or Airflow itself, you will have to create an Airflow
+home directory, from which you can then run Airflow or tests, and set a
+few environment variables.  By convention the folder is `airflow` under
+this repository.  Here is how you do that:
 
 ```
 export PATH=$PWD/venv/bin:$PATH
@@ -124,10 +126,13 @@ To remove these DAGs:
 
 The demo DAGs will be gone.
 
-## Deploying a bare-bones Airflow instance to a VM
+### Deploying a bare-bones Airflow instance to a VM
 
-The following shellcode deploys Airflow (at a specific version) in a Fedora 38 VM,
-using the minimalistic SQLite database.
+Some people prefer to use VMs for testing.  VMs can also run programs
+that may not be available or installable in local development environments.
+
+The following shellcode deploys Airflow (at a specific version) in a
+running Fedora 38 VM, using the minimalistic SQLite database.
 
 ```
 cd /opt/airflow || { mkdir -p /opt/airflow && cd /opt/airflow ; }
