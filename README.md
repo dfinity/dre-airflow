@@ -3,10 +3,12 @@
 This repository contains code and instructions for working with the
 Distributed Reliability Team Airflow instance.
 
-## DAGs distributed in this repository
+## Artifacts distributed in this repository
 
 The DAGs in this repository are distributed under folder
 [dags/](dags/README.md).
+
+The operators are under folder [plugins/operators](plugins/operators/README.md).
 
 ### Editing DAGs
 
