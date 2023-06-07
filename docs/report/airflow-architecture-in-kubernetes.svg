@@ -7,8 +7,8 @@
    viewBox="0 0 210 297"
    version="1.1"
    id="svg5"
-   inkscape:version="1.1.2 (0a00cf5339, 2022-02-04)"
    sodipodi:docname="airflow-architecture-in-kubernetes.svg"
+   inkscape:version="1.1.2 (0a00cf5339, 2022-02-04)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -33,7 +33,14 @@
      inkscape:window-maximized="0"
      inkscape:current-layer="layer1" />
   <defs
-     id="defs2" />
+     id="defs2">
+    <rect
+       x="90.630243"
+       y="264.29196"
+       width="316.01359"
+       height="143.37032"
+       id="rect3945" />
+  </defs>
   <g
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
@@ -45,5 +52,13 @@
        height="84.116974"
        x="1.7281325"
        y="42.783787" />
+    <text
+       xml:space="preserve"
+       transform="scale(0.26458333)"
+       id="text3943"
+       style="font-size:13.3333px;line-height:1.25;font-family:sans-serif;white-space:pre;shape-inside:url(#rect3945)"><tspan
+         x="90.630859"
+         y="276.08786"
+         id="tspan3957">Not yet done, excuse this please.</tspan></text>
   </g>
 </svg>
