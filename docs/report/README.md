@@ -8,7 +8,7 @@ Airflow is stable, mature, it has a decent user interface, it has an API, it has
 
 * https://airflow.apache.org/docs/
 
-## Pending
+## Pending items to settle / document / implement
 
 * Learn about Airflow deployment in Kubernetes.
   * Finish SVG graph. https://github.com/apache/airflow/tree/main/chart/templates
