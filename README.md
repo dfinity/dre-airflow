@@ -1,7 +1,8 @@
-# Airflow setup used by the DRE team
+# Airflow repository of the DRE team
 
-This repository contains code and instructions for working with the
-Distributed Reliability Team Airflow instance.
+This repository contains Airflow extensions (workflows and operators)
+as well as documentation for effective working with the
+Distributed Reliability Team Airflow setup.
 
 ## Artifacts distributed in this repository
 
