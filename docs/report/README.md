@@ -12,6 +12,7 @@ Airflow is stable, mature, it has a decent user interface, it has an API, it has
 
 * Learn about Airflow deployment in Kubernetes.
   * Finish SVG graph. https://github.com/apache/airflow/tree/main/chart/templates
+  * Come up with concrete story to deploy using Flux
 * Decide on a method and pipeline to redeploy custom operators and DAGs.
 * Hard test reliability of partial outages of the system (kill executor pod / scheduler)
 * Document and implement testability story for workflows.  Local test and CI/CD.
