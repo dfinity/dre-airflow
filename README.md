@@ -4,6 +4,8 @@ This repository contains Airflow extensions (workflows and operators)
 as well as documentation for effective working with the
 Distributed Reliability Team Airflow setup.
 
+[[_TOC_]]
+
 ## Artifacts distributed in this repository
 
 The DAGs in this repository are distributed under folder
