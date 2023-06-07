@@ -68,7 +68,7 @@ Here it is:
 
 The Apache Airflow site [hosts an architectural description](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/overview.html).
 
-## Flows (DAGs), tasks and operators
+## Building blocks: flows (DAGs), tasks and operators
 
 Flows (DAGs) are directed acyclic graphs written in Python, using Airflow primitives
 to put them together.  Nodes in a flow are tasks.
@@ -116,7 +116,7 @@ DAGs appear to be required by the scheduler node too.  It looks like DAGs
 are always [reloaded by the scheduler periodically and also before starting
 a new DAG run](https://stackoverflow.com/questions/46418236/can-airflow-load-dags-file-without-restart-scheduler).
 
-## How are operators found and loaded?
+### How are operators found and loaded?
 
 In principle, the DAG imports the Operator class and `__init__`s it.
 This code runs in the scheduler and also in the process that imports
