@@ -62,6 +62,10 @@ actually testing everything in an integrated fashion.
 Test DAG runs are recorded in the local development environment's
 database as well.  You can browse DAG runs using the web interface.
 
+More on testing DAGs:
+
+* [Test-running DAGs interactively](https://airflow.apache.org/docs/apache-airflow/2.6.1/core-concepts/executor/debug.html).
+
 TBD:
 
 * local mock testing story (test DAG dependencies and dry-run)
@@ -245,10 +249,6 @@ a task node in the DAG.  Think of an operator as a template for a task.
 
 * [Operators in Airflow](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/operators.html).
 * [Built-in operator index](https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/operators/index.html).
-
-## Testing
-
-* [Testing DAGs](https://airflow.apache.org/docs/apache-airflow/2.6.1/core-concepts/executor/debug.html).
 
 ## Administrivia
 
