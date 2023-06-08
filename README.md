@@ -4,17 +4,22 @@ This repository contains Airflow extensions (workflows and operators)
 as well as documentation for effective working with the
 Distributed Reliability Team Airflow setup.
 
+To effectively contribute code to this repository, you must first
+set up a local development environment.  See below for instructions.
 [[_TOC_]]
 
 ## Artifacts distributed in this repository
 
-* The DAGs in this repository are distributed under folder
+* Our DAGs in this repository are distributed under folder
 [dags](dags/README.md).
-* The operators are under folder [plugins/operators](plugins/operators/README.md).
-* To effectively contribute code to this repository, you must first
-  set up a local development environment.  See below for instructions.
+* Our custom operators are under folder [operators](operators/README.md).
 
 ### Editing DAGs
+
+DAGs are workflows expressed in Python, which Airflow loads and enables
+you to either execute them manually or trigger them under certain conditions.
+
+* DAG developer reference: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
 
 With the local development environment instructions below, DAGs are
 automatically reloaded a few seconds after you save changes to the files
