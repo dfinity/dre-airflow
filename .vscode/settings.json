@@ -6,5 +6,10 @@
         "--show-column-numbers",
         "--no-pretty",
         "--strict"
-    ]
+    ],
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": true,
+        "source.fixAll": true
+    }
 }
