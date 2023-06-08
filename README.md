@@ -11,7 +11,7 @@ Distributed Reliability Team Airflow setup.
 * The DAGs in this repository are distributed under folder
 [dags](dags/README.md).
 * The operators are under folder [plugins/operators](plugins/operators/README.md).
-* To effectively contribute code to this repository, you should
+* To effectively contribute code to this repository, you must first
   set up a local development environment.  See below for instructions.
 
 ### Editing DAGs
@@ -21,7 +21,7 @@ automatically reloaded a few seconds after you save changes to the files
 under the DAGs folder.  To force a reload:
 
 ```
-venv/bin/python -c "from airflow.models import DagBag; d = DagBag();"
+bin/reload-dags
 ```
 
 If you rename a DAG or its ID, you will have to delete the old DAG
@@ -36,9 +36,13 @@ Operators are Python classes defined in standalone files under the
 * Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
 
 A local Airflow instance will **not** reload the operator code when
-modifications are made, unless you change configuration key
-`webserver.reload_on_plugin_change` to `True` in `airflow.cfg`, then
-restart your Airflow instance once.  We recommend that change.
+modifications are made by default.  To enable this behavior:
+
+```
+sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow/airflow.cfg
+```
+
+Now restart any running `bin/airflow standalone` instances.
 
 ### Testing DAGs
 
@@ -132,13 +136,14 @@ able to open TCP port 8080, since the VM will have hogged the port.
 
 ### Removing the example DAGs that ship with Airflow
 
-To remove these DAGs:
+To remove these DAGs from your instance's list of DAGs:
 
-1. Stop any instance of `bin/airflow standalone`.
-2. `sed -i 's/load_examples.*/load_examples = False/' airflow/airflow.cfg`
-3. Start your `bin/airflow standalone` instance.
+```
+sed -i 's/load_examples.*/load_examples = False/' airflow/airflow.cfg
+```
 
-The demo DAGs will be gone.
+Now restart any running `bin/airflow standalone` instances.  The demo DAGs
+will be gone now.
 
 ### Deploying a bare-bones Airflow instance to a VM
 
