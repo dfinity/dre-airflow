@@ -1,3 +1,8 @@
+"""
+This operator demoes a wrapper of the standard Python operator,
+which can run an arbitrary Python callable.
+"""
+
 import sys
 import time
 from typing import Any
