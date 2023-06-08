@@ -8,10 +8,11 @@ Distributed Reliability Team Airflow setup.
 
 ## Artifacts distributed in this repository
 
-The DAGs in this repository are distributed under folder
-[dags/](dags/README.md).
-
-The operators are under folder [plugins/operators](plugins/operators/README.md).
+* The DAGs in this repository are distributed under folder
+[dags](dags/README.md).
+* The operators are under folder [plugins/operators](plugins/operators/README.md).
+* To effectively contribute code to this repository, you should
+  set up a local development environment.  See below for instructions.
 
 ### Editing DAGs
 
