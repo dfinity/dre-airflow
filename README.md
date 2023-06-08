@@ -32,11 +32,12 @@ Operators are Python classes defined in standalone files under the
 [operators](plugins/operators) folder.
 
 * Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
+* Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
 
 A local Airflow instance will **not** reload the operator code when
 modifications are made, unless you change configuration key
-`webserver.reload_on_plugin_change` to True in `airflow.cfg`, then
-restart your Airflow instance once.
+`webserver.reload_on_plugin_change` to `True` in `airflow.cfg`, then
+restart your Airflow instance once.  We recommend that change.
 
 ### Testing DAGs
 
@@ -103,43 +104,26 @@ a production Airflow setup yet.
 
 ## Local development environment setup
 
-To get the right libraries loaded into your IDE:
+To get the right libraries loaded into your IDE, you will need a
+virtual environment with them installed.  Run `bin/airflow setup`
+to get yourself set up.  You can then tell your IDE to use the
+specific venv `python3` binary under the folder `venv` in this
+repository.
 
-* Create a virtual environment using your local Python interpreter.
-  * Customarily you can use the folder `venv` in this project.
-  * `cd path/to/this/folder ; python -m venv venv`
-* Run the installation on the venv.  The following sample command gets you
-  going with the Airflow instance.  Note that the version may vary as we move
-  forward, and you may be required to update it later.
+To actually run tests or Airflow itself, the `setup` subcommand will
+set up an Airflow directory instance.  The folder is `airflow` under
+this repository.
 
-```
-venv/bin/pip3 install "apache-airflow[celery]==2.6.1" \
-  --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.6.1/constraints-3.7.txt
-```
+Once setup, the `bin/airflow` command can be used anytime you want
+to invoke the Airflow CLI.  It takes care of setting up the environment
+so everything works as expected.  With it, you can run
+`bin/airflow standalone` as well as tests such as DAG tests.
 
-Now you can tell your IDE to use the specific venv `python` binary.
-
-### Running Airflow or its code
-
-To actually run tests or Airflow itself, you will have to create an Airflow
-home directory, from which you can then run Airflow or tests, and set a
-few environment variables.  By convention the folder is `airflow` under
-this repository.  Here is how you do that:
-
-```
-export PATH=$PWD/venv/bin:$PATH
-export AIRFLOW_HOME=$PWD/airflow
-mkdir -p "$AIRFLOW_HOME"
-ln -sf ../dags airflow/dags # link this repo's DAGs folder here
-ln -sf ../plugins airflow/plugins # link this repo's plugins folder
-airflow db init
-```
-
-Note the password for the `admin` user in the output of `airflow db init`.
-
-You can now run both `airflow standalone` and tests such as DAG tests.
-After logging in, you can change the admin user password to a simple
-password, through the web interface on the top right corner menu.
+The first time you run the standalone server, it will create an
+admin user and password and start by listening on HTTP port 8080.
+Note the password that appears on the terminal, and log in.  After
+logging in, you can change the admin user password to a simple password,
+through the web interface on the top right corner menu.
 
 Note: if you also followed the instructions on how to run Airflow on a VM
 as indicated below, and the VM is running, Airflow locally will not be
@@ -149,10 +133,9 @@ able to open TCP port 8080, since the VM will have hogged the port.
 
 To remove these DAGs:
 
-1. Stop any instance of `airflow standalone`.
-2. Edit `core.load_examples` to False in `airflow.cfg` under the
-   `airflow` folder.
-3. Start your `airflow standalone instance`.
+1. Stop any instance of `bin/airflow standalone`.
+2. `sed -i 's/load_examples.*/load_examples = False/' airflow/airflow.cfg`
+3. Start your `bin/airflow standalone` instance.
 
 The demo DAGs will be gone.
 
@@ -162,7 +145,7 @@ Some people prefer to use VMs for testing.  VMs can also run programs
 that may not be available or installable in local development environments.
 
 The following shellcode deploys Airflow (at a specific version) in a
-running Fedora 38 VM, using the minimalistic SQLite database.
+running Fedora 38 VM as root, using the minimalistic SQLite database.
 
 ```
 cd /opt/airflow || { mkdir -p /opt/airflow && cd /opt/airflow ; }

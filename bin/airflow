@@ -1,0 +1,43 @@
+#!/bin/bash -e
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
+export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
+
+test -x "$VENV_DIR"/bin/airflow || {
+    if [ "$1" == "setup" ]
+    then
+        python3 -m venv "$VENV_DIR"
+        "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.6.1" \
+            --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.6.1/constraints-3.7.txt
+    else
+        echo "The Airflow virtual environment is not set up at $VENV_DIR" >&2
+        echo "Run this command with 'setup' as its only argument to set it up." >&2
+        exit 32
+    fi
+}
+test -f "$AIRFLOW_HOME"/airflow.cfg || {
+    if [ "$1" == "setup" ]
+    then
+        mkdir -p "$AIRFLOW_HOME"
+        ln -sf ../dags airflow/dags # link this repo's DAGs folder here
+        ln -sf ../plugins airflow/plugins # link this repo's plugins folder
+        PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db init
+    else
+        echo "Airflow has not been initialized at $AIRFLOW_HOME" >&2
+        echo "Run this command with 'setup' as its only argument to initialize it." >&2
+        exit 32
+    fi
+}
+
+if [ "$1" == "setup" ]
+then
+    echo "Airflow is now successfully setup." >&2
+    PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow info >&2
+    echo "You can now run this command with 'standalone' as its only argument." >&2
+    echo "When you do that, note the admin password in the scrollback buffer -- you will need it to log in." >&2
+    exit
+fi
+
+export PATH="$VENV_DIR/bin:$PATH"
+"$VENV_DIR"/bin/airflow "$@"
