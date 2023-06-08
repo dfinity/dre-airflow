@@ -10,4 +10,4 @@ VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
 export PYTHONPATH=$( dirname "$SCRIPT_DIR" )
 
-"$VENV_DIR"/bin/python "$@"
+exec "$VENV_DIR"/bin/python "$@"

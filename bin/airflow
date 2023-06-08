@@ -45,4 +45,4 @@ then
 fi
 
 export PATH="$VENV_DIR/bin:$PATH"
-"$VENV_DIR"/bin/airflow "$@"
+exec "$VENV_DIR"/bin/airflow "$@"

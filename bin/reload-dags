@@ -7,4 +7,4 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
 
-"$VENV_DIR"/bin/python -c "from airflow.models import DagBag; d = DagBag();"
+exec "$VENV_DIR"/bin/python -c "from airflow.models import DagBag; d = DagBag();"
