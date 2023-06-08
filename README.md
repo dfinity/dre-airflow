@@ -21,13 +21,18 @@ DAGs are workflows expressed in Python, which Airflow loads and enables
 you to either execute them manually or trigger them under certain conditions.
 
 * DAG developer reference: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
+* You can write DAGs [in the TaskFlow style](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/taskflow.html)
 * Browse loaded DAGs: http://localhost:8080/home
 * Browse DAG dependencies: http://localhost:8080/dag-dependencies
 
 #### Working with DAGs
 
-DAGs are automatically reloaded a few seconds after you save changes to the
-files under the DAGs folder.  To force a reload on the spot:
+A DAG won't run, even if manually started, unless it is enabled.  In
+the DAG list, you will see a switch to turn each DAG on or off.
+
+DAGs are automatically reloaded by the standalone Airflow process a few
+seconds after you save changes to the files under the DAGs folder.  To
+force a reload on the spot:
 
 ```
 bin/reload-dags
@@ -101,9 +106,12 @@ TBD:
 
 ### Sensors
 
-A sensor is a special type of operator which has one job: to wait for something to happen.
+A sensor is a special type of operator which has one job: to wait for
+something to happen.
 
 * Sensor reference documentation: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/sensors.html
+* Sensor API documentation: https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/sensors/base/index.html
+* Useful sensor information: https://marclamberti.com/blog/airflow-sensors/
 
 #### Working with sensors
 

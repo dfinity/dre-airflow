@@ -11,6 +11,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from operators.timed_python_operator import TimedPythonOperator
+from sensors.custom_poke import CustomPokeSensor
 
 with DAG(
     dag_id="dre_demo_dag",
@@ -25,12 +26,10 @@ with DAG(
         task_id="run_this_last",
     )
 
-    # [START howto_operator_bash]
     run_this = BashOperator(
         task_id="run_after_loop",
         bash_command="echo 1",
     )
-    # [END howto_operator_bash]
 
     run_this >> run_this_last
 
@@ -44,13 +43,22 @@ with DAG(
     def print_hello() -> None:
         print("Hello!")
 
-    # [START howto_operator_bash_template]
+    def sensor_done() -> bool:
+        return True
+
     also_run_this = TimedPythonOperator(
         task_id="run_this_python",
         python_callable=print_hello,
     )
-    # [END howto_operator_bash_template]
     also_run_this >> run_this_last
+
+    wait_before = CustomPokeSensor(
+        task_id="wait_till_true",
+        python_callable=sensor_done,
+    )
+
+    wait_before >> also_run_this
+
 
 # [START howto_operator_bash_skip]
 this_will_skip = BashOperator(
