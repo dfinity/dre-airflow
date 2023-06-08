@@ -27,6 +27,23 @@ you to either execute them manually or trigger them under certain conditions.
 
 #### Working with DAGs
 
+Task dependencies within a DAG are typically specified with the
+operators `>>` and `<<`.  Sample that demonstrates perfectly
+what that means:
+
+```
+first_task >> [second_task, third_task]
+third_task << fourth_task
+
+# Results in this order (read from left to right):
+#
+#                  second_task
+#                /
+# first_task   --
+#                \
+# fourth_task  --- third_task
+```
+
 A DAG won't run, even if manually started, unless it is enabled.  In
 the DAG list, you will see a switch to turn each DAG on or off.
 
