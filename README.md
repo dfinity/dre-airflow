@@ -44,6 +44,9 @@ third_task << fourth_task
 # fourth_task  --- third_task
 ```
 
+The reference documentation has tips on how to specify more complex
+dependencies.
+
 A DAG won't run, even if manually started, unless it is enabled.  In
 the DAG list, you will see a switch to turn each DAG on or off.
 
