@@ -15,7 +15,7 @@ set up a local development environment.  See below for instructions.
 [dags](dags/README.md).
 * Our custom operators are under folder [operators](operators/README.md).
 
-### Editing DAGs
+### DAGs
 
 DAGs are workflows expressed in Python, which Airflow loads and enables
 you to either execute them manually or trigger them under certain conditions.
@@ -23,6 +23,8 @@ you to either execute them manually or trigger them under certain conditions.
 * DAG developer reference: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
 * Browse loaded DAGs: http://localhost:8080/home
 * Browse DAG dependencies: http://localhost:8080/dag-dependencies
+
+#### Working with DAGs
 
 DAGs are automatically reloaded a few seconds after you save changes to the
 files under the DAGs folder.  To force a reload on the spot:
@@ -36,25 +38,7 @@ The web interface will tell you at the top if there was a problem loading a DAG.
 If you rename a DAG or its ID, you will have to delete the old DAG
 through the CLI or the web interface.
 
-### Editing operators
-
-Operators are Python classes defined in standalone files under the
-[operators](plugins/operators) folder.  They are run by workers after the
-tasks that require them get dispatched to the workers.
-
-* Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
-* Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
-
-A local Airflow instance will **not** reload the operator code when
-modifications are made by default.  To enable this behavior:
-
-```
-sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow/airflow.cfg
-```
-
-Now restart any running `bin/airflow standalone` instances.
-
-### Testing DAGs
+#### Testing DAGs
 
 By convention, DAGs can be tested by running them so:
 
@@ -87,9 +71,48 @@ TBD:
 * local mock testing story (test DAG dependencies and dry-run)
 * CI/CD pipeline story
 
-### Testing operators
+
+### Operators
+
+Operators are Python classes defined in standalone files under the
+[operators](plugins/operators) folder.  They are run by workers after the
+tasks that require them get dispatched to the workers.
+
+* Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
+* Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
+
+#### Working with operators
+
+A local Airflow instance will **not** reload the operator code when
+modifications are made by default.  To enable this behavior:
+
+```
+sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow/airflow.cfg
+```
+
+Now restart any running `bin/airflow standalone` instances.
+
+#### Testing operators
 
 TBD:
+
+* local testing story (unit tests)
+* CI/CD pipeline story
+
+### Sensors
+
+A sensor is a special type of operator which has one job: to wait for something to happen.
+
+* Sensor reference documentation: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/sensors.html
+
+#### Working with sensors
+
+To have your Airflow development instance reload sensors, use the same procedure
+as the procedure to have Airflow reload operators.
+
+#### Testing sensors
+
+TBD.
 
 * local testing story (unit tests)
 * CI/CD pipeline story
