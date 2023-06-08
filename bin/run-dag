@@ -1,10 +1,13 @@
 #!/bin/bash -e
 
+# Pass the path to the DAG you want to run.
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 "$SCRIPT_DIR"/airflow check-setup
 
 VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
+export PYTHONPATH=$( dirname "$SCRIPT_DIR" )
 
-"$VENV_DIR"/bin/python -c "from airflow.models import DagBag; d = DagBag();"
+"$VENV_DIR"/bin/python "$@"

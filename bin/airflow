@@ -30,6 +30,11 @@ test -f "$AIRFLOW_HOME"/airflow.cfg || {
     fi
 }
 
+if [ "$1" == "check-setup" ]
+then
+    exit
+fi
+
 if [ "$1" == "setup" ]
 then
     echo "Airflow is now successfully setup." >&2

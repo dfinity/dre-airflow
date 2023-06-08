@@ -6,6 +6,7 @@ Distributed Reliability Team Airflow setup.
 
 To effectively contribute code to this repository, you must first
 set up a local development environment.  See below for instructions.
+
 [[_TOC_]]
 
 ## Artifacts distributed in this repository
@@ -20,14 +21,17 @@ DAGs are workflows expressed in Python, which Airflow loads and enables
 you to either execute them manually or trigger them under certain conditions.
 
 * DAG developer reference: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
+* Browse loaded DAGs: http://localhost:8080/home
+* Browse DAG dependencies: http://localhost:8080/dag-dependencies
 
-With the local development environment instructions below, DAGs are
-automatically reloaded a few seconds after you save changes to the files
-under the DAGs folder.  To force a reload:
+DAGs are automatically reloaded a few seconds after you save changes to the
+files under the DAGs folder.  To force a reload on the spot:
 
 ```
 bin/reload-dags
 ```
+
+The web interface will tell you at the top if there was a problem loading a DAG.
 
 If you rename a DAG or its ID, you will have to delete the old DAG
 through the CLI or the web interface.
@@ -35,7 +39,8 @@ through the CLI or the web interface.
 ### Editing operators
 
 Operators are Python classes defined in standalone files under the
-[operators](plugins/operators) folder.
+[operators](plugins/operators) folder.  They are run by workers after the
+tasks that require them get dispatched to the workers.
 
 * Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
 * Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
@@ -51,15 +56,14 @@ Now restart any running `bin/airflow standalone` instances.
 
 ### Testing DAGs
 
-By convention, DAGs can be tested by running them under the Python
-venv interpreter that has the Airflow installation (see under
-*Local development environment* to get it set up):
+By convention, DAGs can be tested by running them so:
 
 ```
-venv/bin/python dags/<DAG file name>
+bin/run-dag dags/<DAG file name>
 ```
 
-That command would [test-runs your DAG](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/debug.html).
+That command would
+[test-runs your DAG](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/debug.html).
 This works because there's a snippet at the end of each DAG:
 
 ```
@@ -71,7 +75,8 @@ if __name__ == "__main__":
 actually testing everything in an integrated fashion.
 
 Test DAG runs are recorded in the local development environment's
-database as well.  You can browse DAG runs using the web interface.
+database as well.  You can browse DAG runs using the web interface
+at http://localhost:8080/dagrun/list/
 
 More on testing DAGs:
 
