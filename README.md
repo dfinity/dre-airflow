@@ -119,9 +119,12 @@ Now restart any running `bin/airflow standalone` instances.
 
 #### Testing operators
 
+Unit tests are in directory [tests](tests/).  You can run them
+directly from Visual Studio Code, or run them via Make using
+`make test`.
+
 TBD:
 
-* local testing story (unit tests)
 * CI/CD pipeline story
 
 ### Sensors
@@ -140,9 +143,12 @@ as the procedure to have Airflow reload operators.
 
 #### Testing sensors
 
-TBD.
+Unit tests are in directory [tests](tests/).  You can run them
+directly from Visual Studio Code, or run them via Make using
+`make test`.
 
-* local testing story (unit tests)
+TBD:
+
 * CI/CD pipeline story
 
 ## Quality assurance
