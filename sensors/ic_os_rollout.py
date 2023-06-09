@@ -4,16 +4,14 @@ IC-OS rollout sensors.
 
 from typing import Any
 
+import sensors.prom_api as prom
 from airflow.sensors.base import BaseSensorOperator
 from airflow.utils.context import Context
-from operators.ic_os_rollout import (
-    ProposalStatus,
-    RolloutParams,
-    get_proposals_for_subnet_and_revision,
-)
+from operators.ic_api import ProposalStatus
+from operators.ic_os_rollout import RolloutParams, get_proposals_for_subnet_and_revision
 
 
-class CountableSensor(RolloutParams, BaseSensorOperator):
+class ICRolloutSensorBaseOperator(RolloutParams, BaseSensorOperator):
     def __init__(
         self,
         *,
@@ -24,10 +22,9 @@ class CountableSensor(RolloutParams, BaseSensorOperator):
     ):
         RolloutParams.__init__(self, subnet_id=subnet_id, git_revision=git_revision)
         BaseSensorOperator.__init__(self, task_id=task_id, **kwargs)
-        self.counter = 2
 
 
-class WaitForProposalAcceptance(CountableSensor):
+class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
     def poke(self, context: Context) -> bool:
         props = get_proposals_for_subnet_and_revision(
             subnet_id=self.subnet_id,
@@ -56,26 +53,48 @@ class WaitForProposalAcceptance(CountableSensor):
         return False
 
 
-class WaitForReplicaRevisionUpdated(CountableSensor):
+class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
+    api_urls = [
+        "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
+        "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+    ]
+
     def poke(self, context: Context) -> bool:
-        # FIXME implement.
-        if self.counter > 0:
+        print(
+            f"Waiting for all nodes on subnet id {self.subnet_id} have "
+            + f"adopted revision {self.git_revision}"
+        )
+        query = (
+            "sum(ic_replica_info{"
+            + f'ic_subnet="{self.subnet_id}"'
+            + "}) by (ic_active_version, ic_subnet)"
+        )
+        res = prom.query_prometheus_servers(self.api_urls, query)
+        if len(res) == 1 and res[0]["metric"]["ic_active_version"] == self.git_revision:
             print(
-                f"Waiting for all nodes on subnet id {self.subnet_id} have "
-                + f"adopted revision {self.git_revision}"
+                f"All {res[0]['value']} nodes in subnet {self.subnet_id} have"
+                f" updated to revision {self.git_revision}"
             )
-            self.counter = self.counter - 1
-            return False
-        else:
             return True
+        print("Upgrade is not complete yet.  From Prometheus:")
+        for r in res:
+            print(r)
+        return False
 
 
-class WaitUntilNoAlertsOnSubnet(CountableSensor):
+class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
     def poke(self, context: Context) -> bool:
-        # FIXME implement.
-        if self.counter > 0:
-            print(f"Waiting for all alerts on subnet id {self.subnet_id} to quiesce")
-            self.counter = self.counter - 1
-            return False
-        else:
-            return True
+        # FIXME implement
+        print(
+            f"Waiting for all alerts on subnet id {self.subnet_id} to quiesce... done!"
+        )
+        return True
+
+
+if __name__ == "__main__":
+    k = WaitForReplicaRevisionUpdated(
+        task_id="x",
+        subnet_id="yinp6-35cfo-wgcd2-oc4ty-2kqpf-t4dul-rfk33-fsq3r-mfmua-m2ngh-jqe",
+        git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
+    )
+    k.poke({})

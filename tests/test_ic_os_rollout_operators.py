@@ -1,6 +1,7 @@
 import unittest
 
-from operators.ic_os_rollout import CreateProposalIdempotently, unroll
+from operators.ic_api import unroll
+from operators.ic_os_rollout import CreateProposalIdempotently
 
 
 class TestOperators(unittest.TestCase):
