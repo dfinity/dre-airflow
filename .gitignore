@@ -1,3 +1,6 @@
 __pycache__
 venv
 airflow/*
+.mypy_cache
+.pytest_cache
+.ruff_cache
