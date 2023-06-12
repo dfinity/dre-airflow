@@ -42,6 +42,8 @@ with DAG(
             "0000000000000000000000000000000000000000",
             type="string",
             pattern="^[a-f0-9]{40}$",
+            title="Git revision",
+            description="Git revision of the IC-OS release to roll out to this subnet",
         ),
         "start_time": Param(
             now,
