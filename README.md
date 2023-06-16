@@ -11,9 +11,11 @@ set up a local development environment.  See below for instructions.
 
 ## Artifacts distributed in this repository
 
-* Our DAGs in this repository are distributed under folder
-[dags](dags/README.md).
-* Our custom operators are under folder [operators](operators/README.md).
+* Our DAGs in this repository are distributed under folder [dags](dags/README.md).
+* Our custom sensors and operators are under folder [operators](plugins/operators/README.md) and [sensors](plugins/sensors/README.md).
+* Library code is under folder [shared](shared/README.md).
+  * See info on [how Airflow finds Python modules](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/modules_management.html)
+  * The local runner automatically makes this code available
 
 ### DAGs
 
@@ -96,7 +98,6 @@ TBD:
 * local mock testing story (test DAG dependencies and dry-run)
 * CI/CD pipeline story
 
-
 ### Operators
 
 Operators are Python classes defined in standalone files under the
@@ -108,14 +109,8 @@ tasks that require them get dispatched to the workers.
 
 #### Working with operators
 
-A local Airflow instance will **not** reload the operator code when
-modifications are made by default.  To enable this behavior:
-
-```
-sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow/airflow.cfg
-```
-
-Now restart any running `bin/airflow standalone` instances.
+Your local Airflow instance should reload operator code when you
+make changes.  If it does not, simply restart your Airflow instance.
 
 #### Testing operators
 
@@ -136,6 +131,9 @@ something to happen.
 * Sensor API documentation: https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/sensors/base/index.html
 * Useful sensor information: https://marclamberti.com/blog/airflow-sensors/
 
+Our operators are defined in standalone files under the
+[sensors](plugins/sensors) folder.
+
 #### Working with sensors
 
 To have your Airflow development instance reload sensors, use the same procedure
@@ -154,6 +152,7 @@ TBD:
 ## Quality assurance
 
 *TBD*.  We do not yet have a pipeline to run automated tests.
+FIXME.
 
 Targets:
 
@@ -200,14 +199,6 @@ through the web interface on the top right corner menu.
 Note: if you also followed the instructions on how to run Airflow on a VM
 as indicated below, and the VM is running, Airflow locally will not be
 able to open TCP port 8080, since the VM will have hogged the port.
-
-### Removing the example DAGs that ship with Airflow
-
-To remove these DAGs from your instance's list of DAGs:
-
-```
-sed -i 's/load_examples.*/load_examples = False/' airflow/airflow.cfg
-```
 
 Now restart any running `bin/airflow standalone` instances.  The demo DAGs
 will be gone now.

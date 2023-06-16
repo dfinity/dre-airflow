@@ -29,9 +29,11 @@ stack within our team.
   * Finish SVG graph. https://github.com/apache/airflow/tree/main/chart/templates
   * Come up with concrete story to deploy using Flux
 * Decide on a method and pipeline to redeploy custom operators and DAGs.
+  * Need to investigate how to reload code modules in scheduler and workers,
+    when we deploy these.
 * Hard test reliability of partial outages of the system (kill executor pod / scheduler)
 * Document and implement testability story for workflows.  Local test and CI/CD.
-* Rename dre-st2-pack repo to dre-airflow. 
+* Rename dre-st2-pack repo to dre-airflow.
 
 ## Architecture
 
@@ -143,6 +145,7 @@ also affects the scheduler and the workers.
 
 * Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
 * Packaging operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
+* Python modules: https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/modules_management.html
 
 ## Fault tolerance
 

@@ -21,6 +21,7 @@ def query_prometheus_servers(
         try:
             r = requests.get(
                 url + "?" + urllib.parse.urlencode({"query": query}),
+                timeout=25,
             )
             r.raise_for_status()
             resp = r.json()

@@ -2,13 +2,16 @@
 IC-OS rollout sensors.
 """
 
+import datetime
 from typing import Any
 
-import sensors.prom_api as prom
+import dfinity.prom_api as prom
+from dfinity.ic_api import ProposalStatus, get_proposals_for_subnet_and_revision
+from operators.ic_os_rollout import RolloutParams
+
 from airflow.sensors.base import BaseSensorOperator
+from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.utils.context import Context
-from operators.ic_api import ProposalStatus
-from operators.ic_os_rollout import RolloutParams, get_proposals_for_subnet_and_revision
 
 
 class ICRolloutSensorBaseOperator(RolloutParams, BaseSensorOperator):
@@ -22,6 +25,24 @@ class ICRolloutSensorBaseOperator(RolloutParams, BaseSensorOperator):
     ):
         RolloutParams.__init__(self, subnet_id=subnet_id, git_revision=git_revision)
         BaseSensorOperator.__init__(self, task_id=task_id, **kwargs)
+
+
+class CustomDateTimeSensorAsync(DateTimeSensorAsync):
+    def __init__(  # type:ignore
+        self,
+        *,
+        target_time: str | datetime.datetime,
+        **kwargs,
+    ) -> None:
+        """Exists to work around inability to pass target_time as xcom arg."""
+        BaseSensorOperator.__init__(self, **kwargs)
+
+        if isinstance(target_time, datetime.datetime):
+            self.target_time = target_time.isoformat()
+        elif isinstance(target_time, str):
+            self.target_time = target_time
+        else:
+            self.target_time = target_time
 
 
 class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):

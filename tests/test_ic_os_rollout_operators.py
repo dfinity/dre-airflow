@@ -1,6 +1,6 @@
 import unittest
 
-from operators.ic_api import unroll
+from dfinity.ic_api import unroll
 from operators.ic_os_rollout import CreateProposalIdempotently
 
 

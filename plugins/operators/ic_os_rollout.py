@@ -3,25 +3,11 @@ IC-OS rollout operators.
 """
 from typing import Any, Sequence
 
-import operators.ic_api as ic_api
+import dfinity.ic_api as ic_api
+
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
-
-
-def get_proposals_for_subnet_and_revision(
-    git_revision: str, subnet_id: str, limit: int, offset: int = 0
-) -> list[ic_api.Proposal]:
-    return [
-        r
-        for r in ic_api.get_proposals(
-            topic=ic_api.ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
-            limit=limit,
-            offset=offset,
-        )
-        if r["payload"].get("subnet_id") == subnet_id
-        and r["payload"].get("replica_version_id") == git_revision
-    ]
 
 
 class RolloutParams(Templater):
@@ -49,7 +35,7 @@ class ICRolloutBaseOperator(RolloutParams, BaseOperator):
 
 class CreateProposalIdempotently(ICRolloutBaseOperator):
     def execute(self, context: Context) -> None:
-        props = get_proposals_for_subnet_and_revision(
+        props = ic_api.get_proposals_for_subnet_and_revision(
             subnet_id=self.subnet_id,
             git_revision=self.git_revision,
             limit=1000,
@@ -89,14 +75,3 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 f"Creating proposal for subnet id {self.subnet_id} to "
                 + f"adopt revision {self.git_revision}"
             )
-
-
-if __name__ == "__main__":
-    import pprint
-
-    for p in get_proposals_for_subnet_and_revision(
-        subnet_id="yinp6-35cfo-wgcd2-oc4ty-2kqpf-t4dul-rfk33-fsq3r-mfmua-m2ngh-jqe",
-        git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
-        limit=1000,
-    ):
-        pprint.pprint(p)

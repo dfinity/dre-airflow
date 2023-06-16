@@ -4,3 +4,4 @@ airflow/*
 .mypy_cache
 .pytest_cache
 .ruff_cache
+plugins/dags/*

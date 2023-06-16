@@ -1,13 +1,12 @@
 import unittest
 
 import mock  # type:ignore
-
+from dfinity.prom_api import PrometheusVectorResultEntry
 from sensors.ic_os_rollout import (
     WaitForProposalAcceptance,
     WaitForReplicaRevisionUpdated,
     WaitUntilNoAlertsOnSubnet,
 )
-from sensors.prom_api import PrometheusVectorResultEntry
 
 
 class TestOperators(unittest.TestCase):
@@ -29,7 +28,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
             subnet_id="yinp6-35cfo-wgcd2",
             git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
         )
-        return k.poke({})
+        return k.poke({})  # type:ignore
 
     def test_happy_path(self) -> None:
         inp = [
@@ -43,7 +42,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
             )
         ]
         exp = True
-        with mock.patch("sensors.prom_api.query_prometheus_servers") as m:
+        with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
             res = self._exercise()
             assert res == exp, f"{res} != {exp}"
@@ -68,7 +67,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
             ),
         ]
         exp = False
-        with mock.patch("sensors.prom_api.query_prometheus_servers") as m:
+        with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
             res = self._exercise()
             res = self._exercise()
@@ -86,7 +85,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
             )
         ]
         exp = False
-        with mock.patch("sensors.prom_api.query_prometheus_servers") as m:
+        with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
             res = self._exercise()
             assert res == exp, f"{res} != {exp}"

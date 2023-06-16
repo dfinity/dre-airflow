@@ -6,12 +6,12 @@ TimedPythonOperator.
 import datetime
 
 import pendulum
+from operators.timed_python_operator import TimedPythonOperator
+from sensors.custom_poke import CustomPokeSensor
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
-from operators.timed_python_operator import TimedPythonOperator
-from sensors.custom_poke import CustomPokeSensor
 
 with DAG(
     dag_id="dre_demo_dag",

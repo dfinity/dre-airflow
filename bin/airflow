@@ -3,31 +3,36 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
+export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared
+
+if [ "$1" == "setup" ]
+then
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.6.1" \
+        --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.6.1/constraints-3.7.txt
+    mkdir -p "$AIRFLOW_HOME"
+    if ! test -f "$AIRFLOW_HOME"/airflow.db
+    then
+        PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db init
+    fi
+    pushd "$AIRFLOW_HOME"
+    ln -sfT ../dags dags
+    ln -sfT ../plugins plugins
+    sed -i 's/allowed_deserialization_classes.*/allowed_deserialization_classes = (airflow|dfinity)[.].*/' airflow.cfg
+    sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow.cfg
+    sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
+    popd
+fi
 
 test -x "$VENV_DIR"/bin/airflow || {
-    if [ "$1" == "setup" ]
-    then
-        python3 -m venv "$VENV_DIR"
-        "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.6.1" \
-            --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.6.1/constraints-3.7.txt
-    else
-        echo "The Airflow virtual environment is not set up at $VENV_DIR" >&2
-        echo "Run this command with 'setup' as its only argument to set it up." >&2
-        exit 32
-    fi
+    echo "The Airflow virtual environment is not set up at $VENV_DIR" >&2
+    echo "Run this command with 'setup' as its only argument to set it up." >&2
+    exit 32
 }
 test -f "$AIRFLOW_HOME"/airflow.cfg || {
-    if [ "$1" == "setup" ]
-    then
-        mkdir -p "$AIRFLOW_HOME"
-        ln -sf ../dags airflow/dags # link this repo's DAGs folder here
-        ln -sf ../plugins airflow/plugins # link this repo's plugins folder
-        PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db init
-    else
-        echo "Airflow has not been initialized at $AIRFLOW_HOME" >&2
-        echo "Run this command with 'setup' as its only argument to initialize it." >&2
-        exit 32
-    fi
+    echo "Airflow has not been initialized at $AIRFLOW_HOME" >&2
+    echo "Run this command with 'setup' as its only argument to initialize it." >&2
+    exit 32
 }
 
 if [ "$1" == "check-setup" ]

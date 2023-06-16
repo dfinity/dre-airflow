@@ -15,4 +15,4 @@ $(VENV_BINDIR)/pytest: $(VENV_BINDIR)
 	touch $(VENV_BINDIR)/pytest
 
 test: $(VENV_BINDIR)/pytest $(VENV_DIR)/lib/*/site-packages/mock
-	PYTHONPATH=$(PWD) $(VENV_BINDIR)/pytest -v tests
+	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/pytest -v tests

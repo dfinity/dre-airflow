@@ -4,6 +4,7 @@ IC API code.
 Minimal API to deal with proposals, sufficient in scope to
 help with IC OS rollouts.
 """
+
 import urllib.parse
 from enum import Enum
 from typing import Any, TypedDict, cast
@@ -194,3 +195,29 @@ def get_proposals(
             res.append(x)
 
     return res
+
+
+def get_proposals_for_subnet_and_revision(
+    git_revision: str, subnet_id: str, limit: int, offset: int = 0
+) -> list[Proposal]:
+    return [
+        r
+        for r in get_proposals(
+            topic=ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
+            limit=limit,
+            offset=offset,
+        )
+        if r["payload"].get("subnet_id") == subnet_id
+        and r["payload"].get("replica_version_id") == git_revision
+    ]
+
+
+if __name__ == "__main__":
+    import pprint
+
+    for p in get_proposals_for_subnet_and_revision(
+        subnet_id="yinp6-35cfo-wgcd2-oc4ty-2kqpf-t4dul-rfk33-fsq3r-mfmua-m2ngh-jqe",
+        git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
+        limit=1000,
+    ):
+        pprint.pprint(p)

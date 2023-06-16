@@ -6,17 +6,17 @@ TimedPythonOperator.
 import datetime
 
 import pendulum
-
-from airflow import DAG
-from airflow.models.param import Param
-from airflow.sensors.date_time import DateTimeSensorAsync
-from airflow.utils import timezone
 from operators.ic_os_rollout import CreateProposalIdempotently
 from sensors.ic_os_rollout import (
     WaitForProposalAcceptance,
     WaitForReplicaRevisionUpdated,
     WaitUntilNoAlertsOnSubnet,
 )
+
+from airflow import DAG
+from airflow.models.param import Param
+from airflow.sensors.date_time import DateTimeSensorAsync
+from airflow.utils import timezone
 
 now = timezone.utcnow().strftime("%Y-%m-%dT%H:%M:%S%z")
 if not now.endswith("Z"):
