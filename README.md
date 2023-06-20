@@ -288,7 +288,6 @@ the worker for the task to succeed.
 
 * [Tasks in Airflow](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html).
 
-
 ### Operators
 
 An operator is a module that specifies an operation which would normally be
@@ -341,3 +340,16 @@ References:
 
 * https://airflow.apache.org/docs/apache-airflow/stable/stable-rest-api-ref.html
 * https://hevodata.com/learn/airflow-rest-api/#5
+
+### Notes on the operation of Airflow
+
+Changing DAGs, operators, sensors or other shared code on a running system
+will not affect the the execution of tasks currently executing on any flow
+currently running.  However, they will affect the execution of future tasks
+instantiated by any currently-running flow (effectively, each task runs
+an `airflow tasks ...` command, which independently loads the DAG,
+instantiates the tasks, locates the task it is supposed to execute, and
+runs it — all of which is materialized at runtime).  Therefore, to avoid
+failures, changes to long-running flows should be careful to be compatible
+with any running flows at the time of rollout, or should wait until the
+currently-running flows which may be impacted have finished.

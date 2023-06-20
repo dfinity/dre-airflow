@@ -5,83 +5,119 @@ TimedPythonOperator.
 
 import datetime
 
+import operators.ic_os_rollout as ic_os_rollout
 import pendulum
-from operators.ic_os_rollout import CreateProposalIdempotently
-from sensors.ic_os_rollout import (
-    WaitForProposalAcceptance,
-    WaitForReplicaRevisionUpdated,
-    WaitUntilNoAlertsOnSubnet,
-)
+import sensors.ic_os_rollout as ic_os_sensor
+from dfinity.ic_api import IC_NETWORKS
 
 from airflow import DAG
 from airflow.models.param import Param
-from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.utils import timezone
 
 now = timezone.utcnow().strftime("%Y-%m-%dT%H:%M:%S%z")
 if not now.endswith("Z"):
     now = now[:-2] + ":" + now[-2:]
 
+DAGS: dict[str, DAG] = {}
+for network_name, network in IC_NETWORKS.items():
+    with DAG(
+        dag_id=f"rollout_ic_os_to_{network_name}_subnet",
+        schedule=None,
+        start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
+        catchup=False,
+        dagrun_timeout=datetime.timedelta(hours=12),
+        tags=["rollout", "DRE"],
+        params={
+            "subnet_id": Param(
+                "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",
+                type="string",
+                pattern="^([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})"
+                "-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})"
+                "-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{3})$",
+            ),
+            "git_revision": Param(
+                "0000000000000000000000000000000000000000",
+                type="string",
+                pattern="^[a-f0-9]{40}$",
+                title="Git revision",
+                description="Git revision of the IC-OS release to roll out to"
+                " this subnet",
+            ),
+            "start_time": Param(
+                now,
+                type="string",
+                format="date-time",
+                title="Start rollout at",
+                description="Please select a date and time to roll out this subnet",
+            ),
+            "simulate_proposal": Param(
+                True,
+                type="boolean",
+                title="Simulate proposal",
+                description="If enabled (the default), the update proposal will be"
+                " simulated but not created, and its acceptance will be simulated too",
+            ),
+        },
+    ) as dag:
+        DAGS[network_name] = dag
+        retries = int(86400 / 60 / 5)  # one day worth of retries
 
-with DAG(
-    dag_id="rollout_git_revision_to_subnet",
-    schedule=None,
-    start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
-    catchup=False,
-    dagrun_timeout=datetime.timedelta(hours=12),
-    tags=["rollout", "DRE"],
-    params={
-        "subnet_id": Param(
-            "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",
-            type="string",
-            pattern="^([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})"
-            "-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{5})"
-            "-([a-z0-9]{5})-([a-z0-9]{5})-([a-z0-9]{3})$",
-        ),
-        "git_revision": Param(
-            "0000000000000000000000000000000000000000",
-            type="string",
-            pattern="^[a-f0-9]{40}$",
-            title="Git revision",
-            description="Git revision of the IC-OS release to roll out to this subnet",
-        ),
-        "start_time": Param(
-            now,
-            type="string",
-            format="date-time",
-            title="Start rollout at",
-            description="Please select a date and time to roll out this subnet",
-        ),
-    },
-    render_template_as_native_obj=True,
-) as dag:
-    (
-        DateTimeSensorAsync(
-            task_id="wait_until_start_time",
-            target_time="{{ params.start_time }}",
+        (
+            ic_os_sensor.CustomDateTimeSensorAsync(
+                task_id="wait_until_start_time",
+                target_time="{{ params.start_time }}",
+            )
+            >> ic_os_rollout.CreateProposalIdempotently(
+                task_id="create_proposal_if_none_exists",
+                subnet_id="{{ params.subnet_id }}",
+                git_revision="{{ params.git_revision }}",
+                simulate_proposal="{{ params.simulate_proposal }}",
+                network=network,
+                retries=retries,
+            )
+            >> ic_os_sensor.WaitForProposalAcceptance(
+                task_id="wait_until_proposal_is_accepted",
+                subnet_id="{{ params.subnet_id }}",
+                git_revision="{{ params.git_revision }}",
+                simulate_proposal_acceptance="{{ params.simulate_proposal }}",
+                retries=retries,
+                network=network,
+            )
+            >> ic_os_sensor.WaitForReplicaRevisionUpdated(
+                task_id="wait_for_replica_revision",
+                subnet_id="{{ params.subnet_id }}",
+                git_revision="{{ params.git_revision }}",
+                retries=retries,
+                network=network,
+            )
+            >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
+                task_id="wait_until_no_alerts_on_subnets",
+                subnet_id="{{ params.subnet_id }}",
+                git_revision="{{ params.git_revision }}",
+                retries=retries,
+                network=network,
+            )
         )
-        >> CreateProposalIdempotently(
-            task_id="create_proposal_if_none_exists",
-            subnet_id="{{ params.subnet_id }}",
-            git_revision="{{ params.git_revision }}",
-        )
-        >> WaitForProposalAcceptance(
-            task_id="wait_until_proposal_is_accepted",
-            subnet_id="{{ params.subnet_id }}",
-            git_revision="{{ params.git_revision }}",
-        )
-        >> WaitForReplicaRevisionUpdated(
-            task_id="wait_for_replica_revision",
-            subnet_id="{{ params.subnet_id }}",
-            git_revision="{{ params.git_revision }}",
-        )
-        >> WaitUntilNoAlertsOnSubnet(
-            task_id="wait_until_no_alerts_on_subnets",
-            subnet_id="{{ params.subnet_id }}",
-            git_revision="{{ params.git_revision }}",
-        )
-    )
 
 
 if __name__ == "__main__":
-    dag.test()
+    import os
+    import sys
+
+    try:
+        subnet_id = sys.argv[1]
+        rev = sys.argv[2]
+    except Exception:
+        print(
+            "Error: to run this DAG you must specify the subnet ID and the revision"
+            " as arguments on the command line.",
+            file=sys.stderr,
+        )
+        sys.exit(os.EX_USAGE)
+    dag = DAGS["mainnet"]
+    dag.test(
+        run_conf={
+            "git_revision": rev,
+            "subnet_id": subnet_id,
+        }
+    )

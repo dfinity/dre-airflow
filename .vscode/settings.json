@@ -23,5 +23,6 @@
         "./tests",
         "-p",
         "test_*.py"
-    ]
+    ],
+    "python.analysis.diagnosticMode": "workspace"
 }

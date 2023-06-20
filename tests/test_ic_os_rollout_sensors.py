@@ -1,12 +1,15 @@
 import unittest
 
 import mock  # type:ignore
+from dfinity.ic_api import IC_NETWORKS
 from dfinity.prom_api import PrometheusVectorResultEntry
 from sensors.ic_os_rollout import (
     WaitForProposalAcceptance,
     WaitForReplicaRevisionUpdated,
     WaitUntilNoAlertsOnSubnet,
 )
+
+import airflow.exceptions
 
 
 class TestOperators(unittest.TestCase):
@@ -18,17 +21,28 @@ class TestOperators(unittest.TestCase):
             WaitForReplicaRevisionUpdated,
             WaitUntilNoAlertsOnSubnet,
         ]:
-            klass(task_id=klass.__name__, subnet_id=sid, git_revision=gitr)
+            kwargs = {"network": IC_NETWORKS["mainnet"]}
+            if klass == WaitForProposalAcceptance:
+                kwargs["simulate_proposal_acceptance"] = True
+            klass(
+                task_id=klass.__name__,
+                subnet_id=sid,
+                git_revision=gitr,
+                **kwargs,
+            )
 
 
 class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
-    def _exercise(self) -> bool:
+    network = IC_NETWORKS["mainnet"]
+
+    def _exercise(self) -> WaitForReplicaRevisionUpdated:
         k = WaitForReplicaRevisionUpdated(
             task_id="x",
             subnet_id="yinp6-35cfo-wgcd2",
             git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
+            network=self.network,
         )
-        return k.poke({})  # type:ignore
+        return k
 
     def test_happy_path(self) -> None:
         inp = [
@@ -41,10 +55,10 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                 timestamp=0.0,
             )
         ]
-        exp = True
+        exp = None
         with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
-            res = self._exercise()
+            res = self._exercise().execute({})
             assert res == exp, f"{res} != {exp}"
 
     def test_halfway_done(self) -> None:
@@ -66,12 +80,10 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                 timestamp=0.0,
             ),
         ]
-        exp = False
         with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
-            res = self._exercise()
-            res = self._exercise()
-            assert res == exp, f"{res} != {exp}"
+            k = self._exercise()
+            self.assertRaises(airflow.exceptions.TaskDeferred, k.execute, {})
 
     def test_not_started(self) -> None:
         inp = [
@@ -84,8 +96,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                 timestamp=0.0,
             )
         ]
-        exp = False
         with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
-            res = self._exercise()
-            assert res == exp, f"{res} != {exp}"
+            k = self._exercise()
+            self.assertRaises(airflow.exceptions.TaskDeferred, k.execute, {})

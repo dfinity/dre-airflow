@@ -9,7 +9,23 @@ import urllib.parse
 from enum import Enum
 from typing import Any, TypedDict, cast
 
+import dfinity.ic_types as ic_types
 import requests  # type:ignore
+
+IC_NETWORKS: dict[str, ic_types.ICNetwork] = {
+    "mainnet": ic_types.ICNetwork(
+        "https://ic0.app/",
+        "https://ic-api.internetcomputer.org/api/v3/proposals",
+        "https://dashboard.internetcomputer.org/proposal",
+        "https://dashboard.internetcomputer.org/release",
+        [
+            "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
+            "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+        ],
+    ),
+    # "staging": ic_types.ICNetwork("http://[2600:3004:1200:1200:5000:11ff:fe37:c55d]:8080/"),
+    # FIXME we do not have a proposals URL for staging
+}
 
 
 class ProposalStatus(Enum):
@@ -169,9 +185,12 @@ def unroll(limit: int, offset: int) -> list[tuple[int, int]]:
 
 
 def get_proposals(
-    topic: ProposalTopic | None, limit: int = 100, offset: int = 0
+    network: ic_types.ICNetwork,
+    topic: ProposalTopic | None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[Proposal]:
-    url = "https://ic-api.internetcomputer.org/api/v3/proposals"
+    url = network.proposal_url
     res: list[Proposal] = []
 
     for limit, offset in unroll(limit, offset):
@@ -198,7 +217,11 @@ def get_proposals(
 
 
 def get_proposals_for_subnet_and_revision(
-    git_revision: str, subnet_id: str, limit: int, offset: int = 0
+    network: ic_types.ICNetwork,
+    git_revision: str,
+    subnet_id: str,
+    limit: int,
+    offset: int = 0,
 ) -> list[Proposal]:
     return [
         r
@@ -206,6 +229,7 @@ def get_proposals_for_subnet_and_revision(
             topic=ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
             limit=limit,
             offset=offset,
+            network=network,
         )
         if r["payload"].get("subnet_id") == subnet_id
         and r["payload"].get("replica_version_id") == git_revision
@@ -219,5 +243,6 @@ if __name__ == "__main__":
         subnet_id="yinp6-35cfo-wgcd2-oc4ty-2kqpf-t4dul-rfk33-fsq3r-mfmua-m2ngh-jqe",
         git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
         limit=1000,
+        network=IC_NETWORKS["mainnet"],
     ):
         pprint.pprint(p)

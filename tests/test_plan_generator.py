@@ -3,7 +3,7 @@ import unittest
 from datetime import timezone as tz
 
 import yaml  # type:ignore
-from dfinity.types import SubnetRolloutInstance
+from dfinity.ic_types import SubnetRolloutInstance
 
 from dags.rollout_ic_os_to_subnets import rollout_planner, week_planner
 
@@ -30,6 +30,15 @@ class TestWeekPlanner(unittest.TestCase):
 
 
 class TestRolloutPlanner(unittest.TestCase):
+    def transform_actual(
+        self,
+        inp: SubnetRolloutInstance,
+    ) -> list[tuple[datetime.datetime, int]]:
+        return list((i.start_at, i.subnet_num) for i in inp)
+
+    def fake_get_subnet_list(self) -> list[str]:
+        return ["0000-00%02d-0000-0000" % n for n in range(38)]
+
     def test_rollout_planner_default_rollout(self) -> None:
         plan = """
 Monday:
@@ -91,24 +100,53 @@ Monday next week:
             (datetime.datetime(2023, 6, 19, 11, 0, tzinfo=tz.utc), 0),
         ]
 
-        def transform_actual(
-            inp: SubnetRolloutInstance,
-        ) -> list[tuple[datetime.datetime, int]]:
-            return list((i.start_at, i.subnet_num) for i in inp)
-
-        def fake_get_subnet_list() -> list[str]:
-            return ["0000-0000-0000-0000" for _ in range(38)]
-
         on_monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
         plan_structure = yaml.safe_load(plan)
         rollout_plan = rollout_planner(
-            plan_structure, on_monday, subnet_list_source=fake_get_subnet_list
+            plan_structure,
+            self.fake_get_subnet_list,
+            on_monday,
         )
-        assert transform_actual(rollout_plan) == expected
+        assert self.transform_actual(rollout_plan) == expected
 
         on_prior_saturday = datetime.datetime(2023, 6, 10, 0, 0, 0)
         plan_structure = yaml.safe_load(plan)
         rollout_plan = rollout_planner(
-            plan_structure, on_prior_saturday, subnet_list_source=fake_get_subnet_list
+            plan_structure,
+            self.fake_get_subnet_list,
+            on_prior_saturday,
         )
-        assert transform_actual(rollout_plan) == expected
+        assert self.transform_actual(rollout_plan) == expected
+
+    def test_rollout_planner_ambiguous_rollout(self) -> None:
+        plan = """
+Monday:
+  9:00: ["0000"]
+"""
+        rollout_plan = yaml.safe_load(plan)
+        monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(
+                rollout_plan,
+                self.fake_get_subnet_list,
+                monday,
+            ),
+        )
+
+    def test_rollout_planner_unambiguous_rollout(self) -> None:
+        plan = """
+Monday:
+  9:00: ["0000-0002"]
+"""
+        rollout_plan = yaml.safe_load(plan)
+        monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
+        expected = [
+            (datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 2),
+        ]
+        res = rollout_planner(
+            rollout_plan,
+            self.fake_get_subnet_list,
+            monday,
+        )
+        assert self.transform_actual(res) == expected

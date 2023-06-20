@@ -3,12 +3,11 @@
 # Pass the path to the DAG you want to run.
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared
 
 "$SCRIPT_DIR"/airflow check-setup
 
 VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
-export PYTHONPATH=$( dirname "$SCRIPT_DIR" )
+export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared:$(dirname "$SCRIPT_DIR")/plugins
 
 exec "$VENV_DIR"/bin/python "$@"

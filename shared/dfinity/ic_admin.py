@@ -5,11 +5,14 @@ ic-admin proxy and downloader.
 import fcntl
 import glob
 import os
+import shlex
 import subprocess
+import sys
 import zlib
 from contextlib import contextmanager
 from typing import IO, Any, Generator, cast
 
+import dfinity.ic_types as ic_types
 import requests  # type:ignore
 import yaml  # type: ignore
 
@@ -17,7 +20,6 @@ GOVERNANCE_CANISTER_VERSION_URL = "https://dashboard.internal.dfinity.network/ap
 IC_ADMIN_GZ_URL = (
     "https://download.dfinity.systems/ic/%(version)s/binaries/%(platform)s/ic-admin.gz"
 )
-NNS_URL = "https://ic0.app"
 
 
 @contextmanager
@@ -44,9 +46,19 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 
 def ic_admin(
-    *args: str, ic_admin_version: str | None = None, **kwargs: Any
+    *args: str,
+    network: ic_types.ICNetwork,
+    ic_admin_version: str | None = None,
+    dry_run: bool = False,
+    **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ic-admin, potentially downloading it if not present."""
+    """
+    Run ic-admin, potentially downloading it if not present.
+
+    Args:
+    * dry_run: if true, the command will be echoed on standard error,
+      but it won't be executed.
+    """
     rundir = f"/run/user/{os.getuid()}"
     if os.path.isdir(rundir):
         d = os.path.join(rundir, "ic_admin")
@@ -81,10 +93,75 @@ def ic_admin(
                 ic_admin_file.write(ungzipped_data)
             os.chmod(icapath, 0o755)
         kwargs["text"] = True
-        nnsurl = ["--nns-url", NNS_URL]
+        nnsurl = ["--nns-url", network.nns_url]
+        cmd = [icapath] + nnsurl + list(args)
+        if dry_run:
+            print(" ".join(shlex.quote(x) for x in cmd), file=sys.stderr)
+            return subprocess.CompletedProcess(cmd, 0, None, None)
         return subprocess.run([icapath] + nnsurl + list(args), **kwargs)
 
 
-def get_subnet_list(ic_admin_version: str | None = None) -> list[str]:
-    listp = ic_admin("get-subnet-list", capture_output=True, check=True)
+def get_subnet_list(
+    network: ic_types.ICNetwork,
+    ic_admin_version: str | None = None,
+) -> list[str]:
+    listp = ic_admin(
+        "get-subnet-list",
+        network=network,
+        capture_output=True,
+        check=True,
+        ic_admin_version=ic_admin_version,
+    )
     return cast(list[str], yaml.safe_load(listp.stdout))
+
+
+def propose_to_update_subnet_replica_version(
+    subnet_id: str,
+    git_revision: str,
+    proposer_neuron_id: int,
+    proposer_neuron_pem: str,
+    network: ic_types.ICNetwork,
+    ic_admin_version: str | None = None,
+    dry_run: bool = False,
+) -> None:
+    """
+    Create proposal to update a subnet to a specific git revision.
+
+    Args:
+    * subnet_id: which subnet to upgrade.
+    * git_revision: which git revision to upgrade to.
+    * proposer_neuron_id: the number of the neuron to use for proposal.
+    * proposer_neuron_pem: the path to the PEM file containing the private
+      key material for the neuron used to propose.
+    * dry_run: if true, print the command that would be run to standard
+      error, but do not run it.
+    """
+    subnet_id_short = subnet_id.split("-")[0]
+    git_revision_short = git_revision[:7]
+    proposal_title = (
+        f"Update subnet {subnet_id_short} to replica version {git_revision_short}"
+    )
+    proposal_summary = (
+        f"""Update subnet {subnet_id} to replica version """
+        """[{git_revision}]("{network.release_display_url}/{git_revision})
+""".strip()
+    )
+    ic_admin(
+        "-s",
+        proposer_neuron_pem,
+        "propose-to-update-subnet-replica-version",
+        "--proposal-title",
+        proposal_title,
+        "--summary",
+        proposal_summary,
+        "--proposer",
+        str(proposer_neuron_id),
+        subnet_id,
+        git_revision,
+        network=network,
+        ic_admin_version=ic_admin_version,
+        dry_run=dry_run,
+        check=True,
+        capture_output=True,
+        input="y\n",
+    )
