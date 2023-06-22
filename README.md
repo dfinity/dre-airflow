@@ -75,7 +75,8 @@ bin/run-dag dags/<DAG file name>
 
 That command would
 [test-runs your DAG](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/debug.html).
-This works because there's a snippet at the end of each DAG:
+This works because there's a snippet at the end of each DAG,
+somewhat similar to this:
 
 ```
 if __name__ == "__main__":
@@ -118,6 +119,29 @@ Unit tests are in directory [tests](tests/).  You can run them
 directly from Visual Studio Code, or run them via Make using
 `make test`.
 
+To run an operator, just write code at the bottom of its file
+that does something like this:
+
+
+```py
+if __name__ == "__main__":
+    import sys
+
+    if sys.argv[1] == "my_operator":
+        kn = MyOperator(
+            task_id="x",
+            arg1=sys.argv[2],
+            arg2=sys.argv[3],
+        )
+        kn.execute({})
+```
+
+Then you can run it under the Airflow environment:
+
+```
+bin/run-dag plugins/operators/<operator file name>
+```
+
 TBD:
 
 * CI/CD pipeline story
@@ -141,13 +165,7 @@ as the procedure to have Airflow reload operators.
 
 #### Testing sensors
 
-Unit tests are in directory [tests](tests/).  You can run them
-directly from Visual Studio Code, or run them via Make using
-`make test`.
-
-TBD:
-
-* CI/CD pipeline story
+Everything under the *Testing operators* headline applies.
 
 ## Quality assurance
 
