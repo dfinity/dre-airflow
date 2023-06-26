@@ -36,7 +36,7 @@ release:
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
-        - $DOCKERFILE_PATH
+        - airflow-content-syncer/Dockerfile
   script:
     - "[[ -z ${APP+x} ]] && echo 'APP is not defined' && exit 1"
     - "[[ -z ${CONTEXT_PATH+x} ]] && echo 'CONTEXT_PATH is not defined' && exit 1"
