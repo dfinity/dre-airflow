@@ -71,7 +71,7 @@ for network_name, network in IC_NETWORKS.items():
                 task_id="create_proposal_if_none_exists",
                 subnet_id="{{ params.subnet_id }}",
                 git_revision="{{ params.git_revision }}",
-                simulate_proposal="{{ params.simulate_proposal }}",
+                simulate_proposal="{{ params.simulate_proposal }}",  # type:ignore
                 network=network,
                 retries=retries,
             )
@@ -79,7 +79,9 @@ for network_name, network in IC_NETWORKS.items():
                 task_id="wait_until_proposal_is_accepted",
                 subnet_id="{{ params.subnet_id }}",
                 git_revision="{{ params.git_revision }}",
-                simulate_proposal_acceptance="{{ params.simulate_proposal }}",
+                simulate_proposal_acceptance="""{{
+                    params.simulate_proposal
+                }}""",  # type:ignore
                 retries=retries,
                 network=network,
             )

@@ -175,6 +175,7 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
         )
         print(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
+        print(res)
         if len(res) == 1 and res[0]["metric"]["ic_active_version"] == self.git_revision:
             print(
                 f"All {res[0]['value']} nodes in subnet {self.subnet_id} have"
@@ -182,7 +183,10 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
             )
             return
         if res:
-            print(f"Upgrade of {self.subnet_id} is not complete yet.  From Prometheus:")
+            print(
+                f"Upgrade of {self.subnet_id} to {self.git_revision}"
+                " is not complete yet.  From Prometheus:"
+            )
             for r in res:
                 print(r)
         else:

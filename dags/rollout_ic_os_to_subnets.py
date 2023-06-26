@@ -1,6 +1,5 @@
 """
-Example DAG demonstrating the usage of the BashOperator and custom
-TimedPythonOperator.
+Rollout IC os to subnets.
 """
 
 import datetime
@@ -152,22 +151,22 @@ for network_name, network in IC_NETWORKS.items():
         schedule=None,
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
-        dagrun_timeout=datetime.timedelta(minutes=60),
+        dagrun_timeout=datetime.timedelta(days=14),
         tags=["testing"],
         params={
-            "plan": Param(
-                default=DEFAULT_PLANS[network_name].strip(),
-                type="string",
-                title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
-                custom_html_form=_PLAN_FORM,
-            ),
             "git_revision": Param(
                 "0000000000000000000000000000000000000000",
                 type="string",
                 pattern="^[a-f0-9]{40}$",
                 title="Git revision",
                 description="Git revision of the IC-OS release to roll out to subnets",
+            ),
+            "plan": Param(
+                default=DEFAULT_PLANS[network_name].strip(),
+                type="string",
+                title="Rollout plan",
+                description="A YAML-formatted string describing the rollout schedule",
+                custom_html_form=_PLAN_FORM,
             ),
             "simulate_proposal": Param(
                 True,
@@ -186,7 +185,13 @@ for network_name, network in IC_NETWORKS.items():
             plan_data_structure = yaml.safe_load(
                 context["task"].render_template("{{ params.plan }}", context)
             )
-            subnet_list_source = functools.partial(get_subnet_list, network=network)
+            ic_admin_version = yaml.safe_load(
+                context["task"].render_template("{{ params.git_revision }}", context)
+            )
+            kwargs = {"network": network}
+            if not ic_admin_version == "0000000000000000000000000000000000000000":
+                kwargs["ic_admin_version"] = ic_admin_version
+            subnet_list_source = functools.partial(get_subnet_list, **kwargs)
             return rollout_planner(
                 plan_data_structure,
                 subnet_list_source=subnet_list_source,
@@ -228,7 +233,7 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="create_proposal",
                     subnet_id=ts,
                     git_revision="{{ params.git_revision }}",
-                    simulate_proposal="{{ params.simulate_proposal }}",
+                    simulate_proposal="{{ params.simulate_proposal }}",  # type:ignore
                     retries=retries,
                     network=network,
                 )
@@ -236,7 +241,9 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="wait_until_proposal_is_accepted",
                     subnet_id=ts,
                     git_revision="{{ params.git_revision }}",
-                    simulate_proposal_acceptance="{{ params.simulate_proposal }}",
+                    simulate_proposal_acceptance="""{{
+                        params.simulate_proposal
+                    }}""",  # type:ignore
                     retries=retries,
                     network=network,
                 )

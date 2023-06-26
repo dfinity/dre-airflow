@@ -75,9 +75,10 @@ def ic_admin(
             else:
                 vr = requests.get(GOVERNANCE_CANISTER_VERSION_URL)
                 vr.raise_for_status()
-                ic_admin_version = vr.json()["stringified_hash"]
+                ic_admin_version = vr.json()["stringified_hash"].strip()
                 icapath = os.path.join(d, f"ic-admin.{ic_admin_version}")
         else:
+            ic_admin_version = ic_admin_version.strip()
             icapath = os.path.join(d, f"ic-admin.{ic_admin_version}")
         if not os.path.exists(icapath):
             platform = "x86_64-linux"
