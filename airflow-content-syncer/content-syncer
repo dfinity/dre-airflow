@@ -34,12 +34,12 @@ do
         git reset --hard
         git clean -fxd
         mkdir -p "$AIRFLOW_HOME/plugins"
-        rsync -av --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
+        rsync -rlpgoDv --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
         for folder in plugins/operators plugins/sensors shared/*
         do
             test -d "$folder" || continue
             if [ $(basename "$folder") == "__pycache__" ] ; then continue ; fi
-            rsync -av --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
+            rsync -rlpgoDv --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
         done
     fi
     if [ "$1" == "once" ] ; then exit ; fi
