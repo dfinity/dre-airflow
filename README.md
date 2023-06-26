@@ -216,11 +216,17 @@ by updating the reference to the content syncer image in the
 file linked within this paragraph, then the K8s repository
 needs to have the update merged.
 
-*TBD*: test these artifacts
+To determine if / when the artifacts have been synced, look at the
+log of the container `airflow-content-syncer` in any of the
+triggerer, scheduler or worker pods of the Airflow deployment (in
+namespace `airflow`).
 
-* Settle on artifact format and repository.
-* Come up with pipeline to build artifacts and upload them.
-* Come up with workflow to deploy artifacts.
+*TBD*: test these artifacts!
+
+* Pipeline has to use the exact same version of Python
+  that the Airflow container does -- possibly necessarily
+  the same container itself!  The Airflow containers
+  use an ancient version of Python.
 
 ## Local development environment setup
 

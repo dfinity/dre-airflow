@@ -33,6 +33,7 @@ do
     then
         git reset --hard
         git clean -fxd
+        echo "$(date): Updating to revision $remote" >&2
         set -x
         mkdir -p "$AIRFLOW_HOME/plugins"
         rsync -rlDv --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"

@@ -70,7 +70,8 @@ def ic_admin(
     os.makedirs(d, exist_ok=True)
     with locked_open(os.path.join(d, ".oplock")):
         if ic_admin_version is None:
-            if ic_admins := glob.glob(os.path.join(d, "ic-admin.*")):
+            ic_admins = glob.glob(os.path.join(d, "ic-admin.*"))
+            if ic_admins:
                 icapath = ic_admins[0]
             else:
                 vr = requests.get(GOVERNANCE_CANISTER_VERSION_URL)
