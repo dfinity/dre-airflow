@@ -100,7 +100,7 @@ More on testing DAGs:
 TBD:
 
 * local mock testing story (test DAG dependencies and dry-run)
-* CI/CD pipeline story
+* CI/CD testing story
 
 ### Operators
 
@@ -149,7 +149,7 @@ bin/run-dag plugins/operators/<operator file name>
 
 TBD:
 
-* CI/CD pipeline story
+* CI/CD testing story
 
 ### Sensors
 
@@ -183,8 +183,7 @@ In production, each shared folder is deployed to `$AIRFLOW_HOME/plugins`.
 
 ## Quality assurance
 
-*TBD*.  We do not yet have a pipeline to run automated tests.
-FIXME.
+*TBD*: CI/CD testing story
 
 Targets:
 
@@ -202,20 +201,22 @@ Airflow pods by way of the `airflow-content-syncer` container
 [built from this repository](airflow-content-syncer/).  Delivery
 is not done through the container, but rather by using
 `git clone` within the container periodically, running as a
-sidecar in all relevant Airflow pods.  The container will
-check which is the latest revision of the `main` branch
-of the repo containing this file, and if it differs from
-what is deployed in Airflow, it will redeploy from the
-latest `main` branch.
+sidecar in all relevant Airflow pods.
+
+The container will check which is the latest revision of the
+`main` branch of the repo containing this file, and if it differs
+from what is deployed in Airflow, it will redeploy from the latest
+`main` branch.
 
 The container image version is referred to as `syncer_image` in
 [this K8s file](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/deps/afvalues.yaml).
 When the container image is updated, Airflow must be
-[redeployed](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/README.md).
+[redeployed](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/README.md)
+by updating the reference to the content syncer image in the
+file linked within this paragraph, then the K8s repository
+needs to have the update merged.
 
-*TBD*.  We do not yet have a pipeline to create artifacts that
-will be deployed to production, largely because we do not have
-a production Airflow setup yet.
+*TBD*: test these artifacts
 
 * Settle on artifact format and repository.
 * Come up with pipeline to build artifacts and upload them.
