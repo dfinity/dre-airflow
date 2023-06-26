@@ -226,7 +226,9 @@ namespace `airflow`).
 * Pipeline has to use the exact same version of Python
   that the Airflow container does -- possibly necessarily
   the same container itself!  The Airflow containers
-  use an ancient version of Python.
+  use an ancient version of Python.  We have set up the
+  container with tag 2.6.2-python3.10 to be used for our
+  prod setup.
 
 ## Local development environment setup
 
