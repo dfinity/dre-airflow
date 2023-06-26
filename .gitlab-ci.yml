@@ -24,6 +24,7 @@ variables:
   DOCKERFILE_PATH: airflow-content-syncer/Dockerfile
 
 release:
+  stage: release
   tags:
     - ubuntu
     - dfinity-shared
