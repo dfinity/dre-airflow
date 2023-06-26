@@ -208,6 +208,11 @@ of the repo containing this file, and if it differs from
 what is deployed in Airflow, it will redeploy from the
 latest `main` branch.
 
+The container image version is referred to as `syncer_image` in
+[this K8s file](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/deps/afvalues.yaml).
+When the container image is updated, Airflow must be
+[redeployed](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/README.md).
+
 *TBD*.  We do not yet have a pipeline to create artifacts that
 will be deployed to production, largely because we do not have
 a production Airflow setup yet.
