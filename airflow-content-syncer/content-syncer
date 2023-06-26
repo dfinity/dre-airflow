@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -e
+
+AIRFLOW_HOME=${AIRFLOW_HOME-/opt/airflow}
+CONTENT_SYNCER_GIT_REPO_FOLDER=${CONTENT_SYNCER_GIT_REPO_FOLDER-/tmp/gitrepo}
+CONTENT_SYNCER_INTERVAL=${CONTENT_SYNCER_INTERVAL:300}
+
+if [ -z "$CONTENT_SYNCER_GIT_REPO_SOURCE" ]
+then
+    echo The variable CONTENT_SYNCER_GIT_REPO_SOURCE was not set to the repository to clone. >&2
+    echo The variable must contain an HTTPS URL using a token as password to pull from the repo. >&2
+    exit 64
+fi
+
+mkdir -p "$(dirname CONTENT_SYNCER_GIT_REPO_FOLDER)"
+if [ ! -d "$CONTENT_SYNCER_GIT_REPO_FOLDER" ]
+then
+    git clone "$CONTENT_SYNCER_GIT_REPO_SOURCE" "$CONTENT_SYNCER_GIT_REPO_FOLDER"
+fi
+
+cd "$CONTENT_SYNCER_GIT_REPO_FOLDER"
+while true
+do
+    git fetch origin || {
+        echo Failed to fetch the origin. >&2 
+        sleep "$CONTENT_SYNCER_INTERVAL"
+        continue
+    }
+    local=$(git show-ref main | cut -d " " -f 1)
+    remote=$(git show-ref origin/main | cut -d " " -f 1)
+    if [ "$local" != "$remote" ]
+    then
+        git reset --hard
+        git clean -fxd
+        mkdir -p "$AIRFLOW_HOME/plugins"
+        rsync -av --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
+        for folder in plugins/operators plugins/sensors shared/*
+        do
+            test -d "$folder" || continue
+            if [ $(basename "$folder") == "__pycache__" ] ; then continue ; fi
+            rsync -av --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
+        done
+    fi
+    if [ "$1" == "once" ] ; then exit ; fi
+    sleep "$CONTENT_SYNCER_INTERVAL"
+done

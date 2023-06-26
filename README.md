@@ -16,6 +16,7 @@ set up a local development environment.  See below for instructions.
 * Library code is under folder [shared](shared/README.md).
   * See info on [how Airflow finds Python modules](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/modules_management.html)
   * The local runner automatically makes this code available
+  * [When are plugins reloaded?](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/plugins.html#plugins-loading)
 
 ### DAGs
 
@@ -26,6 +27,8 @@ you to either execute them manually or trigger them under certain conditions.
 * You can write DAGs [in the TaskFlow style](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/taskflow.html)
 * Browse loaded DAGs: http://localhost:8080/home
 * Browse DAG dependencies: http://localhost:8080/dag-dependencies
+
+In production, DAGs are deployed to `$AIRFLOW_HOME/dags`.
 
 #### Working with DAGs
 
@@ -70,7 +73,7 @@ through the CLI or the web interface.
 By convention, DAGs can be tested by running them so:
 
 ```
-bin/run-dag dags/<DAG file name>
+bin/run-dag dags/<DAG file name> [parameters...]
 ```
 
 That command would
@@ -107,6 +110,8 @@ tasks that require them get dispatched to the workers.
 
 * Operator developer reference: https://airflow.apache.org/docs/apache-airflow/stable/howto/custom-operator.html
 * Useful knowledge on how to develop operators: https://kvirajdatt.medium.com/airflow-writing-custom-operators-and-publishing-them-as-a-package-part-2-3f4603899ec2
+
+In production, operators are deployed to `$AIRFLOW_HOME/plugins/operators`.
 
 #### Working with operators
 
@@ -155,8 +160,10 @@ something to happen.
 * Sensor API documentation: https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/sensors/base/index.html
 * Useful sensor information: https://marclamberti.com/blog/airflow-sensors/
 
-Our operators are defined in standalone files under the
+Our sensors are defined in standalone files under the
 [sensors](plugins/sensors) folder.
+
+In production, sensors are deployed to `$AIRFLOW_HOME/plugins/sensors`.
 
 #### Working with sensors
 
@@ -166,6 +173,13 @@ as the procedure to have Airflow reload operators.
 #### Testing sensors
 
 Everything under the *Testing operators* headline applies.
+
+### Shared code
+
+Library code used by DAGs, operators and sensors is available under
+folder [shared](shared/).
+
+In production, each shared folder is deployed to `$AIRFLOW_HOME/plugins`.
 
 ## Quality assurance
 
@@ -182,6 +196,17 @@ Targets:
 * Gitlab pipeline validating all the above
 
 ## Continuous delivery
+
+The artifacts in this repository are delivered to the relevant
+Airflow pods by way of the `airflow-content-syncer` container
+[built from this repository](airflow-content-syncer/).  Delivery
+is not done through the container, but rather by using
+`git clone` within the container periodically, running as a
+sidecar in all relevant Airflow pods.  The container will
+check which is the latest revision of the `main` branch
+of the repo containing this file, and if it differs from
+what is deployed in Airflow, it will redeploy from the
+latest `main` branch.
 
 *TBD*.  We do not yet have a pipeline to create artifacts that
 will be deployed to production, largely because we do not have
