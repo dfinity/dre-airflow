@@ -31,8 +31,6 @@ release:
   image:
     name: gcr.io/kaniko-project/executor:debug # debug is required for gitlab as it needs to run a shell inside.
     entrypoint: [""]
-  variables:
-    APP: content-syncer
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
