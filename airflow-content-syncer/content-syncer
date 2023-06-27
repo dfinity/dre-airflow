@@ -27,23 +27,21 @@ do
         sleep "$CONTENT_SYNCER_INTERVAL"
         continue
     }
-    local=$(git show-ref main | cut -d " " -f 1)
+    local=$(git show-ref heads/main | cut -d " " -f 1)
     remote=$(git show-ref origin/main | cut -d " " -f 1)
     if [ "$local" != "$remote" ] || [ "$1" == "once" ]
     then
         git reset --hard origin/main
         git clean -fxd
         echo "$(date): Updating to revision $remote" >&2
-        set -x
         mkdir -p "$AIRFLOW_HOME/plugins"
-        rsync -rlDv --checksum --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
+        rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
         for folder in plugins/operators plugins/sensors shared/*
         do
             test -d "$folder" || continue
             if [ $(basename "$folder") == "__pycache__" ] ; then continue ; fi
-            rsync -rlDv --checksum --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
+            rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
         done
-        set +x
     fi
     if [ "$1" == "once" ] ; then exit ; fi
     sleep "$CONTENT_SYNCER_INTERVAL"
