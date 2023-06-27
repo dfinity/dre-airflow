@@ -31,7 +31,7 @@ do
     remote=$(git show-ref origin/main | cut -d " " -f 1)
     if [ "$local" != "$remote" ]
     then
-        git reset --hard
+        git reset --hard origin/main
         git clean -fxd
         echo "$(date): Updating to revision $remote" >&2
         set -x
