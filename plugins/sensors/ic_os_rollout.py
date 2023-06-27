@@ -210,23 +210,23 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         (IC_Replica_Behind) which must resolve themselves.  We look back
         30 minutes to ensure they are resolved.
         """
-        print(f"Waiting for all alerts on subnet ID {self.subnet_id} to subside.")
+        self.log.info(f"Waiting for alerts on subnet ID {self.subnet_id} to subside.")
         query = (
             'sum_over_time(ALERTS{ic_subnet="%(subnet_id)s",'
             % ({"subnet_id": self.subnet_id})
             + ' severity="page"}[30m])'
         )
-        print(f"Querying Prometheus servers: {query}")
+        self.log.info(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) > 0:
-            print("There are still Prometheus alerts on the subnet:")
+            self.log.info("There are still Prometheus alerts on the subnet:")
             for r in res:
-                print(r)
+                self.log.info(r)
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
             )
-        print(f"There are no more alerts on subnet ID {self.subnet_id}.")
+        self.log.info(f"There are no more alerts on subnet ID {self.subnet_id}.")
 
 
 if __name__ == "__main__":
