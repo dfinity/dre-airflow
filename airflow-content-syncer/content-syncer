@@ -29,7 +29,7 @@ do
     }
     local=$(git show-ref main | cut -d " " -f 1)
     remote=$(git show-ref origin/main | cut -d " " -f 1)
-    if [ "$local" != "$remote" ]
+    if [ "$local" != "$remote" ] || [ "$1" == "once" ]
     then
         git reset --hard origin/main
         git clean -fxd
