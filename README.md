@@ -197,9 +197,9 @@ Targets:
 ## Continuous delivery
 
 The artifacts in this repository are delivered to the relevant
-Airflow pods by way of the `airflow-content-syncer` container
-[built from this repository](airflow-content-syncer/).  Delivery
-is not done through the container, but rather by using
+Airflow production pods by way of the `airflow-content-syncer`
+container [built from this repository](airflow-content-syncer/).
+Delivery is not done through the container, but rather by using
 `git clone` within the container periodically, running as a
 sidecar in all relevant Airflow pods.
 
