@@ -4,7 +4,7 @@ Rollout IC os to subnets.
 
 import datetime
 import functools
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
@@ -233,7 +233,7 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="create_proposal",
                     subnet_id=ts,
                     git_revision="{{ params.git_revision }}",
-                    simulate_proposal="{{ params.simulate_proposal }}",  # type:ignore
+                    simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
                     retries=retries,
                     network=network,
                 )
@@ -241,9 +241,12 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="wait_until_proposal_is_accepted",
                     subnet_id=ts,
                     git_revision="{{ params.git_revision }}",
-                    simulate_proposal_acceptance="""{{
+                    simulate_proposal_acceptance=cast(
+                        bool,
+                        """{{
                         params.simulate_proposal
-                    }}""",  # type:ignore
+                    }}""",
+                    ),
                     retries=retries,
                     network=network,
                 )

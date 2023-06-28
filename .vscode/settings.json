@@ -1,12 +1,5 @@
 {
     "python.linting.mypyEnabled": true,
-    "python.linting.mypyArgs": [
-        "--follow-imports=silent",
-        "--ignore-missing-imports",
-        "--show-column-numbers",
-        "--no-pretty",
-        "--strict"
-    ],
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
         "source.organizeImports": false,
@@ -24,5 +17,11 @@
         "-p",
         "test_*.py"
     ],
-    "python.analysis.diagnosticMode": "workspace"
+    "python.analysis.diagnosticMode": "workspace",
+    "python.linting.mypyArgs": [
+        "--config=mypy.ini",
+        "--show-column-numbers",
+        "--no-pretty"
+    ],
+    "python.linting.mypyPath": "venv/bin/mypy"
 }
