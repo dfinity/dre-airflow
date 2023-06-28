@@ -5,9 +5,8 @@ ic-admin proxy and downloader.
 import fcntl
 import glob
 import os
-import shlex
 import subprocess
-import sys
+import tempfile
 import zlib
 from contextlib import contextmanager
 from typing import IO, Any, Generator, cast
@@ -15,6 +14,8 @@ from typing import IO, Any, Generator, cast
 import dfinity.ic_types as ic_types
 import requests  # type:ignore
 import yaml  # type: ignore
+
+import airflow.models
 
 GOVERNANCE_CANISTER_VERSION_URL = "https://dashboard.internal.dfinity.network/api/proxy/registry/mainnet/canisters/governance/version"
 IC_ADMIN_GZ_URL = (
@@ -56,8 +57,11 @@ def ic_admin(
     Run ic-admin, potentially downloading it if not present.
 
     Args:
-    * dry_run: if true, the command will be echoed on standard error,
-      but it won't be executed.
+    * dry_run: if true, the command will get a --dry-run
+      appended at the end.
+    * capture_output: if true, the returned CompletedProcess
+      will have the stdout and stderr of the process as
+      attributes.
     """
     rundir = f"/run/user/{os.getuid()}"
     if os.path.isdir(rundir):
@@ -98,9 +102,8 @@ def ic_admin(
         nnsurl = ["--nns-url", network.nns_url]
         cmd = [icapath] + nnsurl + list(args)
         if dry_run:
-            print(" ".join(shlex.quote(x) for x in cmd), file=sys.stderr)
-            return subprocess.CompletedProcess(cmd, 0, None, None)
-        return subprocess.run([icapath] + nnsurl + list(args), **kwargs)
+            cmd.append("--dry-run")
+        return subprocess.run(cmd, **kwargs)
 
 
 def get_subnet_list(
@@ -120,12 +123,10 @@ def get_subnet_list(
 def propose_to_update_subnet_replica_version(
     subnet_id: str,
     git_revision: str,
-    proposer_neuron_id: int,
-    proposer_neuron_pem: str,
     network: ic_types.ICNetwork,
     ic_admin_version: str | None = None,
     dry_run: bool = False,
-) -> None:
+) -> subprocess.CompletedProcess[str]:
     """
     Create proposal to update a subnet to a specific git revision.
 
@@ -135,9 +136,16 @@ def propose_to_update_subnet_replica_version(
     * proposer_neuron_id: the number of the neuron to use for proposal.
     * proposer_neuron_pem: the path to the PEM file containing the private
       key material for the neuron used to propose.
-    * dry_run: if true, print the command that would be run to standard
-      error, but do not run it.
+    * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+    Returns:
+      A CompletedProcess with stdout and stderr attributes to read from.
     """
+    proposer_neuron_id = network.proposer_neuron_id
+    proposer_neuron_certificate_variable_name = (
+        network.proposer_neuron_certificate_variable_name
+    )
+
     subnet_id_short = subnet_id.split("-")[0]
     git_revision_short = git_revision[:7]
     proposal_title = (
@@ -145,25 +153,76 @@ def propose_to_update_subnet_replica_version(
     )
     proposal_summary = (
         f"""Update subnet {subnet_id} to replica version """
-        """[{git_revision}]("{network.release_display_url}/{git_revision})
+        f"""[{git_revision}]("{network.release_display_url}/{git_revision})
 """.strip()
     )
-    ic_admin(
-        "-s",
-        proposer_neuron_pem,
-        "propose-to-update-subnet-replica-version",
-        "--proposal-title",
-        proposal_title,
-        "--summary",
-        proposal_summary,
-        "--proposer",
-        str(proposer_neuron_id),
-        subnet_id,
-        git_revision,
-        network=network,
-        ic_admin_version=ic_admin_version,
-        dry_run=dry_run,
-        check=True,
-        capture_output=True,
-        input="y\n",
-    )
+    with tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".proposal-cert.pem" if not dry_run else ".fake-proposal-cert.pem",
+    ) as w:
+        proposal_pem_contents = airflow.models.Variable.get(
+            proposer_neuron_certificate_variable_name
+        )
+        if dry_run:
+            # Use a dummy PEM private key file instead.
+            w.write(
+                """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
+AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
+5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
+-----END EC PRIVATE KEY-----"""
+            )
+        else:
+            # Use the actual PEM private key retrieved from variables.
+            # We could perhaps forego writing the PEM file, and
+            # use sockets instead, if we used a pipe, and ran ic_admin
+            # asynchronously.
+            w.write(proposal_pem_contents)
+        w.flush()
+        return ic_admin(
+            "-s",
+            w.name,
+            "propose-to-update-subnet-replica-version",
+            "--proposal-title",
+            proposal_title,
+            "--summary",
+            proposal_summary,
+            "--proposer",
+            str(proposer_neuron_id),
+            subnet_id,
+            git_revision,
+            network=network,
+            ic_admin_version=ic_admin_version,
+            dry_run=dry_run,
+            check=True,
+            capture_output=True,
+            input="y\n",
+        )
+
+
+if __name__ == "__main__":
+    try:
+        p = propose_to_update_subnet_replica_version(
+            "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",
+            "0000000000000000000000000000000000000000",
+            ic_types.ICNetwork(
+                "https://ic0.app/",
+                "https://ic-api.internetcomputer.org/api/v3/proposals",
+                "https://dashboard.internetcomputer.org/proposal",
+                "https://dashboard.internetcomputer.org/release",
+                [
+                    "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
+                    "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+                ],
+                80,
+                "dfinity.ic_admin.mainnet.proposer_key_file",
+            ),
+            None,
+            True,
+        )
+        print("Stdout", p.stdout)
+        print("Stderr", p.stderr)
+    except subprocess.CalledProcessError as exc:
+        print("Failure return code:", exc.returncode)
+        print("Stdout", exc.stdout)
+        print("Stderr", exc.stderr)

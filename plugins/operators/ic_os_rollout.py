@@ -3,6 +3,7 @@ IC-OS rollout operators.
 """
 
 import itertools
+import subprocess
 from typing import Any, Sequence
 
 import dfinity.ic_admin as ic_admin
@@ -12,10 +13,6 @@ import dfinity.ic_types as ic_types
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
-
-# FIXME: these need to be parameterizable.
-PROPOSER_NEURON_ID = 80
-PROPOSER_NEURON_PATH = "/nonexistent.pem"
 
 
 class RolloutParams(Templater):
@@ -97,14 +94,14 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
             if p["status"] == ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN
         ]
         if executeds:
-            print(
+            self.log.info(
                 f"Proposal"
                 f" {self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
                 f" titled {executeds[0]['title']}"
                 f" has executed.  No need to do anything."
             )
         elif opens:
-            print(
+            self.log.info(
                 "Proposal"
                 " {self.network.proposal_display_url}/{opens[0]['proposal_id']}"
                 " titled {opens[0]['title']}"
@@ -112,35 +109,38 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
             )
         else:
             if not props:
-                print(
+                self.log.info(
                     f"No proposals for subnet ID {self.subnet_id} to "
                     + f"adopt revision {self.git_revision}."
                 )
             else:
-                print("The following proposals neither open nor executed exist:")
+                self.log.info(
+                    "The following proposals neither open nor executed exist:"
+                )
                 for p in props:
-                    print(f"* {self.network.proposal_display_url}/{p['proposal_id']}")
+                    self.log.info(
+                        f"* {self.network.proposal_display_url}/{p['proposal_id']}"
+                    )
             if not self.simulate_proposal:
                 raise NotImplementedError
-            print(
+            self.log.info(
                 f"Creating proposal for subnet ID {self.subnet_id} to "
                 + f"adopt revision {self.git_revision}."
             )
-            ic_admin.propose_to_update_subnet_replica_version(
-                self.subnet_id,
-                self.git_revision,
-                PROPOSER_NEURON_ID,
-                PROPOSER_NEURON_PATH,
-                self.network,
-                dry_run=True,
-            )
-            if self.simulate_proposal:
-                print("The proposal creation was successfully simulated.")
-            else:
-                ic_admin.propose_to_update_subnet_replica_version(
+
+            try:
+                p = ic_admin.propose_to_update_subnet_replica_version(
                     self.subnet_id,
                     self.git_revision,
-                    PROPOSER_NEURON_ID,
-                    PROPOSER_NEURON_PATH,
                     self.network,
+                    dry_run=self.simulate_proposal,
                 )
+                self.log.info("Standard output: %s", p.stdout)
+                self.log.info("Standard error: %s", p.stderr)
+            except subprocess.CalledProcessError as exc:
+                self.log.error(
+                    "Failure to execute ic-admin (return code %d)", exc.returncode
+                )
+                self.log.error("Standard output: %s", exc.stdout)
+                self.log.error("Standard error: %s", exc.stderr)
+                raise

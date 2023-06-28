@@ -22,6 +22,8 @@ IC_NETWORKS: dict[str, ic_types.ICNetwork] = {
             "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
             "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
         ],
+        80,
+        "dfinity.ic_admin.mainnet.proposer_key_file",
     ),
     # "staging": ic_types.ICNetwork("http://[2600:3004:1200:1200:5000:11ff:fe37:c55d]:8080/"),
     # FIXME we do not have a proposals URL for staging

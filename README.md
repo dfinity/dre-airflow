@@ -9,6 +9,26 @@ set up a local development environment.  See below for instructions.
 
 [[_TOC_]]
 
+## Variables required for workflows
+
+The workflows and operators in this repository require a set of
+variables to be added to Airflow before they are executed.
+These variables are retrieved at runtime.  If a task in a workflow
+fails to retrieve a variable, the workflow perishes.
+
+Logged in as administrator through the UI, go to
+*Top menubar -> Admin -> Variables*.  Then create the following
+variables:
+
+*
+  * Key: `dfinity.ic_admin.mainnet.proposer_key_file`
+  * Val: the contents of the release automation certificate PEM file used
+    to roll out IC OS (ask DRE team for information, it should be in
+    their vault)
+  * Description: The proposal certificate for neuron 80 to be used on mainnet.
+
+Variables are only visible to administrators.
+
 ## Artifacts distributed in this repository
 
 * Our DAGs in this repository are distributed under folder [dags](dags/README.md).
@@ -259,6 +279,11 @@ able to open TCP port 8080, since the VM will have hogged the port.
 
 Now restart any running `bin/airflow standalone` instances.  The demo DAGs
 will be gone now.
+
+To actually *run* the DAGs here, you will almost certainly have to
+create the required variables on your Airflow instance.  See the
+heading *Variables required for workflows* for instructions on
+what to create.
 
 ### Deploying a bare-bones Airflow instance to a VM
 
