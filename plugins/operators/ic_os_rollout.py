@@ -10,6 +10,7 @@ import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 
+import airflow.models
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
@@ -128,15 +129,33 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 + f"adopt revision {self.git_revision}."
             )
 
+            # Use forrealz private key only when rolling out forrealz.
+            pkey = (
+                """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
+AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
+5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
+-----END EC PRIVATE KEY-----"""
+                if self.simulate_proposal
+                else airflow.models.Variable.get(
+                    self.network.proposer_neuron_private_key_variable_name
+                )
+            )
+            net = ic_types.augment_network_with_private_key(self.network, pkey)
+            # Force use of Git revision for ic-admin rollout,
+            # but only when rolling out forrealz.
+            ic_admin_version = None if self.simulate_proposal else self.git_revision
+
             try:
-                p = ic_admin.propose_to_update_subnet_replica_version(
+                proc = ic_admin.propose_to_update_subnet_replica_version(
                     self.subnet_id,
                     self.git_revision,
-                    self.network,
+                    net,
+                    ic_admin_version=ic_admin_version,
                     dry_run=self.simulate_proposal,
                 )
-                self.log.info("Standard output: %s", p.stdout)
-                self.log.info("Standard error: %s", p.stderr)
+                self.log.info("Standard output: %s", proc.stdout)
+                self.log.info("Standard error: %s", proc.stderr)
             except subprocess.CalledProcessError as exc:
                 self.log.error(
                     "Failure to execute ic-admin (return code %d)", exc.returncode

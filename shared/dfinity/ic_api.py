@@ -9,8 +9,9 @@ import urllib.parse
 from enum import Enum
 from typing import Any, TypedDict, cast
 
+import requests
+
 import dfinity.ic_types as ic_types
-import requests  # type:ignore
 
 IC_NETWORKS: dict[str, ic_types.ICNetwork] = {
     "mainnet": ic_types.ICNetwork(

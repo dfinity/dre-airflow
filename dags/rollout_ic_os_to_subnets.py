@@ -9,7 +9,7 @@ from typing import Any, Callable
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-import yaml  # type: ignore
+import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
 from dfinity.ic_types import SubnetRolloutInstance
@@ -220,7 +220,7 @@ for network_name, network in IC_NETWORKS.items():
 
             @task
             def to_subnet_id(x: SubnetRolloutInstance) -> str:
-                return x.subnet_id  # type:ignore
+                return x.subnet_id
 
             ts = to_subnet_id(rep)
 

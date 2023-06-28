@@ -11,11 +11,10 @@ import zlib
 from contextlib import contextmanager
 from typing import IO, Any, Generator, cast
 
-import dfinity.ic_types as ic_types
-import requests  # type:ignore
-import yaml  # type: ignore
+import requests
+import yaml
 
-import airflow.models
+import dfinity.ic_types
 
 GOVERNANCE_CANISTER_VERSION_URL = "https://dashboard.internal.dfinity.network/api/proxy/registry/mainnet/canisters/governance/version"
 IC_ADMIN_GZ_URL = (
@@ -48,7 +47,7 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 def ic_admin(
     *args: str,
-    network: ic_types.ICNetwork,
+    network: dfinity.ic_types.ICNetwork,
     ic_admin_version: str | None = None,
     dry_run: bool = False,
     **kwargs: Any,
@@ -107,7 +106,7 @@ def ic_admin(
 
 
 def get_subnet_list(
-    network: ic_types.ICNetwork,
+    network: dfinity.ic_types.ICNetwork,
     ic_admin_version: str | None = None,
 ) -> list[str]:
     listp = ic_admin(
@@ -123,8 +122,8 @@ def get_subnet_list(
 def propose_to_update_subnet_replica_version(
     subnet_id: str,
     git_revision: str,
-    network: ic_types.ICNetwork,
-    ic_admin_version: str | None = None,
+    network: dfinity.ic_types.ICNetworkWithPrivateKey,
+    ic_admin_version: str | None,
     dry_run: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """
@@ -141,11 +140,6 @@ def propose_to_update_subnet_replica_version(
     Returns:
       A CompletedProcess with stdout and stderr attributes to read from.
     """
-    proposer_neuron_id = network.proposer_neuron_id
-    proposer_neuron_certificate_variable_name = (
-        network.proposer_neuron_certificate_variable_name
-    )
-
     subnet_id_short = subnet_id.split("-")[0]
     git_revision_short = git_revision[:7]
     proposal_title = (
@@ -160,24 +154,7 @@ def propose_to_update_subnet_replica_version(
         "w",
         suffix=".proposal-cert.pem" if not dry_run else ".fake-proposal-cert.pem",
     ) as w:
-        proposal_pem_contents = airflow.models.Variable.get(
-            proposer_neuron_certificate_variable_name
-        )
-        if dry_run:
-            # Use a dummy PEM private key file instead.
-            w.write(
-                """-----BEGIN EC PRIVATE KEY-----
-MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
-AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
-5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
------END EC PRIVATE KEY-----"""
-            )
-        else:
-            # Use the actual PEM private key retrieved from variables.
-            # We could perhaps forego writing the PEM file, and
-            # use sockets instead, if we used a pipe, and ran ic_admin
-            # asynchronously.
-            w.write(proposal_pem_contents)
+        w.write(network.proposer_neuron_private_key)
         w.flush()
         return ic_admin(
             "-s",
@@ -188,7 +165,7 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
             "--summary",
             proposal_summary,
             "--proposer",
-            str(proposer_neuron_id),
+            str(network.proposer_neuron_id),
             subnet_id,
             git_revision,
             network=network,
@@ -205,7 +182,7 @@ if __name__ == "__main__":
         p = propose_to_update_subnet_replica_version(
             "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",
             "0000000000000000000000000000000000000000",
-            ic_types.ICNetwork(
+            dfinity.ic_types.ICNetworkWithPrivateKey(
                 "https://ic0.app/",
                 "https://ic-api.internetcomputer.org/api/v3/proposals",
                 "https://dashboard.internetcomputer.org/proposal",
@@ -215,7 +192,12 @@ if __name__ == "__main__":
                     "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
                 ],
                 80,
-                "dfinity.ic_admin.mainnet.proposer_key_file",
+                "unused",
+                """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
+AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
+5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
+-----END EC PRIVATE KEY-----""",
             ),
             None,
             True,

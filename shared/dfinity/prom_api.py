@@ -5,7 +5,7 @@ Minimal Prometheus client.
 import urllib.parse
 from typing import TypedDict, cast
 
-import requests  # type:ignore
+import requests
 
 
 class PrometheusVectorResultEntry(TypedDict):
