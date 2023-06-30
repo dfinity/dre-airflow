@@ -4,7 +4,7 @@ Rollout IC os to subnets.
 
 import datetime
 import functools
-from typing import Any, Callable, cast
+from typing import cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
@@ -12,8 +12,10 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
+from dfinity.ic_os_rollout import rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
+import airflow.providers.slack.operators.slack as slack
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.models.param import Param
@@ -61,89 +63,6 @@ _PLAN_FORM = """
 """
 
 
-def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.datetime]:
-    if now is None:
-        now = datetime.datetime.now()
-    days = {
-        "Monday": now - datetime.timedelta(days=now.weekday()),
-        "Tuesday": now - datetime.timedelta(days=now.weekday() - 1),
-        "Wednesday": now - datetime.timedelta(days=now.weekday() - 2),
-        "Thursday": now - datetime.timedelta(days=now.weekday() - 3),
-        "Friday": now - datetime.timedelta(days=now.weekday() - 4),
-        "Saturday": now - datetime.timedelta(days=now.weekday() - 5),
-        "Sunday": now - datetime.timedelta(days=now.weekday() - 6),
-    }
-    for k, v in list(days.items()):
-        days[k + " next week"] = v + datetime.timedelta(days=7)
-    for k, v in list(days.items()):
-        days[k] = v.replace(
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-            tzinfo=datetime.timezone.utc,
-        )
-    if now.weekday() in (5, 6):
-        for k, v in list(days.items()):
-            days[k] = v + datetime.timedelta(days=7)
-    return days
-
-
-def rollout_planner(
-    plan: dict[str, Any],
-    subnet_list_source: Callable[[], list[str]],
-    now: datetime.datetime | None = None,
-) -> list[SubnetRolloutInstance]:
-    res = []
-    subnet_list = subnet_list_source()
-    week_plan = week_planner(now)
-    for dayname, hours in plan.items():
-        try:
-            date = week_plan[dayname]
-        except KeyError:
-            raise ValueError(f"{dayname} is not a valid day")
-        for time_s, subnet_numbers in hours.items():
-            org_time_s = time_s
-            if isinstance(time_s, int):
-                hour = int(time_s / 60)
-                minute = time_s % 60
-                time_s = f"{hour}:{minute}"
-            try:
-                time = datetime.datetime.strptime(time_s, "%H:%M")
-            except Exception as exc:
-                raise ValueError(
-                    f"{org_time_s} is not a valid hh:mm time on {dayname}"
-                ) from exc
-            date_and_time = date.replace(hour=time.hour, minute=time.minute)
-            for n, sn in enumerate(subnet_numbers):
-                if isinstance(sn, str):
-                    prefix_matches = [
-                        (m, s) for m, s in enumerate(subnet_list) if s.startswith(sn)
-                    ]
-                    if not prefix_matches:
-                        raise ValueError(
-                            f"subnet specification {sn} not in known subnet list"
-                            " for this network"
-                        )
-                    if len(prefix_matches) > 1:
-                        raise ValueError(f"subnet specification {sn} is ambiguous")
-                    subnet_numbers[n] = prefix_matches[0][0]
-                elif not isinstance(sn, int) or sn < 0:
-                    raise ValueError(
-                        f"subnet number {sn} in {hours} of {dayname} is"
-                        " not a zero/positive integer or a valid subnet ID"
-                    )
-            for sn in subnet_numbers:
-                if sn >= len(subnet_list):
-                    raise ValueError(
-                        f"subnet number {sn} in {hours} of {dayname} is"
-                        " larger than the known total number of subnets"
-                    )
-            for sn in subnet_numbers:
-                res.append(SubnetRolloutInstance(date_and_time, sn, subnet_list[sn]))
-    return res
-
-
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
     with DAG(
@@ -189,7 +108,7 @@ for network_name, network in IC_NETWORKS.items():
                 context["task"].render_template("{{ params.git_revision }}", context)
             )
             kwargs = {"network": network}
-            if not ic_admin_version == "0000000000000000000000000000000000000000":
+            if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
                 kwargs["ic_admin_version"] = ic_admin_version
             subnet_list_source = functools.partial(get_subnet_list, **kwargs)
             return rollout_planner(
@@ -224,19 +143,36 @@ for network_name, network in IC_NETWORKS.items():
 
             ts = to_subnet_id(rep)
 
+            create_proposal = ic_os_rollout.CreateProposalIdempotently(
+                task_id="create_proposal_if_none_exists",
+                subnet_id=ts,
+                git_revision="{{ params.git_revision }}",
+                simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
+                retries=retries,
+                network=network,
+            )
+            tpl = """
+Proposal %s/{{ task_instance.xcom_pull(
+  task_ids='per_subnet.create_proposal_if_none_exists',
+  map_indexes=task_instance.map_index
+)
+}} is now ready for voting.  Please vote for this proposal.
+""".strip()
+            request_proposal_vote = slack.SlackAPIPostOperator(
+                task_id="request_proposal_vote",
+                channel="#eng-release-bots",
+                username="Airflow",
+                text=tpl % (network.proposal_display_url,),
+                slack_conn_id="slack.ic_os_rollout",
+            )
+            create_proposal >> request_proposal_vote
+
             (
                 ic_os_sensor.CustomDateTimeSensorAsync(
                     task_id="wait_until_start_time",
                     target_time=td,
                 )
-                >> ic_os_rollout.CreateProposalIdempotently(
-                    task_id="create_proposal",
-                    subnet_id=ts,
-                    git_revision="{{ params.git_revision }}",
-                    simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
-                    retries=retries,
-                    network=network,
-                )
+                >> create_proposal
                 >> ic_os_sensor.WaitForProposalAcceptance(
                     task_id="wait_until_proposal_is_accepted",
                     subnet_id=ts,

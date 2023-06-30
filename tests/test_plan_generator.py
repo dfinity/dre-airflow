@@ -2,10 +2,9 @@ import datetime
 import unittest
 from datetime import timezone as tz
 
-import yaml  # type:ignore
+import yaml
+from dfinity.ic_os_rollout import rollout_planner, week_planner
 from dfinity.ic_types import SubnetRolloutInstance
-
-from dags.rollout_ic_os_to_subnets import rollout_planner, week_planner
 
 
 class TestWeekPlanner(unittest.TestCase):
@@ -32,7 +31,7 @@ class TestWeekPlanner(unittest.TestCase):
 class TestRolloutPlanner(unittest.TestCase):
     def transform_actual(
         self,
-        inp: SubnetRolloutInstance,
+        inp: list[SubnetRolloutInstance],
     ) -> list[tuple[datetime.datetime, int]]:
         return list((i.start_at, i.subnet_num) for i in inp)
 

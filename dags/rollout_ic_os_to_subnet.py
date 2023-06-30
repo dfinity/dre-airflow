@@ -4,12 +4,14 @@ TimedPythonOperator.
 """
 
 import datetime
+from typing import cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_api import IC_NETWORKS
 
+import airflow.providers.slack.operators.slack as slack
 from airflow import DAG
 from airflow.models.param import Param
 from airflow.utils import timezone
@@ -62,26 +64,44 @@ for network_name, network in IC_NETWORKS.items():
         DAGS[network_name] = dag
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
+        create_proposal = ic_os_rollout.CreateProposalIdempotently(
+            task_id="create_proposal_if_none_exists",
+            subnet_id="{{ params.subnet_id }}",
+            git_revision="{{ params.git_revision }}",
+            simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
+            network=network,
+            retries=retries,
+        )
+        tpl = """
+Proposal %s/{{ task_instance.xcom_pull(
+  task_ids='create_proposal_if_none_exists'
+) }} is now ready for voting.  Please vote for this proposal.
+""".strip()
+        request_proposal_vote = slack.SlackAPIPostOperator(
+            task_id="request_proposal_vote",
+            channel="#eng-release-bots",
+            username="Airflow",
+            text=tpl % (network.proposal_display_url,),
+            slack_conn_id="slack.ic_os_rollout",
+        )
+        create_proposal >> request_proposal_vote
+
         (
             ic_os_sensor.CustomDateTimeSensorAsync(
                 task_id="wait_until_start_time",
                 target_time="{{ params.start_time }}",
             )
-            >> ic_os_rollout.CreateProposalIdempotently(
-                task_id="create_proposal_if_none_exists",
-                subnet_id="{{ params.subnet_id }}",
-                git_revision="{{ params.git_revision }}",
-                simulate_proposal="{{ params.simulate_proposal }}",  # type:ignore
-                network=network,
-                retries=retries,
-            )
+            >> create_proposal
             >> ic_os_sensor.WaitForProposalAcceptance(
                 task_id="wait_until_proposal_is_accepted",
                 subnet_id="{{ params.subnet_id }}",
                 git_revision="{{ params.git_revision }}",
-                simulate_proposal_acceptance="""{{
+                simulate_proposal_acceptance=cast(
+                    bool,
+                    """{{
                     params.simulate_proposal
-                }}""",  # type:ignore
+                }}""",
+                ),
                 retries=retries,
                 network=network,
             )

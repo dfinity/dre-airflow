@@ -9,12 +9,13 @@ set up a local development environment.  See below for instructions.
 
 [[_TOC_]]
 
-## Variables required for workflows
+## Variables and connections required for workflows
 
 The workflows and operators in this repository require a set of
-variables to be added to Airflow before they are executed.
-These variables are retrieved at runtime.  If a task in a workflow
-fails to retrieve a variable, the workflow perishes.
+variables and connections to be added to Airflow before they are
+executed. These variables are retrieved at runtime.  If a task in
+a workflow fails to retrieve a variable or a connection, the
+workflow perishes.
 
 Logged in as administrator through the UI, go to
 *Top menubar -> Admin -> Variables*.  Then create the following
@@ -27,7 +28,17 @@ variables:
     their vault)
   * Description: The proposal certificate for neuron 80 to be used on mainnet.
 
-Variables are only visible to administrators.
+Now go to *Top menubar -> Admin -> Connections*.  Then create the following
+connections:
+
+*
+  * Name: `slack.ic_os_rollout`
+  * Connection type: Slack API
+  * Description: The connection used for IC OS rollouts.
+  * Slack API token: ask the DRE team for the API token to post
+    to Slack, which should be in the DRE team vault.
+
+Variables and connections are only visible to administrators.
 
 ## Artifacts distributed in this repository
 
