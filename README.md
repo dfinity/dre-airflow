@@ -49,6 +49,59 @@ Variables and connections are only visible to administrators.
   * The local runner automatically makes this code available
   * [When are plugins reloaded?](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/plugins.html#plugins-loading)
 
+### Robust development of Airflow content
+
+To ensure robust DAG runs, you must be aware of the lifecycle
+these artifacts undergo, once they go past quality assurance
+and they are deployed.
+
+Delivery is discussed in detail under the *Continuous delivery*
+heading, but here is a brief summary:
+
+* You push code changes to this repository.
+* Each scheduler, worker and triggerer pod picks up, every five
+  minutes, the most up-to-date revision of this repository.
+* When a change is detected, the contents are synced in the
+  following order:
+  1. the contents of [plugins/operators](plugins/operators)
+  2. the contents of [plugins/sensors](plugins/sensors)
+  3. the contents of [shared/*](shared/)
+  4. the contents of [dags](dags)
+* DAGs are loaded, but runs are not started, when the scheduler
+  notices DAGs change.
+* The worker and triggerer pods always run the *most up to date*
+  version of the operator / sensor code you wrote, when a task
+  (sensor or operator) is started.
+
+From this, the following facts hold:
+
+* If your DAG requires operator, sensor or shared code, the
+  required code better be present and bug-free, otherwise DAG
+  load will fail in the scheduler, and you will not be able to
+  dispatch new DAG runs or control existing DAG runs (the
+  UI will show you *Broken DAG* errors onscreen).
+* While any existing DAG runs will *not* alter their graph
+  shape, any code change you make to sensors, operators and
+  shared code will *take effect immediately* on
+  currently-executing DAG runs.  This means if your operator
+  did thing X in the past, but now does thing Y, any future
+  tasks from already-scheduled DAGs will do thing Y, instead
+  of doing thing X.
+* Any broken operator, sensor, or shared code will induce
+  failures on any scheduled, deferred or future tasks that
+  will execute after you pushed.
+* Code changes must take into account that operators, sensors
+  and shared code may expect certain parameters and inter-task
+  data to be a certain type or shape.  If you have a DAG with
+  tasks `A -> B` and `B` expects `A` to return an `int` (or `B`
+  pulls `A`'s result from the XCom result table, and expects
+  the result to be an `int`), then any pushes that alter `B`
+  will cause all running DAGs to fail when task `B` launches.
+
+Be especially judicious and careful about the changes you make
+on code used by DAGs that may be running right now or may be
+scheduled in the near future.
+
 ### DAGs
 
 DAGs are workflows expressed in Python, which Airflow loads and enables
@@ -234,10 +287,11 @@ Delivery is not done through the container, but rather by using
 `git clone` within the container periodically, running as a
 sidecar in all relevant Airflow pods.
 
-The container will check which is the latest revision of the
-`main` branch of the repo containing this file, and if it differs
-from what is deployed in Airflow, it will redeploy from the latest
-`main` branch.
+In production, the syncer container will check which is the latest
+revision of the `main` branch of the repo containing this file, and
+if it differs from what is deployed in Airflow, it will redeploy from
+the latest `main` branch.  The source tree and branch can be overridden
+via an environment variable `CONTENT_SYNCER_GIT_REPO_SOURCE` on the pod.
 
 The container image version is referred to as `syncer_image` in
 [this K8s file](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/deps/afvalues.yaml).
@@ -246,7 +300,6 @@ When the container image is updated, Airflow must be
 by updating the reference to the content syncer image in the
 file linked within this paragraph, then the K8s repository
 needs to have the update merged.
-
 
 To determine if / when the artifacts have been synced, look at the
 log of the container `airflow-content-syncer` in any of the
