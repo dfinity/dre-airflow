@@ -12,9 +12,14 @@ import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 
 import airflow.models
+import airflow.providers.slack.operators.slack as slack
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
+
+FAKE_PROPOSAL_NUMBER = -123456
+SLACK_CHANNEL = "#eng-release-bots"
+SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 
 
 class RolloutParams(Templater):
@@ -78,40 +83,45 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         )
         self.simulate_proposal = simulate_proposal
 
-    def execute(self, context: Context) -> int:
+    def execute(self, context: Context) -> dict[str, int | str | bool]:
         props = ic_api.get_proposals_for_subnet_and_revision(
             subnet_id=self.subnet_id,
             git_revision=self.git_revision,
             limit=1000,
             network=self.network,
         )
-        executeds = [
-            p
-            for p in props
-            if p["status"] == ic_api.ProposalStatus.PROPOSAL_STATUS_EXECUTED
-        ]
-        opens = [
-            p
-            for p in props
-            if p["status"] == ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN
-        ]
+
+        def per_status(
+            props: list[ic_api.Proposal], status: ic_api.ProposalStatus
+        ) -> list[ic_api.Proposal]:
+            return [p for p in props if p["status"] == status]
+
+        executeds = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
+        opens = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN)
+
         if executeds:
+            url = f"{self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
             self.log.info(
-                f"Proposal"
-                f" {self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
-                f" titled {executeds[0]['title']}"
+                "Proposal " + url + f" titled {executeds[0]['title']}"
                 f" has executed.  No need to do anything."
             )
-            return int(executeds[0]["proposal_id"])
+            return {
+                "proposal_id": int(executeds[0]["proposal_id"]),
+                "proposal_url": url,
+                "needs_vote": False,
+            }
 
         if opens:
+            url = f"{self.network.proposal_display_url}/{opens[0]['proposal_id']}"
             self.log.info(
-                "Proposal"
-                " {self.network.proposal_display_url}/{opens[0]['proposal_id']}"
-                " titled {opens[0]['title']}"
+                "Proposal " + url + f" titled {opens[0]['title']}"
                 " is open.  Continuing to next step until proposal has executed."
             )
-            return int(opens[0]["proposal_id"])
+            return {
+                "proposal_id": int(opens[0]["proposal_id"]),
+                "proposal_url": url,
+                "needs_vote": True,
+            }
 
         if not props:
             self.log.info(
@@ -124,8 +134,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 self.log.info(
                     f"* {self.network.proposal_display_url}/{p['proposal_id']}"
                 )
-        if not self.simulate_proposal:
-            raise NotImplementedError
+
         self.log.info(
             f"Creating proposal for subnet ID {self.subnet_id} to "
             + f"adopt revision {self.git_revision}."
@@ -167,8 +176,54 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
             raise
 
         if self.simulate_proposal:
-            return 123456
-        proposal_number = int(
-            re.search("Ok.proposal ([0-9]+).", proc.stdout).groups(1)[0]
+            proposal_number = FAKE_PROPOSAL_NUMBER
+        else:
+            search_result = re.search("Ok.proposal ([0-9]+).", proc.stdout)
+            assert search_result, "Proposal creation failed but did not error out"
+            proposal_number = int(search_result.groups(1)[0])
+        url = f"{self.network.proposal_display_url}/{proposal_number}"
+        return {
+            "proposal_id": proposal_number,
+            "proposal_url": url,
+            "needs_vote": True,
+        }
+
+
+class RequestProposalVote(slack.SlackAPIPostOperator):
+    def __init__(
+        self,
+        source_task_id: str,
+        **kwargs: Any,
+    ) -> None:
+        self.source_task_id = source_task_id
+        text = (
+            """Proposal {{
+      task_instance.xcom_pull(
+        task_ids='"""
+            + source_task_id
+            + """',
+        map_indexes=task_instance.map_index,
+      ).proposal_url
+}} is now ready for voting.  Please vote for this proposal."""
         )
-        return proposal_number
+        slack.SlackAPIPostOperator.__init__(
+            self,
+            channel=SLACK_CHANNEL,
+            username="Airflow",
+            text=text,
+            slack_conn_id=SLACK_CONNECTION_ID,
+            **kwargs,
+        )
+
+    def execute(self, context: Context) -> None:  # type:ignore
+        proposal_creation_result = context["task_instance"].xcom_pull(
+            task_ids=self.source_task_id,
+            map_indexes=context["task_instance"].map_index,
+        )
+        if proposal_creation_result["proposal_id"] == FAKE_PROPOSAL_NUMBER:
+            self.log.info("Fake proposal.  Not requesting vote.")
+        elif not proposal_creation_result["needs_vote"]:
+            self.log.info("Proposal does not need vote.  Not requesting vote.")
+        else:
+            self.log.info("Requesting vote on proposal with text: %s", self.text)
+            slack.SlackAPIPostOperator.execute(self, context=context)  # type:ignore

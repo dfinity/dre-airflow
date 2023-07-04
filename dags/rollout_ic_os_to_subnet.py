@@ -11,7 +11,6 @@ import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_api import IC_NETWORKS
 
-import airflow.providers.slack.operators.slack as slack
 from airflow import DAG
 from airflow.models.param import Param
 from airflow.utils import timezone
@@ -72,17 +71,9 @@ for network_name, network in IC_NETWORKS.items():
             network=network,
             retries=retries,
         )
-        tpl = """
-Proposal %s/{{ task_instance.xcom_pull(
-  task_ids='create_proposal_if_none_exists'
-) }} is now ready for voting.  Please vote for this proposal.
-""".strip()
-        request_proposal_vote = slack.SlackAPIPostOperator(
+        request_proposal_vote = ic_os_rollout.RequestProposalVote(
             task_id="request_proposal_vote",
-            channel="#eng-release-bots",
-            username="Airflow",
-            text=tpl % (network.proposal_display_url,),
-            slack_conn_id="slack.ic_os_rollout",
+            source_task_id="create_proposal_if_none_exists",
         )
         create_proposal >> request_proposal_vote
 

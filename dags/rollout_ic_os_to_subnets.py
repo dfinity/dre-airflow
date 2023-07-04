@@ -15,7 +15,6 @@ from dfinity.ic_api import IC_NETWORKS
 from dfinity.ic_os_rollout import rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
-import airflow.providers.slack.operators.slack as slack
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.models.param import Param
@@ -151,19 +150,9 @@ for network_name, network in IC_NETWORKS.items():
                 retries=retries,
                 network=network,
             )
-            tpl = """
-Proposal %s/{{ task_instance.xcom_pull(
-  task_ids='per_subnet.create_proposal_if_none_exists',
-  map_indexes=task_instance.map_index
-)
-}} is now ready for voting.  Please vote for this proposal.
-""".strip()
-            request_proposal_vote = slack.SlackAPIPostOperator(
+            request_proposal_vote = ic_os_rollout.RequestProposalVote(
                 task_id="request_proposal_vote",
-                channel="#eng-release-bots",
-                username="Airflow",
-                text=tpl % (network.proposal_display_url,),
-                slack_conn_id="slack.ic_os_rollout",
+                source_task_id="per_subnet.create_proposal_if_none_exists",
             )
             create_proposal >> request_proposal_vote
 
