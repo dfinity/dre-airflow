@@ -321,8 +321,8 @@ revision of the `main` branch of the repo containing this file, and
 if it differs from what is deployed in Airflow, it will redeploy from
 the latest `main` branch.  The source tree can be overridden via an
 environment variable `CONTENT_SYNCER_GIT_REPO_SOURCE` on the pod,
-but the branch being overridable is still waiting for feature request
-https://dfinity.atlassian.net/browse/REL-2638 .
+and the branch can be overridden using variable
+`CONTENT_SYNCER_GIT_REPO_BRANCH`.
 
 The container image version is referred to as `syncer_image` in
 [this K8s file](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/deps/afvalues.yaml).
