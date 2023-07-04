@@ -71,10 +71,14 @@ heading, but here is a brief summary:
   notices DAGs change.
 * The worker and triggerer pods always run the *most up to date*
   version of the operator / sensor code you wrote, when a task
-  (sensor or operator) is started.  The way the worker / triggerer
-  runs a task is by running an entirely new process that
-  "rehydrates the DAG" with the key parameters of DAG run ID,
-  task ID, and possibly a mapped task index ID.
+  (sensor or operator) is started.
+  * The way the worker / triggerer runs a task is by running an
+    entirely new process that "rehydrates the DAG" with the key
+    parameters of DAG run ID, task ID, possibly a mapped task
+    index ID, and possibly the task data produced by previous
+    tasks already-executed by the DAG run.
+  * Concretely, this is what the worker does:
+    `Executing command in Celery: ['airflow', 'tasks', 'run', 'dag_name', 'taskgroup_name.task_name', 'run_id', '--local', '--subdir', 'DAGS_FOLDER/file_containing_dag.py', '--map-index', 'mapindex_int']`
 * DAG runs are often long-running (could be days or weeks).
 
 From this, the following facts hold:
@@ -84,6 +88,9 @@ From this, the following facts hold:
   load will fail in the scheduler, and you will not be able to
   dispatch new DAG runs or control existing DAG runs (the
   UI will show you *Broken DAG* errors onscreen).
+* Any broken operator, sensor, or shared code will induce
+  failures on any scheduled, deferred or future tasks that
+  will execute after you pushed.
 * While any existing DAG runs will *not* alter their graph
   shape, any code change you make to sensors, operators and
   shared code will *take effect immediately* on
@@ -91,9 +98,12 @@ From this, the following facts hold:
   did thing X in the past, but now does thing Y, any future
   tasks from already-scheduled DAGs will do thing Y, instead
   of doing thing X.
-* Any broken operator, sensor, or shared code will induce
-  failures on any scheduled, deferred or future tasks that
-  will execute after you pushed.
+* "Rehydration" implies that what the task does when it
+  "rehydrates" depends on all these parameters discussed above,
+  so if the code changes in ways that these parameters "mean
+  something else" or otherwise become incompatible with
+  currently-scheduled tasks, the currently-scheduled tasks
+  will fail in hard-to-debug ways.
 * Code changes must take into account that operators, sensors
   and shared code may expect certain parameters and inter-task
   data to be a certain type or shape.  If you have a DAG with
