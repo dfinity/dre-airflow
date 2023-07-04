@@ -114,7 +114,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
             # No proposal exists.
             if self.simulate_proposal_acceptance:
                 # Ah, so this is why the proposal does not exist.
-                print(
+                self.log.info(
                     f"Simulating that the nonexistent proposal to update"
                     f" {self.subnet_id} to {self.git_revision}"
                     f" has been created and accepted."
@@ -122,7 +122,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
                 return
 
             for p in props:
-                print(
+                self.log.info(
                     f"Matching proposal not open and not executed:"
                     f" {self.network.proposal_display_url}/{p}"
                 )
@@ -133,8 +133,8 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
             )
         if executeds:
             for p in executeds:
-                print(f"Proposal: {p}")
-            print(
+                self.log.info(f"Proposal: {p}")
+            self.log.info(
                 f"Proposal"
                 f" {self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
                 f" titled {executeds[0]['title']}"
@@ -144,13 +144,13 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
 
         # There is an open proposal, but not yet voted to execution.
         if self.simulate_proposal_acceptance:
-            print(
+            self.log.info(
                 f"Simulating that the open proposal to update {self.subnet_id} to"
                 f" {self.git_revision} has been created and accepted."
             )
             return
 
-        print(
+        self.log.info(
             f"Proposal"
             f" {self.network.proposal_display_url}/{opens[0]['proposal_id']}"
             f" titled {opens[0]['title']}"
@@ -164,7 +164,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
 
 class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
     def execute(self, context: Context, event: Any = None) -> None:
-        print(
+        self.log.info(
             f"Waiting for all nodes on subnet ID {self.subnet_id} have "
             + f"adopted revision {self.git_revision}."
         )
@@ -173,24 +173,23 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
             + f'ic_subnet="{self.subnet_id}"'
             + "}) by (ic_active_version, ic_subnet)"
         )
-        print(f"Querying Prometheus servers: {query}")
+        self.log.info(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
-        print(res)
         if len(res) == 1 and res[0]["metric"]["ic_active_version"] == self.git_revision:
-            print(
+            self.log.info(
                 f"All {res[0]['value']} nodes in subnet {self.subnet_id} have"
                 f" updated to revision {self.git_revision}"
             )
             return
         if res:
-            print(
+            self.log.info(
                 f"Upgrade of {self.subnet_id} to {self.git_revision}"
                 " is not complete yet.  From Prometheus:"
             )
             for r in res:
-                print(r)
+                self.log.info(r)
         else:
-            print(
+            self.log.info(
                 f"Upgrade has not begun yet -- Prometheus show no results for git"
                 f" revision {self.git_revision} on subnet {self.subnet_id}."
             )
