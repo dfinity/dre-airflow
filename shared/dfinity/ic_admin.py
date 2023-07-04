@@ -177,7 +177,55 @@ def propose_to_update_subnet_replica_version(
         )
 
 
+def get_blessed_replica_versions(
+    network: dfinity.ic_types.ICNetwork,
+    ic_admin_version: str | None = None,
+) -> list[str]:
+    listp = ic_admin(
+        "--json",
+        "get-blessed-replica-versions",
+        network=network,
+        capture_output=True,
+        check=True,
+        ic_admin_version=ic_admin_version,
+    )
+    return cast(list[str], yaml.safe_load(listp.stdout)["value"]["blessed_version_ids"])
+
+
+def is_replica_version_blessed(
+    git_revision: str,
+    network: dfinity.ic_types.ICNetwork,
+    ic_admin_version: str | None = None,
+) -> bool:
+    return git_revision.lower() in [
+        x.lower()
+        for x in get_blessed_replica_versions(
+            network=network, ic_admin_version=ic_admin_version
+        )
+    ]
+
+
 if __name__ == "__main__":
+    print(
+        is_replica_version_blessed(
+            "b314222935b7d06c70036b0b54aa80a33252d79c",
+            dfinity.ic_types.ICNetwork(
+                "https://ic0.app/",
+                "https://ic-api.internetcomputer.org/api/v3/proposals",
+                "https://dashboard.internetcomputer.org/proposal",
+                "https://dashboard.internetcomputer.org/release",
+                [
+                    "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
+                    "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+                ],
+                80,
+                "unused",
+            ),
+        )
+    )
+    import sys
+
+    sys.exit(0)
     try:
         p = propose_to_update_subnet_replica_version(
             "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",

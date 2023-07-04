@@ -116,7 +116,7 @@ for network_name, network in IC_NETWORKS.items():
             )
 
         @task_group()
-        def per_subnet(x):  # type:ignore
+        def per_subnet(subnet):  # type:ignore
             @task
             def report(x: SubnetRolloutInstance) -> datetime.datetime:
                 print(
@@ -125,7 +125,7 @@ for network_name, network in IC_NETWORKS.items():
                 )
                 return x  # type:ignore
 
-            rep = report(x)
+            rep = report(subnet)
 
             @task
             def to_start_at(x: SubnetRolloutInstance) -> str:
@@ -191,7 +191,16 @@ for network_name, network in IC_NETWORKS.items():
                 )
             )
 
-        per_subnet.expand(x=schedule())
+        sched = schedule()
+        p = per_subnet.expand(subnet=sched)
+        wait_for_blessing = ic_os_sensor.WaitForRevisionToBeBlessed(
+            task_id="wait_for_revision_to_be_blessed",
+            git_revision="{{ params.git_revision }}",
+            simulate_blessed=cast(bool, "{{ params.simulate_proposal }}"),
+            network=network,
+            retries=retries,
+        )
+        wait_for_blessing >> sched
 
 
 if __name__ == "__main__":

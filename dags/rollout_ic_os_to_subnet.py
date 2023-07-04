@@ -63,6 +63,13 @@ for network_name, network in IC_NETWORKS.items():
         DAGS[network_name] = dag
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
+        wait_for_blessing = ic_os_sensor.WaitForRevisionToBeBlessed(
+            task_id="wait_for_revision_to_be_blessed",
+            git_revision="{{ params.git_revision }}",
+            simulate_blessed=cast(bool, "{{ params.simulate_proposal }}"),
+            network=network,
+            retries=retries,
+        )
         create_proposal = ic_os_rollout.CreateProposalIdempotently(
             task_id="create_proposal_if_none_exists",
             subnet_id="{{ params.subnet_id }}",
@@ -78,7 +85,8 @@ for network_name, network in IC_NETWORKS.items():
         create_proposal >> request_proposal_vote
 
         (
-            ic_os_sensor.CustomDateTimeSensorAsync(
+            wait_for_blessing
+            >> ic_os_sensor.CustomDateTimeSensorAsync(
                 task_id="wait_until_start_time",
                 target_time="{{ params.start_time }}",
             )

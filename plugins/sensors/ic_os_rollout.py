@@ -6,6 +6,7 @@ import datetime
 import itertools
 from typing import Any
 
+import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
@@ -52,6 +53,43 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
             self.target_time = target_time
         else:
             self.target_time = target_time
+
+
+class WaitForRevisionToBeBlessed(ICRolloutSensorBaseOperator):
+    simulate_blessed: bool
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        git_revision: str,
+        simulate_blessed: bool,
+        network: ic_types.ICNetwork,
+        **kwargs: Any,
+    ):
+        ICRolloutSensorBaseOperator.__init__(
+            self,
+            task_id=task_id,
+            subnet_id="0" * 40,  # This is unnecessary here.
+            git_revision=git_revision,
+            network=network,
+            **kwargs,
+        )
+        self.simulate_blessed = simulate_blessed
+
+    def execute(self, context: Context, event: Any = None) -> None:
+        if self.simulate_blessed:
+            self.log.info(f"Pretending that {self.git_revision} is blessed.")
+            return
+
+        self.log.info(f"Waiting for revision {self.git_revision} to be blessed.")
+        if not ic_admin.is_replica_version_blessed(self.git_revision, self.network):
+            self.log.info("Revision is not yet blessed.  Waiting.")
+            self.defer(
+                trigger=TimeDeltaTrigger(datetime.timedelta(minutes=15)),
+                method_name="execute",
+            )
+        self.log.info("Revision is blessed.  We can proceed.")
 
 
 class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
