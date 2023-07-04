@@ -35,13 +35,13 @@ do
         git clean -fxd
         echo "$(date): Updating to revision $remote" >&2
         mkdir -p "$AIRFLOW_HOME/plugins"
-        rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
         for folder in plugins/operators plugins/sensors shared/*
         do
             test -d "$folder" || continue
             if [ $(basename "$folder") == "__pycache__" ] ; then continue ; fi
             rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete "$folder"/ "$AIRFLOW_HOME/plugins/$(basename "$folder")"
         done
+        rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
     fi
     if [ "$1" == "once" ] ; then exit ; fi
     sleep "$CONTENT_SYNCER_INTERVAL"
