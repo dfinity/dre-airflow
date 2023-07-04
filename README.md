@@ -71,7 +71,11 @@ heading, but here is a brief summary:
   notices DAGs change.
 * The worker and triggerer pods always run the *most up to date*
   version of the operator / sensor code you wrote, when a task
-  (sensor or operator) is started.
+  (sensor or operator) is started.  The way the worker / triggerer
+  runs a task is by running an entirely new process that
+  "rehydrates the DAG" with the key parameters of DAG run ID,
+  task ID, and possibly a mapped task index ID.
+* DAG runs are often long-running (could be days or weeks).
 
 From this, the following facts hold:
 
@@ -97,6 +101,21 @@ From this, the following facts hold:
   pulls `A`'s result from the XCom result table, and expects
   the result to be an `int`), then any pushes that alter `B`
   will cause all running DAGs to fail when task `B` launches.
+* Task IDs are very important.  If you change the task ID
+  of a task in a DAG, then any already-dispatched currently-
+  running DAG runs that will attempt to "rehydrate" tasks will
+  fail to "rehydrate" the task, and the DAG will simply be
+  marked as failed.
+* Mapped task indexes are just as important as task IDs.  If
+  e.g. your DAG currently "splits into five" parallel flows
+  (usually done with the `expand` method), each one of these
+  flows is identified by a task index, and will be "rehydrated"
+  upon execution with that task index.  Accordingly, if you
+  change a DAG such that the new rendered DAG has four or six
+  parallel flows, or the data each index maps to changes or
+  is reordered, any currently-executing DAG runs will either get
+  the wrong data, or the task will not "rehydrate" successfully
+  and the DAG will fail.
 
 Be especially judicious and careful about the changes you make
 on code used by DAGs that may be running right now or may be
