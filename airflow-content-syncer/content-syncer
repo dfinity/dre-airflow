@@ -4,6 +4,7 @@ set -e
 
 AIRFLOW_HOME=${AIRFLOW_HOME-/opt/airflow}
 CONTENT_SYNCER_GIT_REPO_FOLDER=${CONTENT_SYNCER_GIT_REPO_FOLDER-/tmp/gitrepo}
+CONTENT_SYNCER_GIT_REPO_BRANCH=${CONTENT_SYNCER_GIT_REPO_BRANCH-main}
 CONTENT_SYNCER_INTERVAL=${CONTENT_SYNCER_INTERVAL-300}
 
 if [ -z "$CONTENT_SYNCER_GIT_REPO_SOURCE" ]
@@ -27,11 +28,11 @@ do
         sleep "$CONTENT_SYNCER_INTERVAL"
         continue
     }
-    local=$(git show-ref heads/main | cut -d " " -f 1)
-    remote=$(git show-ref origin/main | cut -d " " -f 1)
+    local=$(git show-ref heads/"$CONTENT_SYNCER_GIT_REPO_BRANCH" | cut -d " " -f 1)
+    remote=$(git show-ref origin/"$CONTENT_SYNCER_GIT_REPO_BRANCH" | cut -d " " -f 1)
     if [ "$local" != "$remote" ] || [ "$1" == "once" ]
     then
-        git reset --hard origin/main
+        git reset --hard origin/"$CONTENT_SYNCER_GIT_REPO_BRANCH"
         git clean -fxd
         echo "$(date): Updating to revision $remote" >&2
         mkdir -p "$AIRFLOW_HOME/plugins"
