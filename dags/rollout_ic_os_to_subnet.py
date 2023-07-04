@@ -27,7 +27,7 @@ for network_name, network in IC_NETWORKS.items():
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(hours=12),
-        tags=["rollout", "DRE"],
+        tags=["rollout", "DRE", "IC OS"],
         params={
             "subnet_id": Param(
                 "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",

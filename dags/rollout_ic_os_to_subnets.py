@@ -70,7 +70,7 @@ for network_name, network in IC_NETWORKS.items():
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=14),
-        tags=["testing"],
+        tags=["rollout", "DRE", "IC OS"],
         params={
             "git_revision": Param(
                 "0000000000000000000000000000000000000000",
