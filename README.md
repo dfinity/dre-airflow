@@ -247,10 +247,13 @@ by updating the reference to the content syncer image in the
 file linked within this paragraph, then the K8s repository
 needs to have the update merged.
 
+
 To determine if / when the artifacts have been synced, look at the
 log of the container `airflow-content-syncer` in any of the
 triggerer, scheduler or worker pods of the Airflow deployment (in
-namespace `airflow`).
+namespace `airflow`).  **The artifacts are not delivered
+simultaneously to all production pods.**  There might be a divergence
+of up to 5 minutes between pods syncing.
 
 *TBD*: test these artifacts!
 

@@ -20,6 +20,3 @@ with DAG(
     test_task = test_operator.TestTask(
         task_id="create_proposal_if_none_exists",
     )
-    test_task2 = test_operator.TestTask2(
-        task_id="create_proposal_if_none_exists_2",
-    )
