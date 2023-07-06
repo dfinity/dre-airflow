@@ -132,28 +132,8 @@ for network_name, network in IC_NETWORKS.items():
                 )
                 return x  # type:ignore
 
-            rep = report(subnet)
-            create_proposal = ic_os_rollout.CreateProposalIdempotently(
-                task_id="create_proposal_if_none_exists",
-                subnet_id="""{{
-                    task_instance.xcom_pull(
-                        task_ids='per_subnet.report',
-                        map_indexes=task_instance.map_index,
-                    ).subnet_id
-                }}""",
-                git_revision="{{ params.git_revision }}",
-                simulate_proposal=cast(bool, "{{ params.simulate }}"),
-                retries=retries,
-                network=network,
-            )
-            request_proposal_vote = ic_os_rollout.RequestProposalVote(
-                task_id="request_proposal_vote",
-                source_task_id="per_subnet.create_proposal_if_none_exists",
-            )
-            rep >> create_proposal >> request_proposal_vote
-
             (
-                rep
+                report(subnet)
                 >> ic_os_sensor.CustomDateTimeSensorAsync(
                     task_id="wait_until_start_time",
                     target_time="""{{
@@ -163,31 +143,53 @@ for network_name, network in IC_NETWORKS.items():
                         ).start_at
                     }}""",
                 )
-                >> create_proposal
-                >> ic_os_sensor.WaitForProposalAcceptance(
-                    task_id="wait_until_proposal_is_accepted",
+                >> ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
+                    task_id="wait_until_no_alerts_on_any_subnet",
+                    alert_task_id="per_subnet.wait_until_no_alerts",
+                )
+                >> ic_os_rollout.CreateProposalIdempotently(
+                    task_id="create_proposal_if_none_exists",
                     subnet_id="""{{
-                        task_instance.xcom_pull(
-                            task_ids='per_subnet.report',
-                            map_indexes=task_instance.map_index,
-                        ).subnet_id
-                    }}""",
+                    task_instance.xcom_pull(
+                        task_ids='per_subnet.report',
+                        map_indexes=task_instance.map_index,
+                    ).subnet_id
+                }}""",
                     git_revision="{{ params.git_revision }}",
-                    simulate_proposal_acceptance=cast(
-                        bool,
-                        """{{ params.simulate }}""",
-                    ),
+                    simulate_proposal=cast(bool, "{{ params.simulate }}"),
                     retries=retries,
                     network=network,
+                )
+                >> (
+                    ic_os_rollout.RequestProposalVote(
+                        task_id="request_proposal_vote",
+                        source_task_id="per_subnet.create_proposal_if_none_exists",
+                    ),
+                    ic_os_sensor.WaitForProposalAcceptance(
+                        task_id="wait_until_proposal_is_accepted",
+                        subnet_id="""{{
+                                task_instance.xcom_pull(
+                                    task_ids='per_subnet.report',
+                                    map_indexes=task_instance.map_index,
+                                ).subnet_id
+                            }}""",
+                        git_revision="{{ params.git_revision }}",
+                        simulate_proposal_acceptance=cast(
+                            bool,
+                            """{{ params.simulate }}""",
+                        ),
+                        retries=retries,
+                        network=network,
+                    ),
                 )
                 >> ic_os_sensor.WaitForReplicaRevisionUpdated(
                     task_id="wait_for_replica_revision",
                     subnet_id="""{{
-                        task_instance.xcom_pull(
-                            task_ids='per_subnet.report',
-                            map_indexes=task_instance.map_index,
-                        ).subnet_id
-                    }}""",
+                                task_instance.xcom_pull(
+                                    task_ids='per_subnet.report',
+                                    map_indexes=task_instance.map_index,
+                                ).subnet_id
+                            }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
@@ -195,15 +197,15 @@ for network_name, network in IC_NETWORKS.items():
                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
                     task_id="wait_until_no_alerts",
                     subnet_id="""{{
-                        task_instance.xcom_pull(
-                            task_ids='per_subnet.report',
-                            map_indexes=task_instance.map_index,
-                        ).subnet_id
-                    }}""",
+                                task_instance.xcom_pull(
+                                    task_ids='per_subnet.report',
+                                    map_indexes=task_instance.map_index,
+                                ).subnet_id
+                            }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
-                )
+                ),
             )
 
         sched = schedule()

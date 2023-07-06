@@ -4,7 +4,7 @@ IC-OS rollout sensors.
 
 import datetime
 import itertools
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
@@ -16,6 +16,11 @@ from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.triggers.temporal import TimeDeltaTrigger
 from airflow.utils.context import Context
+
+
+class SubnetAlertStatus(TypedDict):
+    subnet_id: str
+    alerts: bool
 
 
 class ICRolloutSensorBaseOperator(RolloutParams, BaseSensorOperator):
@@ -259,11 +264,59 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             self.log.info("There are still Prometheus alerts on the subnet:")
             for r in res:
                 self.log.info(r)
+            # This value is used in task WaitUntilNoAlertsOnAnySubnet.
+            self.xcom_push(
+                context=context,
+                key="alerts",
+                value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=True),
+            )
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
             )
         self.log.info(f"There are no more alerts on subnet ID {self.subnet_id}.")
+        self.xcom_push(
+            context=context,
+            key="alerts",
+            value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=True),
+        )
+
+
+class WaitUntilNoAlertsOnAnySubnet(BaseSensorOperator):
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        alert_task_id: str,
+        **kwargs: Any,
+    ):
+        BaseSensorOperator.__init__(self, task_id=task_id, **kwargs)
+        self.alert_task_id = alert_task_id
+
+    def execute(self, context: Context, event: Any = None) -> None:
+        """
+        Wait until all concurrently-running wait-for-alerts have reported there
+        are no more alerts.
+        """
+        # This value comes from task WaitUntilNoAlertsOnSubnet.
+        known_alerts = cast(
+            list[SubnetAlertStatus],
+            self.xcom_pull(context, task_ids=[self.alert_task_id], key="alerts"),
+        )
+        for r in known_alerts:
+            if r["alerts"]:
+                self.log.warning(f"There are alerts on subnet {r['subnet_id']}.")
+        alerts_ongoing = any(r["alerts"] for r in known_alerts)
+        if alerts_ongoing:
+            self.log.warning(
+                "Alerts are ongoing in various subnets."
+                "  It is not safe to proceed yet"
+            )
+            self.defer(
+                trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
+                method_name="execute",
+            )
+        self.log.info("There are no alerts on any subnet.  Safe to proceed.")
 
 
 if __name__ == "__main__":
@@ -277,11 +330,3 @@ if __name__ == "__main__":
             network=ic_api.IC_NETWORKS["mainnet"],
         )
         kn.execute({})
-    elif sys.argv[1] == "wait_until_no_alerts_on_subnet":
-        km = WaitUntilNoAlertsOnSubnet(
-            task_id="x",
-            subnet_id=sys.argv[2],
-            git_revision=sys.argv[3],
-            network=ic_api.IC_NETWORKS["mainnet"],
-        )
-        km.execute({})
