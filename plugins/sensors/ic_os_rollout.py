@@ -280,7 +280,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         self.xcom_push(
             context=context,
             key="alerts",
-            value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=True),
+            value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=False),
         )
 
 
