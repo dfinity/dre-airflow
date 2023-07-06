@@ -329,6 +329,16 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
         dag_id = ti.dag_id
         dag_run = ti.dag_run
         url = f"https://airflow.ch1-rel1.dfinity.network/dags/{dag_id}/grid?dag_run_id={dag_run}"
+
+        def post(text: str) -> None:
+            slack.SlackAPIPostOperator(  # type:ignore
+                channel=SLACK_CHANNEL,
+                username="Airflow",
+                text=text,
+                slack_conn_id=SLACK_CONNECTION_ID,
+                task_id="who_cares",
+            ).execute()
+
         subnets_with_alerts = [r["subnet_id"] for r in known_alerts if r["alerts"]]
         if subnets_with_alerts:
             subnets_text = (
@@ -346,19 +356,14 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
             )
             self.log.warning(text)
             if not self.xcom_pull(context=context, key="messaged"):
-                slack.SlackAPIPostOperator(  # type:ignore
-                    channel=SLACK_CHANNEL,
-                    username="Airflow",
-                    text=text,
-                    slack_conn_id=SLACK_CONNECTION_ID,
-                    task_id="who_cares",
-                ).execute()
+                post(text)
                 self.xcom_push(context=context, key="messaged", value=True)
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
             )
         self.log.info("There are no alerts on any subnet.  Safe to proceed.")
+        post(f"Alerts have subsided.  Rollout of {self.subnet_id} can proceed.")
 
 
 if __name__ == "__main__":
