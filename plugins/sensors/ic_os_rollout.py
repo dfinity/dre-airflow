@@ -13,6 +13,7 @@ import dfinity.prom_api as prom
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 from operators.ic_os_rollout import RolloutParams
 
+import airflow.models.taskinstance
 import airflow.providers.slack.operators.slack as slack
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
@@ -284,15 +285,34 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         )
 
 
-class WaitUntilNoAlertsOnAnySubnet(BaseSensorOperator):
+class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
+    alert_task_id: str
+
     def __init__(
         self,
         *,
         task_id: str,
+        subnet_id: str,
+        git_revision: str,
+        network: ic_types.ICNetwork,
         alert_task_id: str,
         **kwargs: Any,
     ):
-        BaseSensorOperator.__init__(self, task_id=task_id, **kwargs)
+        """
+        Initializes the waiter.
+
+        Args:
+        * simulate_proposal: if enabled, elide the check of whether the proposal
+          has been approved or not, and pretend it has been.
+        """
+        ICRolloutSensorBaseOperator.__init__(
+            self,
+            task_id=task_id,
+            subnet_id=subnet_id,
+            git_revision=git_revision,
+            network=network,
+            **kwargs,
+        )
         self.alert_task_id = alert_task_id
 
     def execute(self, context: Context, event: Any = None) -> None:
@@ -305,6 +325,10 @@ class WaitUntilNoAlertsOnAnySubnet(BaseSensorOperator):
             list[SubnetAlertStatus],
             self.xcom_pull(context, task_ids=[self.alert_task_id], key="alerts"),
         )
+        ti = cast(airflow.models.taskinstance.TaskInstance, context["ti"])
+        dag_id = ti.dag_id
+        dag_run = ti.dag_run
+        url = f"https://airflow.ch1-rel1.dfinity.network/dags/{dag_id}/grid?dag_run_id={dag_run}"
         subnets_with_alerts = [r["subnet_id"] for r in known_alerts if r["alerts"]]
         if subnets_with_alerts:
             subnets_text = (
@@ -313,8 +337,9 @@ class WaitUntilNoAlertsOnAnySubnet(BaseSensorOperator):
                 else "subnets " + ", ".join(subnets_with_alerts)
             )
             text = (
-                f"Alerts on {subnets_text} keep the rollout stuck.  "
-                "Please see the <https://www.notion.so/dfinityorg/Weekly-IC-"
+                f"While rolling out {self.subnet_id}, alerts on {subnets_text} keep"
+                f" <{url}|the rollout> stuck.  Please see the"
+                " <https://www.notion.so/dfinityorg/Weekly-IC-"
                 "OS-release-using-Airflow-1e3c3274ba4d406ebe222aa6eb569e3a#2f"
                 "7b92466c554aeea1dc0f535f665ee1|Weekly release runbook> in"
                 " Notion for more information."

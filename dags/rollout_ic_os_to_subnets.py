@@ -145,8 +145,16 @@ for network_name, network in IC_NETWORKS.items():
                 )
                 >> ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
                     task_id="wait_until_no_alerts_on_any_subnet",
+                    subnet_id="""{{
+                        task_instance.xcom_pull(
+                            task_ids='per_subnet.report',
+                            map_indexes=task_instance.map_index,
+                        ).subnet_id
+                    }}""",
+                    git_revision="{{ params.git_revision }}",
                     alert_task_id="per_subnet.wait_until_no_alerts",
                     retries=retries,
+                    network=network,
                 )
                 >> ic_os_rollout.CreateProposalIdempotently(
                     task_id="create_proposal_if_none_exists",
