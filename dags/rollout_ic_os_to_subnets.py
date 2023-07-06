@@ -193,7 +193,7 @@ for network_name, network in IC_NETWORKS.items():
                     network=network,
                 )
                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
-                    task_id="wait_until_no_alerts_on_subnets",
+                    task_id="wait_until_no_alerts",
                     subnet_id="""{{
                         task_instance.xcom_pull(
                             task_ids='per_subnet.report',
