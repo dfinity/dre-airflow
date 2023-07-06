@@ -51,7 +51,7 @@ for network_name, network in IC_NETWORKS.items():
                 title="Start rollout at",
                 description="Please select a date and time to roll out this subnet",
             ),
-            "simulate_proposal": Param(
+            "simulate": Param(
                 True,
                 type="boolean",
                 title="Simulate proposal",
@@ -63,10 +63,10 @@ for network_name, network in IC_NETWORKS.items():
         DAGS[network_name] = dag
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
-        wait_for_blessing = ic_os_sensor.WaitForRevisionToBeBlessed(
-            task_id="wait_for_revision_to_be_blessed",
+        wait_for_election = ic_os_sensor.WaitForRevisionToBeElected(
+            task_id="wait_for_revision_to_be_elected",
             git_revision="{{ params.git_revision }}",
-            simulate_blessed=cast(bool, "{{ params.simulate_proposal }}"),
+            simulate_elected=cast(bool, "{{ params.simulate }}"),
             network=network,
             retries=retries,
         )
@@ -74,7 +74,7 @@ for network_name, network in IC_NETWORKS.items():
             task_id="create_proposal_if_none_exists",
             subnet_id="{{ params.subnet_id }}",
             git_revision="{{ params.git_revision }}",
-            simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
+            simulate_proposal=cast(bool, "{{ params.simulate }}"),
             network=network,
             retries=retries,
         )
@@ -85,7 +85,7 @@ for network_name, network in IC_NETWORKS.items():
         create_proposal >> request_proposal_vote
 
         (
-            wait_for_blessing
+            wait_for_election
             >> ic_os_sensor.CustomDateTimeSensorAsync(
                 task_id="wait_until_start_time",
                 target_time="{{ params.start_time }}",
@@ -98,7 +98,7 @@ for network_name, network in IC_NETWORKS.items():
                 simulate_proposal_acceptance=cast(
                     bool,
                     """{{
-                    params.simulate_proposal
+                    params.simulate
                 }}""",
                 ),
                 retries=retries,

@@ -55,15 +55,15 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
             self.target_time = target_time
 
 
-class WaitForRevisionToBeBlessed(ICRolloutSensorBaseOperator):
-    simulate_blessed: bool
+class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
+    simulate_elected: bool
 
     def __init__(
         self,
         *,
         task_id: str,
         git_revision: str,
-        simulate_blessed: bool,
+        simulate_elected: bool,
         network: ic_types.ICNetwork,
         **kwargs: Any,
     ):
@@ -75,21 +75,21 @@ class WaitForRevisionToBeBlessed(ICRolloutSensorBaseOperator):
             network=network,
             **kwargs,
         )
-        self.simulate_blessed = simulate_blessed
+        self.simulate_elected = simulate_elected
 
     def execute(self, context: Context, event: Any = None) -> None:
-        if self.simulate_blessed:
-            self.log.info(f"Pretending that {self.git_revision} is blessed.")
+        if self.simulate_elected:
+            self.log.info(f"Pretending that {self.git_revision} is elected.")
             return
 
-        self.log.info(f"Waiting for revision {self.git_revision} to be blessed.")
+        self.log.info(f"Waiting for revision {self.git_revision} to be elected.")
         if not ic_admin.is_replica_version_blessed(self.git_revision, self.network):
-            self.log.info("Revision is not yet blessed.  Waiting.")
+            self.log.info("Revision is not yet elected.  Waiting.")
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=15)),
                 method_name="execute",
             )
-        self.log.info("Revision is blessed.  We can proceed.")
+        self.log.info("Revision is elected.  We can proceed.")
 
 
 class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):

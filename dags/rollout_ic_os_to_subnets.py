@@ -86,10 +86,10 @@ for network_name, network in IC_NETWORKS.items():
                 description="A YAML-formatted string describing the rollout schedule",
                 custom_html_form=_PLAN_FORM,
             ),
-            "simulate_proposal": Param(
+            "simulate": Param(
                 True,
                 type="boolean",
-                title="Simulate proposal",
+                title="Simulate",
                 description="If enabled (the default), the update proposal will be"
                 " simulated but not created, and its acceptance will be simulated too",
             ),
@@ -110,10 +110,17 @@ for network_name, network in IC_NETWORKS.items():
             if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
                 kwargs["ic_admin_version"] = ic_admin_version
             subnet_list_source = functools.partial(get_subnet_list, **kwargs)
-            return rollout_planner(
+            plan = rollout_planner(
                 plan_data_structure,
                 subnet_list_source=subnet_list_source,
             )
+            plan = list(sorted(plan, key=lambda x: x.start_at))
+            for n, item in enumerate(plan):
+                print(
+                    f"{n}: Subnet {item.subnet_id} ({item.subnet_num}) will start"
+                    f" to be rolled out at {item.start_at}"
+                )
+            return plan
 
         @task_group()
         def per_subnet(subnet):  # type:ignore
@@ -146,7 +153,7 @@ for network_name, network in IC_NETWORKS.items():
                 task_id="create_proposal_if_none_exists",
                 subnet_id=ts,
                 git_revision="{{ params.git_revision }}",
-                simulate_proposal=cast(bool, "{{ params.simulate_proposal }}"),
+                simulate_proposal=cast(bool, "{{ params.simulate }}"),
                 retries=retries,
                 network=network,
             )
@@ -169,7 +176,7 @@ for network_name, network in IC_NETWORKS.items():
                     simulate_proposal_acceptance=cast(
                         bool,
                         """{{
-                        params.simulate_proposal
+                        params.simulate
                     }}""",
                     ),
                     retries=retries,
@@ -193,14 +200,14 @@ for network_name, network in IC_NETWORKS.items():
 
         sched = schedule()
         p = per_subnet.expand(subnet=sched)
-        wait_for_blessing = ic_os_sensor.WaitForRevisionToBeBlessed(
-            task_id="wait_for_revision_to_be_blessed",
+        wait_for_election = ic_os_sensor.WaitForRevisionToBeElected(
+            task_id="wait_for_revision_to_be_elected",
             git_revision="{{ params.git_revision }}",
-            simulate_blessed=cast(bool, "{{ params.simulate_proposal }}"),
+            simulate_elected=cast(bool, "{{ params.simulate }}"),
             network=network,
             retries=retries,
         )
-        wait_for_blessing >> sched
+        wait_for_election >> sched
 
 
 if __name__ == "__main__":
