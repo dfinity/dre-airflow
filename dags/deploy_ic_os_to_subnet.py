@@ -22,7 +22,7 @@ if not now.endswith("Z"):
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
     with DAG(
-        dag_id=f"rollout_ic_os_to_{network_name}_subnet",
+        dag_id=f"deploy_ic_os_to_{network_name}_subnet",
         schedule=None,
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
@@ -112,7 +112,7 @@ for network_name, network in IC_NETWORKS.items():
                 network=network,
             )
             >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
-                task_id="wait_until_no_alerts_on_subnets",
+                task_id="wait_until_no_alerts",
                 subnet_id="{{ params.subnet_id }}",
                 git_revision="{{ params.git_revision }}",
                 retries=retries,
