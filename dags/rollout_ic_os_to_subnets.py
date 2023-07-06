@@ -133,25 +133,14 @@ for network_name, network in IC_NETWORKS.items():
                 return x  # type:ignore
 
             rep = report(subnet)
-
-            @task
-            def to_start_at(x: SubnetRolloutInstance) -> str:
-                """
-                Adapt SRI start time to str, expected by CustomDateTimeSensorAsync.\
-                """
-                return str(x.start_at)
-
-            td = to_start_at(rep)
-
-            @task
-            def to_subnet_id(x: SubnetRolloutInstance) -> str:
-                return x.subnet_id
-
-            ts = to_subnet_id(rep)
-
             create_proposal = ic_os_rollout.CreateProposalIdempotently(
                 task_id="create_proposal_if_none_exists",
-                subnet_id=ts,
+                subnet_id="""{{
+                    task_instance.xcom_pull(
+                        task_ids='per_subnet.report',
+                        map_indexes=task_instance.map_index,
+                    ).subnet_id
+                }}""",
                 git_revision="{{ params.git_revision }}",
                 simulate_proposal=cast(bool, "{{ params.simulate }}"),
                 retries=retries,
@@ -161,37 +150,56 @@ for network_name, network in IC_NETWORKS.items():
                 task_id="request_proposal_vote",
                 source_task_id="per_subnet.create_proposal_if_none_exists",
             )
-            create_proposal >> request_proposal_vote
+            rep >> create_proposal >> request_proposal_vote
 
             (
-                ic_os_sensor.CustomDateTimeSensorAsync(
+                rep
+                >> ic_os_sensor.CustomDateTimeSensorAsync(
                     task_id="wait_until_start_time",
-                    target_time=td,
+                    target_time="""{{
+                        task_instance.xcom_pull(
+                            task_ids='per_subnet.report',
+                            map_indexes=task_instance.map_index,
+                        ).start_at
+                    }}""",
                 )
                 >> create_proposal
                 >> ic_os_sensor.WaitForProposalAcceptance(
                     task_id="wait_until_proposal_is_accepted",
-                    subnet_id=ts,
+                    subnet_id="""{{
+                        task_instance.xcom_pull(
+                            task_ids='per_subnet.report',
+                            map_indexes=task_instance.map_index,
+                        ).subnet_id
+                    }}""",
                     git_revision="{{ params.git_revision }}",
                     simulate_proposal_acceptance=cast(
                         bool,
-                        """{{
-                        params.simulate
-                    }}""",
+                        """{{ params.simulate }}""",
                     ),
                     retries=retries,
                     network=network,
                 )
                 >> ic_os_sensor.WaitForReplicaRevisionUpdated(
                     task_id="wait_for_replica_revision",
-                    subnet_id=ts,
+                    subnet_id="""{{
+                        task_instance.xcom_pull(
+                            task_ids='per_subnet.report',
+                            map_indexes=task_instance.map_index,
+                        ).subnet_id
+                    }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
                 )
                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
                     task_id="wait_until_no_alerts_on_subnets",
-                    subnet_id=ts,
+                    subnet_id="""{{
+                        task_instance.xcom_pull(
+                            task_ids='per_subnet.report',
+                            map_indexes=task_instance.map_index,
+                        ).subnet_id
+                    }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
