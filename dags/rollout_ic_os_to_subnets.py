@@ -146,6 +146,7 @@ for network_name, network in IC_NETWORKS.items():
                 >> ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
                     task_id="wait_until_no_alerts_on_any_subnet",
                     alert_task_id="per_subnet.wait_until_no_alerts",
+                    retries=retries,
                 )
                 >> ic_os_rollout.CreateProposalIdempotently(
                     task_id="create_proposal_if_none_exists",
@@ -164,6 +165,7 @@ for network_name, network in IC_NETWORKS.items():
                     ic_os_rollout.RequestProposalVote(
                         task_id="request_proposal_vote",
                         source_task_id="per_subnet.create_proposal_if_none_exists",
+                        retries=retries,
                     ),
                     ic_os_sensor.WaitForProposalAcceptance(
                         task_id="wait_until_proposal_is_accepted",

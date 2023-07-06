@@ -10,6 +10,7 @@ from typing import Any, Sequence
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
+from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 
 import airflow.models
 import airflow.providers.slack.operators.slack as slack
@@ -18,8 +19,6 @@ from airflow.template.templater import Templater
 from airflow.utils.context import Context
 
 FAKE_PROPOSAL_NUMBER = -123456
-SLACK_CHANNEL = "#eng-release-bots"
-SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 
 
 class RolloutParams(Templater):

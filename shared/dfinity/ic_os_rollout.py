@@ -7,6 +7,9 @@ from typing import Any, Callable
 
 from dfinity.ic_types import SubnetRolloutInstance
 
+SLACK_CHANNEL = "#eng-release-bots"
+SLACK_CONNECTION_ID = "slack.ic_os_rollout"
+
 
 def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.datetime]:
     if now is None:

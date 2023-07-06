@@ -10,8 +10,10 @@ import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
+from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 from operators.ic_os_rollout import RolloutParams
 
+import airflow.providers.slack.operators.slack as slack
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.triggers.temporal import TimeDeltaTrigger
@@ -303,15 +305,30 @@ class WaitUntilNoAlertsOnAnySubnet(BaseSensorOperator):
             list[SubnetAlertStatus],
             self.xcom_pull(context, task_ids=[self.alert_task_id], key="alerts"),
         )
-        for r in known_alerts:
-            if r["alerts"]:
-                self.log.warning(f"There are alerts on subnet {r['subnet_id']}.")
-        alerts_ongoing = any(r["alerts"] for r in known_alerts)
-        if alerts_ongoing:
-            self.log.warning(
-                "Alerts are ongoing in various subnets."
-                "  It is not safe to proceed yet"
+        subnets_with_alerts = [r["subnet_id"] for r in known_alerts if r["alerts"]]
+        if subnets_with_alerts:
+            subnets_text = (
+                "subnet " + subnets_with_alerts[0]
+                if len(subnets_with_alerts) == 1
+                else "subnets " + ", ".join(subnets_with_alerts)
             )
+            text = (
+                f"Alerts on {subnets_text} keep the rollout stuck.  "
+                "Please see the <https://www.notion.so/dfinityorg/Weekly-IC-"
+                "OS-release-using-Airflow-1e3c3274ba4d406ebe222aa6eb569e3a#2f"
+                "7b92466c554aeea1dc0f535f665ee1|Weekly release runbook> in"
+                " Notion for more information."
+            )
+            self.log.warning(text)
+            if not self.xcom_pull(context=context, key="messaged"):
+                slack.SlackAPIPostOperator(  # type:ignore
+                    channel=SLACK_CHANNEL,
+                    username="Airflow",
+                    text=text,
+                    slack_conn_id=SLACK_CONNECTION_ID,
+                    task_id="who_cares",
+                ).execute()
+                self.xcom_push(context=context, key="messaged", value=True)
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
