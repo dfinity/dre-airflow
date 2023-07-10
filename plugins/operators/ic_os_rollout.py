@@ -212,14 +212,21 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
     ) -> None:
         self.source_task_id = source_task_id
         text = (
-            """Proposal {{
+            """Proposal <{{
       task_instance.xcom_pull(
         task_ids='"""
             + source_task_id
             + """',
         map_indexes=task_instance.map_index,
       ).proposal_url
-}} is now ready for voting.  Please vote for this proposal."""
+}}|{{
+      task_instance.xcom_pull(
+        task_ids='"""
+            + source_task_id
+            + """',
+        map_indexes=task_instance.map_index,
+      ).proposal_id
+}}> is now ready for voting.  Please vote for this proposal."""
         )
         slack.SlackAPIPostOperator.__init__(
             self,
