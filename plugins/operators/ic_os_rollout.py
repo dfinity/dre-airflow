@@ -191,8 +191,10 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
         if self.simulate_proposal:
             proposal_number = FAKE_PROPOSAL_NUMBER
         else:
-            search_result = re.search("Ok.proposal ([0-9]+).", proc.stdout)
-            assert search_result, "Proposal creation failed but did not error out"
+            search_result = re.search("^proposal ([0-9]+)$", proc.stdout)
+            assert (
+                search_result
+            ), "Proposal creation did not create a proposal number yet it did not bomb."
             proposal_number = int(search_result.groups(1)[0])
         url = f"{self.network.proposal_display_url}/{proposal_number}"
         return {

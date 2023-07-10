@@ -147,7 +147,7 @@ def propose_to_update_subnet_replica_version(
     )
     proposal_summary = (
         f"""Update subnet {subnet_id} to replica version """
-        f"""[{git_revision}]("{network.release_display_url}/{git_revision})
+        f"""[{git_revision}]({network.release_display_url}/{git_revision})
 """.strip()
     )
     with tempfile.NamedTemporaryFile(
