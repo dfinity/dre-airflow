@@ -191,7 +191,7 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
         if self.simulate_proposal:
             proposal_number = FAKE_PROPOSAL_NUMBER
         else:
-            search_result = re.search("^proposal ([0-9]+)$", proc.stdout)
+            search_result = re.search("^proposal ([0-9]+)$", proc.stdout, re.MULTILINE)
             assert (
                 search_result
             ), "Proposal creation did not create a proposal number yet it did not bomb."
