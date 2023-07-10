@@ -376,6 +376,12 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
                 task_id="who_cares",
             ).execute()
 
+        def messaged() -> bool:
+            return bool(self.xcom_pull(context=context, key="messaged"))
+
+        def remember_messaging() -> None:
+            self.xcom_push(context=context, key="messaged", value=True)
+
         subnets_with_alerts = [r["subnet_id"] for r in known_alerts if r["alerts"]]
         if subnets_with_alerts:
             subnets_text = (
@@ -392,15 +398,15 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
                 " Notion for more information."
             )
             self.log.warning(text)
-            if not self.xcom_pull(context=context, key="messaged"):
+            if not messaged():
                 post(text)
-                self.xcom_push(context=context, key="messaged", value=True)
+                remember_messaging()
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
             )
         self.log.info("There are no alerts on any subnet.  Safe to proceed.")
-        if self.xcom_pull(context=context, key="messaged"):
+        if messaged():
             post(f"Alerts have subsided.  Rollout of {self.subnet_id} can proceed.")
 
 
