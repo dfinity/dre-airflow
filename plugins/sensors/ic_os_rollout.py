@@ -400,7 +400,8 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
                 method_name="execute",
             )
         self.log.info("There are no alerts on any subnet.  Safe to proceed.")
-        post(f"Alerts have subsided.  Rollout of {self.subnet_id} can proceed.")
+        if self.xcom_pull(context=context, key="messaged"):
+            post(f"Alerts have subsided.  Rollout of {self.subnet_id} can proceed.")
 
 
 if __name__ == "__main__":
