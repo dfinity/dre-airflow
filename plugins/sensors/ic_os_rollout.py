@@ -208,10 +208,16 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
                     f" {self.network.proposal_display_url}/{p}"
                 )
 
-            raise RuntimeError(
+            self.log.info(
                 "No proposal is either open or executed to update"
-                f" {self.subnet_id} to revision {self.git_revision}"
+                f" {self.subnet_id} to revision {self.git_revision}."
+                "Waiting one minute until a proposal appears executed."
             )
+            self.defer(
+                trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
+                method_name="execute",
+            )
+
         if executeds:
             for p in executeds:
                 self.log.info(f"Proposal: {p}")
