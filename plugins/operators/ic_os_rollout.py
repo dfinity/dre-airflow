@@ -98,6 +98,9 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         executeds = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
         opens = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN)
 
+        if self.simulate_proposal:
+            self.log.info(f"simulate_proposal={self.simulate_proposal}")
+
         if executeds:
             url = f"{self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
             self.log.info(

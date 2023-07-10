@@ -63,46 +63,39 @@ for network_name, network in IC_NETWORKS.items():
         DAGS[network_name] = dag
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
-        wait_for_election = ic_os_sensor.WaitForRevisionToBeElected(
-            task_id="wait_for_revision_to_be_elected",
-            git_revision="{{ params.git_revision }}",
-            simulate_elected=cast(bool, "{{ params.simulate }}"),
-            network=network,
-            retries=retries,
-        )
-        create_proposal = ic_os_rollout.CreateProposalIdempotently(
-            task_id="create_proposal_if_none_exists",
-            subnet_id="{{ params.subnet_id }}",
-            git_revision="{{ params.git_revision }}",
-            simulate_proposal=cast(bool, "{{ params.simulate }}"),
-            network=network,
-            retries=retries,
-        )
-        request_proposal_vote = ic_os_rollout.RequestProposalVote(
-            task_id="request_proposal_vote",
-            source_task_id="create_proposal_if_none_exists",
-        )
-        create_proposal >> request_proposal_vote
-
         (
-            wait_for_election
+            ic_os_sensor.WaitForRevisionToBeElected(
+                task_id="wait_for_revision_to_be_elected",
+                git_revision="{{ params.git_revision }}",
+                simulate_elected=cast(bool, "{{ params.simulate }}"),
+                network=network,
+                retries=retries,
+            )
             >> ic_os_sensor.CustomDateTimeSensorAsync(
                 task_id="wait_until_start_time",
                 target_time="{{ params.start_time }}",
             )
-            >> create_proposal
-            >> ic_os_sensor.WaitForProposalAcceptance(
-                task_id="wait_until_proposal_is_accepted",
+            >> ic_os_rollout.CreateProposalIdempotently(
+                task_id="create_proposal_if_none_exists",
                 subnet_id="{{ params.subnet_id }}",
                 git_revision="{{ params.git_revision }}",
-                simulate_proposal_acceptance=cast(
-                    bool,
-                    """{{
-                    params.simulate
-                }}""",
-                ),
-                retries=retries,
+                simulate_proposal=cast(bool, "{{ params.simulate }}"),
                 network=network,
+                retries=retries,
+            )
+            >> (
+                ic_os_rollout.RequestProposalVote(
+                    task_id="request_proposal_vote",
+                    source_task_id="create_proposal_if_none_exists",
+                ),
+                ic_os_sensor.WaitForProposalAcceptance(
+                    task_id="wait_until_proposal_is_accepted",
+                    subnet_id="{{ params.subnet_id }}",
+                    git_revision="{{ params.git_revision }}",
+                    simulate_proposal_acceptance=cast(bool, "{{ params.simulate }}"),
+                    retries=retries,
+                    network=network,
+                ),
             )
             >> ic_os_sensor.WaitForReplicaRevisionUpdated(
                 task_id="wait_for_replica_revision",

@@ -64,6 +64,14 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
 
 
 class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
+    template_fields = tuple(
+        itertools.chain.from_iterable(
+            (
+                ICRolloutSensorBaseOperator.template_fields,
+                ("simulate_elected",),
+            )
+        )
+    )
     simulate_elected: bool
 
     def __init__(
@@ -87,7 +95,10 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
 
     def execute(self, context: Context, event: Any = None) -> None:
         if self.simulate_elected:
-            self.log.info(f"Pretending that {self.git_revision} is elected.")
+            self.log.info(
+                f"Pretending that {self.git_revision} is elected"
+                f" (simulate_elected={self.simulate_elected})."
+            )
             return
 
         self.log.info(f"Waiting for revision {self.git_revision} to be elected.")
@@ -164,6 +175,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
                     f"Simulating that the nonexistent proposal to update"
                     f" {self.subnet_id} to {self.git_revision}"
                     f" has been created and accepted."
+                    f" (simulate_acceptance={self.simulate_proposal_acceptance})"
                 )
                 return
 
@@ -300,10 +312,6 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
     ):
         """
         Initializes the waiter.
-
-        Args:
-        * simulate_proposal: if enabled, elide the check of whether the proposal
-          has been approved or not, and pretend it has been.
         """
         ICRolloutSensorBaseOperator.__init__(
             self,
