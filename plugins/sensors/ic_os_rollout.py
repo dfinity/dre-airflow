@@ -10,6 +10,7 @@ import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
+import jinja2
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 from operators.ic_os_rollout import RolloutParams
 
@@ -93,6 +94,16 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
         )
         self.simulate_elected = simulate_elected
 
+    def render_template_fields(
+        self,
+        context: Context,
+        jinja_env: jinja2.Environment | None = None,
+    ) -> None:
+        # Ensure our simulate variable is a bool, since
+        # Jinja rendering makes this a string.
+        super().render_template_fields(context=context, jinja_env=jinja_env)
+        self.simulate_elected = cast(str, self.simulate_elected) == "True"
+
     def execute(self, context: Context, event: Any = None) -> None:
         if self.simulate_elected:
             self.log.info(
@@ -148,6 +159,18 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
             **kwargs,
         )
         self.simulate_proposal_acceptance = simulate_proposal_acceptance
+
+    def render_template_fields(
+        self,
+        context: Context,
+        jinja_env: jinja2.Environment | None = None,
+    ) -> None:
+        # Ensure our simulate variable is a bool, since
+        # Jinja rendering makes this a string.
+        super().render_template_fields(context=context, jinja_env=jinja_env)
+        self.simulate_proposal_acceptance = (
+            cast(str, self.simulate_proposal_acceptance) == "True"
+        )
 
     def execute(self, context: Context, event: Any = None) -> None:
         props = ic_api.get_proposals_for_subnet_and_revision(
