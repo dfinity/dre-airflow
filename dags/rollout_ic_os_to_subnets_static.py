@@ -115,7 +115,7 @@ for network_name, network in IC_NETWORKS.items():
                                 target_time="""{{
                                                 task_instance.xcom_pull(
                                                     task_ids='execution_day_hr'
-                                                )['"""rollout_day"""']['"""rollout_hour"""']
+                                                )['""" + rollout_day + """']['""" + rollout_hour + """']
                                             }}""",
                                 timeout=24*60*60,
                                 poke_interval = 10,
