@@ -93,7 +93,6 @@ def rollout_planner(
                 res.append(SubnetRolloutInstance(date_and_time, sn, subnet_list[sn]))
     return res
 
-
 def rollout_planner_static(
     plan: dict[str, dict[str, List[int]]],
     subnet_list_source: Callable[[], list[str]],
