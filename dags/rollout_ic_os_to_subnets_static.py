@@ -103,7 +103,7 @@ for network_name, network in IC_NETWORKS.items():
         for rollout_day, daily_plan in rollout_schedule.items():
             for rollout_hour, subnets in daily_plan.items():
                 time_sensor = DateTimeSensorAsync(
-                                task_id=f'wait_for_{rollout_day}_at_{rollout_hour}', 
+                                task_id=f'wait_for_{rollout_day}_at_{rollout_hour.replace(":", "_")}', 
                                 target_time="""{{
                                                 task_instance.xcom_pull(
                                                     task_ids='compute_rollout_plan'
