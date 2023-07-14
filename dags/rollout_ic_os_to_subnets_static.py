@@ -86,6 +86,7 @@ for network_name, network in IC_NETWORKS.items():
         task_plan = list()
 
         kwargs = {"network": network}
+        kwargs["ic_admin_version"] = '5058a1326d45303de376cd1a1dc5303fa27cdb07'
         subnet_list_source = functools.partial(get_subnet_list, **kwargs)
         plan: Dict[str, List[SubnetRolloutInstance]] = rollout_planner_static(
             rollout_schedule,
