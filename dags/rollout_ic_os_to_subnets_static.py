@@ -62,11 +62,8 @@ _PLAN_FORM = """
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
 
-    today_rollout = datetime.datetime.now()
-    today_rollout_str = today_rollout.strftime("%A_%B_%d__%Y_%I_%M_%p")
-
     with DAG(
-        dag_id=f"rollout_ic_os_to_{network_name}_subnets_{today_rollout_str}",
+        dag_id=f"rollout_ic_os_to_{network_name}_subnets_static",
         schedule=None,
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
