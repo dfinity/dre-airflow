@@ -17,6 +17,7 @@ from airflow.sensors.weekday import DayOfWeekSensor
 from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
+import logging
 
 from airflow import DAG
 from airflow.decorators import task, task_group
@@ -87,8 +88,7 @@ for network_name, network in IC_NETWORKS.items():
         rollout_plan = list()
 
         def get_current_day_hr(rollout_schedule, **context):
-            print(type(context['execution_date']))
-            print(context['execution_date'])
+            logging.info(f"CONTEXT: {context}")
             res = dict()
             for rollout_day, daily_plan in rollout_schedule.items():
                 res[rollout_day] = dict()
@@ -110,13 +110,10 @@ for network_name, network in IC_NETWORKS.items():
 
         for rollout_day, daily_plan in rollout_schedule.items():
             for rollout_hour, subnets in daily_plan.items():
-                time_sensor = DateTimeSensorAsync(
-                                task_id=f'wait_for_{rollout_day}_{rollout_hour.split(":")[0]}', 
-                                target_time="""{{
-                                                task_instance.xcom_pull(
-                                                    task_ids='execution_day_hr'
-                                                )['""" + rollout_day + """']['""" + rollout_hour + """']
-                                            }}""",
+                time_sensor = ic_os_sensor.ICDateTimeSensorAsync(
+                                task_id=f'wait_for_{rollout_day}_{rollout_hour.split(":")[0]}',
+                                day = rollout_day,
+                                hour = rollout_hour,
                                 timeout=24*60*60,
                                 poke_interval = 10,
                                 mode="reschedule",
