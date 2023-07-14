@@ -120,6 +120,7 @@ def rollout_planner_static(
                 ) from exc
             date_and_time = date.replace(hour=time.hour, minute=time.minute)
             date_and_time_str = date_and_time.strftime("%A_%B_%d__%Y_%I_%M_%S_%p")
+            res[date_and_time_str] = list()
 
             for n, sn in enumerate(subnet_numbers):
                 if isinstance(sn, str):
