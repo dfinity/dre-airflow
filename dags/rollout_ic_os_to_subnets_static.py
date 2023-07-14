@@ -31,8 +31,6 @@ rollout_schedule = {
     },
     'Tuesday': {
         '7:00': [15, 18],
-        '9:00': [1, 5, 2],
-        '11:00': [4, 9, 34]
     },
     'Wednesday': {
         '7:00': [3, 7, 11],
@@ -116,7 +114,7 @@ for network_name, network in IC_NETWORKS.items():
                                 dag=dag
                                 )
                 rollout_plan.append(time_sensor)
-                
+
                 # for subnet_id in subnets:
                 #     with TaskGroup(f"ROLLOUT_{subnet_id}") as deploy:
                 #                 (ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
