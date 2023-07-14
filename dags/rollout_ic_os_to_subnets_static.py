@@ -11,7 +11,7 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
-from dfinity.ic_os_rollout import rollout_planner
+from dfinity.ic_os_rollout import rollout_planner_dag_run
 from dfinity.ic_types import SubnetRolloutInstance
 from airflow.sensors.weekday import DayOfWeekSensor
 from airflow.sensors.date_time import DateTimeSensorAsync
@@ -86,28 +86,16 @@ for network_name, network in IC_NETWORKS.items():
         retries = int(86400 / 60 / 5)  # one day worth of retries
         rollout_plan = list()
 
-        def get_current_day_hr(rollout_schedule, **context):
-            print(type(context['execution_date']))
-            print(context['execution_date'])
-            logging.info(f"CONTEXT: {context}")
-            res = dict()
-            for rollout_day, daily_plan in rollout_schedule.items():
-                res[rollout_day] = dict()
-                for rollout_hour in daily_plan.keys():
-                    res[rollout_day][rollout_hour] = 'c'
-
-            return res
-
-        execution_day_hr = PythonOperator(
-            task_id='execution_day_hr',
-            python_callable=get_current_day_hr,
+        dag_run_plan = PythonOperator(
+            task_id='compute_rollout_plan',
+            python_callable=rollout_planner_dag_run,
             op_kwargs={
                 'rollout_schedule': rollout_schedule
             },
-            provide_context=True,
             dag=dag
         )
-        rollout_plan.append(execution_day_hr)
+
+        rollout_plan.append(dag_run_plan)
 
         for rollout_day, daily_plan in rollout_schedule.items():
             for rollout_hour, subnets in daily_plan.items():
@@ -115,7 +103,7 @@ for network_name, network in IC_NETWORKS.items():
                                 task_id=f'wait_for_{rollout_day}_{rollout_hour.split(":")[0]}', 
                                 target_time="""{{
                                                 task_instance.xcom_pull(
-                                                    task_ids='execution_day_hr'
+                                                    task_ids='compute_rollout_plan'
                                                 )['""" + rollout_day + """']['""" + rollout_hour +"""']
                                             }}""",
                                 timeout=24*60*60,
