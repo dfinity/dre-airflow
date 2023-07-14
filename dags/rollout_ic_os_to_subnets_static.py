@@ -45,6 +45,9 @@ rollout_schedule = {
         '9:00': [25, 29, 19],
         '11:00': [17, 32, 35],
         '13:00': [30, 31, 14]
+    },
+    'Monday next week': {
+        '11:00': [0]
     }
 }
 
@@ -100,7 +103,7 @@ for network_name, network in IC_NETWORKS.items():
         for rollout_day, daily_plan in rollout_schedule.items():
             for rollout_hour, subnets in daily_plan.items():
                 time_sensor = DateTimeSensorAsync(
-                                task_id=f'wait_for_{rollout_day}_{rollout_hour.split(":")[0]}', 
+                                task_id=f'wait_for_{rollout_day}_at_{rollout_hour}', 
                                 target_time="""{{
                                                 task_instance.xcom_pull(
                                                     task_ids='compute_rollout_plan'

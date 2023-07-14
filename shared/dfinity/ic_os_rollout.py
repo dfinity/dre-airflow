@@ -129,6 +129,5 @@ def rollout_planner_dag_run(
         for hour, dt in hours.items():
             dt_str = dt.strftime("%A_%B_%d__%Y_%I_%M_%S_%p")
             logging.info(f"DAY: {day} HOUR: {hour} MAPPED TO {dt_str}")
-
-
+            
     return res
