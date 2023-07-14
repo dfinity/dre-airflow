@@ -31,6 +31,8 @@ rollout_schedule = {
     },
     'Tuesday': {
         '7:00': [15, 18],
+        '9:00': [1, 5, 2],
+        '11:00': [4, 9, 34]
     },
     'Wednesday': {
         '7:00': [3, 7, 11],
@@ -59,8 +61,12 @@ _PLAN_FORM = """
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
+
+    today_rollout = datetime.datetime.now()
+    today_rollout_str = today_rollout.strftime("%A_%B_%d__%Y_%I_%M_%p")
+
     with DAG(
-        dag_id=f"rollout_ic_os_to_{network_name}_subnets_static",
+        dag_id=f"rollout_ic_os_to_{network_name}_subnets_{today_rollout_str}",
         schedule=None,
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
@@ -114,52 +120,52 @@ for network_name, network in IC_NETWORKS.items():
                                 dag=dag
                                 )
                 rollout_plan.append(time_sensor)
-
-                # for subnet_id in subnets:
-                #     with TaskGroup(f"ROLLOUT_{subnet_id}") as deploy:
-                #                 (ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
-                #                     task_id=f"wait_until_no_alerts_on_any_subnet",
-                #                     subnet_id=subnet_id,
-                #                     git_revision="{{ params.git_revision }}",
-                #                     alert_task_id="per_subnet.wait_until_no_alerts",
-                #                     retries=retries,
-                #                     network=network,
-                #                 )
-                #                 >> ic_os_rollout.CreateProposalIdempotently(
-                #                     task_id=f"create_proposal_if_none_exists",
-                #                     subnet_id=subnet_id,
-                #                     git_revision="{{ params.git_revision }}",
-                #                     simulate_proposal=cast(bool, "{{ params.simulate }}"),
-                #                     retries=retries,
-                #                     network=network,
-                #                 )
-                #                 >> ic_os_sensor.WaitForProposalAcceptance(
-                #                         task_id=f"wait_until_proposal_is_accepted",
-                #                         subnet_id=subnet_id,
-                #                         git_revision="{{ params.git_revision }}",
-                #                         simulate_proposal_acceptance=cast(
-                #                             bool,
-                #                             """{{ params.simulate }}""",
-                #                         ),
-                #                         retries=retries,
-                #                         network=network,
-                #                     )
-                #                 >> ic_os_sensor.WaitForReplicaRevisionUpdated(
-                #                     task_id=f"wait_for_replica_revision",
-                #                     subnet_id=subnet_id,
-                #                     git_revision="{{ params.git_revision }}",
-                #                     retries=retries,
-                #                     network=network,
-                #                 )
-                #                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
-                #                     task_id=f"wait_until_no_alerts",
-                #                     subnet_id=subnet_id,
-                #                     git_revision="{{ params.git_revision }}",
-                #                     retries=retries,
-                #                     network=network,
-                #                 ),
-                #             )
-                #     rollout_plan.append(deploy)
+                
+                for subnet_id in subnets:
+                    with TaskGroup(f"ROLLOUT_{subnet_id}") as deploy:
+                                (ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
+                                    task_id=f"wait_until_no_alerts_on_any_subnet",
+                                    subnet_id=subnet_id,
+                                    git_revision="{{ params.git_revision }}",
+                                    alert_task_id="per_subnet.wait_until_no_alerts",
+                                    retries=retries,
+                                    network=network,
+                                )
+                                >> ic_os_rollout.CreateProposalIdempotently(
+                                    task_id=f"create_proposal_if_none_exists",
+                                    subnet_id=subnet_id,
+                                    git_revision="{{ params.git_revision }}",
+                                    simulate_proposal=cast(bool, "{{ params.simulate }}"),
+                                    retries=retries,
+                                    network=network,
+                                )
+                                >> ic_os_sensor.WaitForProposalAcceptance(
+                                        task_id=f"wait_until_proposal_is_accepted",
+                                        subnet_id=subnet_id,
+                                        git_revision="{{ params.git_revision }}",
+                                        simulate_proposal_acceptance=cast(
+                                            bool,
+                                            """{{ params.simulate }}""",
+                                        ),
+                                        retries=retries,
+                                        network=network,
+                                    )
+                                >> ic_os_sensor.WaitForReplicaRevisionUpdated(
+                                    task_id=f"wait_for_replica_revision",
+                                    subnet_id=subnet_id,
+                                    git_revision="{{ params.git_revision }}",
+                                    retries=retries,
+                                    network=network,
+                                )
+                                >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
+                                    task_id=f"wait_until_no_alerts",
+                                    subnet_id=subnet_id,
+                                    git_revision="{{ params.git_revision }}",
+                                    retries=retries,
+                                    network=network,
+                                ),
+                            )
+                    rollout_plan.append(deploy)
 
     for task_id in range(len(rollout_plan)-1):
         rollout_plan[task_id] >> rollout_plan[task_id+1]
