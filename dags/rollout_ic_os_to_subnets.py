@@ -1,5 +1,7 @@
 """
 Rollout IC os to subnets in batches.
+
+Each batch runs in parallel.
 """
 
 import datetime
