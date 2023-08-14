@@ -94,6 +94,10 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         self.simulate_proposal = cast(str, self.simulate_proposal) == "True"
 
     def execute(self, context: Context) -> dict[str, int | str | bool]:
+        if isinstance(self.git_revision, int):
+            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
+            self.git_revision = "{:040}".format(self.git_revision)
+
         props = ic_api.get_proposals_for_subnet_and_revision(
             subnet_id=self.subnet_id,
             git_revision=self.git_revision,
@@ -208,6 +212,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
     def __init__(
         self,
         source_task_id: str,
+        _ignored: Any = None,
         **kwargs: Any,
     ) -> None:
         self.source_task_id = source_task_id

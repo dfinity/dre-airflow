@@ -1,10 +1,11 @@
 """
-Rollout IC os to subnets.
+Rollout IC os to subnets in batches.
 """
 
 import datetime
 import functools
-from typing import cast
+import itertools
+from typing import Any, cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
@@ -16,8 +17,13 @@ from dfinity.ic_os_rollout import rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
 from airflow import DAG
-from airflow.decorators import task, task_group
+from airflow.decorators import task
 from airflow.models.param import Param
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import BranchPythonOperator
+from airflow.utils.task_group import TaskGroup
+
+BATCH_COUNT: int = 30
 
 DEFAULT_PLANS: dict[str, str] = {
     "mainnet": """
@@ -71,6 +77,7 @@ for network_name, network in IC_NETWORKS.items():
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=14),
         tags=["rollout", "DRE", "IC OS"],
+        render_template_as_native_obj=True,
         params={
             "git_revision": Param(
                 "0000000000000000000000000000000000000000",
@@ -103,10 +110,10 @@ for network_name, network in IC_NETWORKS.items():
             plan_data_structure = yaml.safe_load(
                 context["task"].render_template("{{ params.plan }}", context)
             )
-            ic_admin_version = yaml.safe_load(
+            ic_admin_version = "{:040}".format(
                 context["task"].render_template("{{ params.git_revision }}", context)
             )
-            kwargs = {"network": network}
+            kwargs: dict[str, Any] = {"network": network}
             if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
                 kwargs["ic_admin_version"] = ic_admin_version
             subnet_list_source = functools.partial(get_subnet_list, **kwargs)
@@ -114,112 +121,144 @@ for network_name, network in IC_NETWORKS.items():
                 plan_data_structure,
                 subnet_list_source=subnet_list_source,
             )
-            plan = list(sorted(plan, key=lambda x: x.start_at))
-            for n, item in enumerate(plan):
-                print(
-                    f"{n}: Subnet {item.subnet_id} ({item.subnet_num}) will start"
-                    f" to be rolled out at {item.start_at}"
-                )
-            return plan
+            batches: dict[
+                str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
+            ] = {}
+            for n, (group_key, members) in enumerate(
+                itertools.groupby(plan, key=lambda x: x.start_at)
+            ):
+                print(f"Batch {n+1}:")
+                batches[str(n)] = (group_key, [])
+                for item in members:
+                    batches[str(n)][1].append(item)
+                    print(
+                        f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
+                        f" to be rolled out at {item.start_at}."
+                    )
+            return batches
 
-        @task_group()
-        def per_subnet(subnet):  # type:ignore
+        sched = schedule()
+
+        def make_me_a_batch(batch_name: str, batch: int) -> None:
+            def work_to_do(
+                current_batch_index: int,
+                batch_name: str,
+                batches: dict[
+                    str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
+                ],
+            ) -> list[str]:
+                this_batch = batches.get(str(current_batch_index))
+                if this_batch:
+                    print("This batch will roll out the following subnets:")
+                    for item in this_batch[1]:
+                        print(
+                            f"    Subnet {item.subnet_id} ({item.subnet_num}) will"
+                            f" start to be rolled out at {item.start_at}."
+                        )
+                    return [f"batch_{batch_name}.wait_until_start_time"]
+                print("This batch does nothing.")
+                return [f"batch_{batch_name}.empty_batch"]
+
             @task
-            def report(x: SubnetRolloutInstance) -> datetime.datetime:
-                print(
-                    f"Plan for subnet {x.subnet_num} with ID {x.subnet_id}"
-                    f" starts at {x.start_at}"
+            def collect_batch_subnets(
+                current_batch_index: int, **kwargs: Any
+            ) -> list[str]:
+                subnets = cast(
+                    list[SubnetRolloutInstance],
+                    (
+                        kwargs["ti"]
+                        .xcom_pull("schedule")
+                        .get(str(current_batch_index))[1]
+                    ),
                 )
-                return x  # type:ignore
+                return [s.subnet_id for s in subnets]
+
+            proceed = collect_batch_subnets(batch)
+
+            batch_has_work = BranchPythonOperator(
+                task_id="batch_has_work",
+                python_callable=work_to_do,
+                op_args=[
+                    batch,
+                    batch_name,
+                    """{{
+                            task_instance.xcom_pull(task_ids='schedule')
+                        }}""",
+                ],
+            )
+
+            empty_batch = EmptyOperator(task_id="empty_batch")
+
+            wait_until_start_time = ic_os_sensor.CustomDateTimeSensorAsync(
+                task_id="wait_until_start_time",
+                target_time="""{{
+                            ti.xcom_pull(task_ids='schedule')["%d"][0] | string
+                        }}"""
+                % batch,
+            )
+
+            batch_has_work >> wait_until_start_time >> proceed
+
+            join = EmptyOperator(
+                task_id="join",
+                trigger_rule="none_failed_min_one_success",
+            )
 
             (
-                report(subnet)
-                >> ic_os_sensor.CustomDateTimeSensorAsync(
-                    task_id="wait_until_start_time",
-                    target_time="""{{
-                        task_instance.xcom_pull(
-                            task_ids='per_subnet.report',
-                            map_indexes=task_instance.map_index,
-                        ).start_at
-                    }}""",
-                )
-                >> ic_os_sensor.WaitUntilNoAlertsOnAnySubnet(
-                    task_id="wait_until_no_alerts_on_any_subnet",
-                    subnet_id="""{{
-                        task_instance.xcom_pull(
-                            task_ids='per_subnet.report',
-                            map_indexes=task_instance.map_index,
-                        ).subnet_id
-                    }}""",
-                    git_revision="{{ params.git_revision }}",
-                    alert_task_id="per_subnet.wait_until_no_alerts",
-                    retries=retries,
-                    network=network,
-                )
-                >> ic_os_rollout.CreateProposalIdempotently(
+                proceed
+                >> ic_os_rollout.CreateProposalIdempotently.partial(
                     task_id="create_proposal_if_none_exists",
-                    subnet_id="""{{
-                    task_instance.xcom_pull(
-                        task_ids='per_subnet.report',
-                        map_indexes=task_instance.map_index,
-                    ).subnet_id
-                }}""",
                     git_revision="{{ params.git_revision }}",
                     simulate_proposal=cast(bool, "{{ params.simulate }}"),
                     retries=retries,
                     network=network,
-                )
+                ).expand(subnet_id=proceed)
                 >> (
-                    ic_os_rollout.RequestProposalVote(
+                    ic_os_rollout.RequestProposalVote.partial(
                         task_id="request_proposal_vote",
-                        source_task_id="per_subnet.create_proposal_if_none_exists",
+                        source_task_id=f"batch_{batch_name}.create_proposal_if_none_exists",
                         retries=retries,
-                    ),
-                    ic_os_sensor.WaitForProposalAcceptance(
-                        task_id="wait_until_proposal_is_accepted",
-                        subnet_id="""{{
-                                task_instance.xcom_pull(
-                                    task_ids='per_subnet.report',
-                                    map_indexes=task_instance.map_index,
-                                ).subnet_id
-                            }}""",
-                        git_revision="{{ params.git_revision }}",
-                        simulate_proposal_acceptance=cast(
-                            bool,
-                            """{{ params.simulate }}""",
-                        ),
-                        retries=retries,
-                        network=network,
+                    ).expand(_ignored=proceed),
+                    (
+                        ic_os_sensor.WaitForProposalAcceptance.partial(
+                            task_id="wait_until_proposal_is_accepted",
+                            git_revision="{{ params.git_revision }}",
+                            simulate_proposal_acceptance=cast(
+                                bool, """{{ params.simulate }}"""
+                            ),
+                            retries=retries,
+                            network=network,
+                        ).expand(subnet_id=proceed)
                     ),
                 )
-                >> ic_os_sensor.WaitForReplicaRevisionUpdated(
+                >> ic_os_sensor.WaitForReplicaRevisionUpdated.partial(
                     task_id="wait_for_replica_revision",
-                    subnet_id="""{{
-                                task_instance.xcom_pull(
-                                    task_ids='per_subnet.report',
-                                    map_indexes=task_instance.map_index,
-                                ).subnet_id
-                            }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
-                )
-                >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
+                ).expand(subnet_id=proceed)
+                >> ic_os_sensor.WaitUntilNoAlertsOnSubnet.partial(
                     task_id="wait_until_no_alerts",
-                    subnet_id="""{{
-                                task_instance.xcom_pull(
-                                    task_ids='per_subnet.report',
-                                    map_indexes=task_instance.map_index,
-                                ).subnet_id
-                            }}""",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
-                ),
+                ).expand(subnet_id=proceed)
+                >> join
             )
 
-        sched = schedule()
-        p = per_subnet.expand(subnet=sched)
+            batch_has_work >> empty_batch >> join
+
+        last_task_group = None
+        for batch in range(BATCH_COUNT):
+            batch_name = str(batch + 1)
+            with TaskGroup(group_id=f"batch_{batch_name}") as group:
+                make_me_a_batch(batch_name, batch)
+                if last_task_group is not None:
+                    last_task_group >> group
+                else:
+                    sched >> group
+                last_task_group = group
+
         wait_for_election = ic_os_sensor.WaitForRevisionToBeElected(
             task_id="wait_for_revision_to_be_elected",
             git_revision="{{ params.git_revision }}",
@@ -227,6 +266,7 @@ for network_name, network in IC_NETWORKS.items():
             network=network,
             retries=retries,
         )
+
         wait_for_election >> sched
 
 

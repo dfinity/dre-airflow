@@ -105,6 +105,10 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
         self.simulate_elected = cast(str, self.simulate_elected) == "True"
 
     def execute(self, context: Context, event: Any = None) -> None:
+        if isinstance(self.git_revision, int):
+            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
+            self.git_revision = "{:040}".format(self.git_revision)
+
         if self.simulate_elected:
             self.log.info(
                 f"Pretending that {self.git_revision} is elected"
@@ -173,6 +177,10 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         )
 
     def execute(self, context: Context, event: Any = None) -> None:
+        if isinstance(self.git_revision, int):
+            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
+            self.git_revision = "{:040}".format(self.git_revision)
+
         props = ic_api.get_proposals_for_subnet_and_revision(
             subnet_id=self.subnet_id,
             git_revision=self.git_revision,
