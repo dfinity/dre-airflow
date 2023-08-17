@@ -217,21 +217,21 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
     ) -> None:
         self.source_task_id = source_task_id
         text = (
-            """Proposal <{{
-      task_instance.xcom_pull(
-        task_ids='"""
-            + source_task_id
-            + """',
-        map_indexes=task_instance.map_index,
-      ).proposal_url
-}}|{{
-      task_instance.xcom_pull(
-        task_ids='"""
-            + source_task_id
-            + """',
-        map_indexes=task_instance.map_index,
-      ).proposal_id
-}}> is now ready for voting.  Please vote for this proposal."""
+            (
+                """Proposal <{{
+                    task_instance.xcom_pull(
+                        task_ids='%(source_task_id)s',
+                        map_indexes=task_instance.map_index,
+                    ).proposal_url
+                }}|{{
+                    task_instance.xcom_pull(
+                        task_ids='%(source_task_id)s',
+                        map_indexes=task_instance.map_index,
+                    ).proposal_id
+                }}> is now up for voting.  The weekly IC OS release operator"
+                " must vote for this proposal ASAP using release neuron 80."""
+            )
+            % locals()
         )
         slack.SlackAPIPostOperator.__init__(
             self,
