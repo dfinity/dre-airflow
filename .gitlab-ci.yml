@@ -70,9 +70,9 @@ release-airflow:
       changes:
         - airflow-customized/Dockerfile
   variables:
-    AF_APP: airflow-customized
-    AF_CONTEXT_PATH: airflow-customized
-    AF_DOCKERFILE_PATH: airflow-customized/Dockerfile
+    APP: airflow-customized
+    CONTEXT_PATH: airflow-customized
+    DOCKERFILE_PATH: airflow-customized/Dockerfile
   script:
     - "[[ -z ${APP+x} ]] && echo 'APP is not defined' && exit 1"
     - "[[ -z ${CONTEXT_PATH+x} ]] && echo 'CONTEXT_PATH is not defined' && exit 1"
