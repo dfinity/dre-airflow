@@ -18,12 +18,7 @@ default:
 stages:
   - release
 
-variables:
-  APP: airflow-content-syncer
-  CONTEXT_PATH: airflow-content-syncer
-  DOCKERFILE_PATH: airflow-content-syncer/Dockerfile
-
-release:
+release-content:
   stage: release
   tags:
     - ubuntu
@@ -33,8 +28,51 @@ release:
     entrypoint: [""]
   rules:
     - if: $CI_COMMIT_BRANCH
-      exists:
+      changes:
         - airflow-content-syncer/Dockerfile
+        - airflow-content-syncer/content-syncer
+  variables:
+    APP: airflow-content-syncer
+    CONTEXT_PATH: airflow-content-syncer
+    DOCKERFILE_PATH: airflow-content-syncer/Dockerfile
+  script:
+    - "[[ -z ${APP+x} ]] && echo 'APP is not defined' && exit 1"
+    - "[[ -z ${CONTEXT_PATH+x} ]] && echo 'CONTEXT_PATH is not defined' && exit 1"
+    - "[[ -z ${DOCKERFILE_PATH+x} ]] && echo 'DOCKERFILE_PATH is not defined' && exit 1"
+    - |
+      if [ "${CI_COMMIT_BRANCH}" != "${CI_DEFAULT_BRANCH}" ]; then
+        export KANIKO_NO_PUSH_FLAG="--no-push"
+      else
+        export KANIKO_NO_PUSH_FLAG=""
+      fi
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}/${CONTEXT_PATH}"
+      --dockerfile "${DOCKERFILE_PATH}"
+      --cache
+      --cache-repo "${CI_REGISTRY_IMAGE}/${APP}/cache"
+      --destination "${CI_REGISTRY_IMAGE}/${APP}:latest"
+      --destination "${CI_REGISTRY_IMAGE}/${APP}:${CI_COMMIT_SHA}"
+      --snapshotMode=redo
+      --reproducible
+      $KANIKO_NO_PUSH_FLAG
+    - mkdir -p /workspace # Fails without creating this folder due to https://gitlab.com/gitlab-org/gitlab-runner/-/issues/29587/
+
+release-airflow:
+  stage: release
+  tags:
+    - ubuntu
+    - dfinity-shared
+  image:
+    name: gcr.io/kaniko-project/executor:debug # debug is required for gitlab as it needs to run a shell inside.
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - airflow-customized/Dockerfile
+  variables:
+    AF_APP: airflow-customized
+    AF_CONTEXT_PATH: airflow-customized
+    AF_DOCKERFILE_PATH: airflow-customized/Dockerfile
   script:
     - "[[ -z ${APP+x} ]] && echo 'APP is not defined' && exit 1"
     - "[[ -z ${CONTEXT_PATH+x} ]] && echo 'CONTEXT_PATH is not defined' && exit 1"
