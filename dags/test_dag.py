@@ -17,6 +17,17 @@ with DAG(
     dagrun_timeout=datetime.timedelta(days=14),
     tags=["testing"],
 ) as dag:
-    test_task = test_operator.TestTask(
-        task_id="create_proposal_if_none_exists",
+    (
+        test_operator.TestTask(
+            task_id="task_1",
+        )
+        >> test_operator.TestTask(
+            task_id="task_2",
+        )
+        >> test_operator.TestTask(
+            task_id="task_3",
+        )
+        >> test_operator.TestTask(
+            task_id="task_4",
+        )
     )
