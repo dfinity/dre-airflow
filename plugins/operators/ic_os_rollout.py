@@ -10,6 +10,7 @@ from typing import Any, Sequence, cast
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
+import dfinity.prom_api as prom
 import jinja2
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 
@@ -115,6 +116,26 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
 
         if self.simulate_proposal:
             self.log.info(f"simulate_proposal={self.simulate_proposal}")
+
+        try:
+            res = int(
+                prom.query_prometheus_servers(
+                    self.network.prometheus_urls,
+                    "sum(ic_replica_info{"
+                    f'ic_subnet="{self.subnet_id}"'
+                    "}) by (ic_subnet)",
+                )[0]["value"]
+            )
+            self.log.info("Remembering current replica count (%s)...", res)
+            self.xcom_push(
+                context=context,
+                key="replica_count",
+                value=res,
+            )
+        except IndexError:
+            raise RuntimeError(
+                f"No replicas have been found with subnet {self.subnet_id}"
+            )
 
         if executeds:
             url = f"{self.network.proposal_display_url}/{executeds[0]['proposal_id']}"

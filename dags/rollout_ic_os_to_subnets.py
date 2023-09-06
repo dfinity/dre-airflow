@@ -238,6 +238,14 @@ for network_name, network in IC_NETWORKS.items():
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
+                    expected_replica_count="""{{
+                        ti.xcom_pull(
+                            task_ids='batch_%(batch_name)s."""
+                    % locals()
+                    + """create_proposal_if_none_exists',
+                            key='replica_count'
+                        ) | int
+                    }}""",
                 ).expand(subnet_id=proceed)
                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet.partial(
                     task_id="wait_until_no_alerts",
