@@ -305,10 +305,17 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         30 minutes to ensure they are resolved.
         """
         self.log.info(f"Waiting for alerts on subnet ID {self.subnet_id} to subside.")
-        query = (
-            'sum_over_time(ALERTS{ic_subnet="%(subnet_id)s",'
-            % ({"subnet_id": self.subnet_id})
-            + ' severity="page"}[30m])'
+        query = """
+            sum_over_time(
+                ALERTS{
+                    ic_subnet="%(subnet_id)s",
+                    alertname!="PrometheusTargetMissing",
+                    severity="page"
+                }[30m]
+            )""" % (
+            {
+                "subnet_id": self.subnet_id,
+            }
         )
         self.log.info(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
