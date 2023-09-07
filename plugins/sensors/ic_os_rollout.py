@@ -258,11 +258,44 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
 
 
 class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
+    template_fields = tuple(
+        itertools.chain.from_iterable(
+            (
+                ICRolloutSensorBaseOperator.template_fields,
+                ("expected_replica_count",),
+            )
+        )
+    )
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        subnet_id: str,
+        git_revision: str,
+        network: ic_types.ICNetwork,
+        expected_replica_count: int,
+        **kwargs: Any,
+    ):
+        """
+        Initializes the waiter.
+        """
+        ICRolloutSensorBaseOperator.__init__(
+            self,
+            task_id=task_id,
+            subnet_id=subnet_id,
+            git_revision=git_revision,
+            network=network,
+            **kwargs,
+        )
+        self.expected_replica_count = expected_replica_count
+
     def execute(self, context: Context, event: Any = None) -> None:
         self.log.info(
             f"Waiting for all nodes on subnet ID {self.subnet_id} have "
             + f"adopted revision {self.git_revision}."
         )
+
         query = (
             "sum(ic_replica_info{"
             + f'ic_subnet="{self.subnet_id}"'
@@ -271,11 +304,22 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
         self.log.info(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) == 1 and res[0]["metric"]["ic_active_version"] == self.git_revision:
-            self.log.info(
-                f"All {res[0]['value']} nodes in subnet {self.subnet_id} have"
-                f" updated to revision {self.git_revision}"
-            )
-            return
+            current_replica_count = int(res[0]["value"])
+            if current_replica_count >= self.expected_replica_count:
+                self.log.info(
+                    "All %s nodes in subnet %s have updated to revision %s.",
+                    current_replica_count,
+                    self.subnet_id,
+                    self.git_revision,
+                )
+                return
+            else:
+                self.log.warn(
+                    "The replica count of subnet %s is %d but %d is expected; waiting.",
+                    self.subnet_id,
+                    current_replica_count,
+                    self.expected_replica_count,
+                )
         if res:
             self.log.info(
                 f"Upgrade of {self.subnet_id} to {self.git_revision}"
@@ -427,5 +471,6 @@ if __name__ == "__main__":
             subnet_id=sys.argv[2],
             git_revision=sys.argv[3],
             network=ic_api.IC_NETWORKS["mainnet"],
+            expected_replica_count=13,
         )
         kn.execute({})

@@ -28,6 +28,7 @@ for network_name, network in IC_NETWORKS.items():
         catchup=False,
         dagrun_timeout=datetime.timedelta(hours=12),
         tags=["rollout", "DRE", "IC OS"],
+        render_template_as_native_obj=True,
         params={
             "subnet_id": Param(
                 "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae",
@@ -103,6 +104,12 @@ for network_name, network in IC_NETWORKS.items():
                 git_revision="{{ params.git_revision }}",
                 retries=retries,
                 network=network,
+                expected_replica_count="""{{
+                    ti.xcom_pull(
+                        task_ids='create_proposal_if_none_exists',
+                        key='replica_count'
+                    ) | int
+                }}""",
             )
             >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
                 task_id="wait_until_no_alerts",

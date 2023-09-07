@@ -10,7 +10,7 @@ import requests
 
 class PrometheusVectorResultEntry(TypedDict):
     metric: dict[str, str]
-    value: str
+    value: float
     timestamp: float
 
 
@@ -31,6 +31,7 @@ def query_prometheus_servers(
             for data in resp["data"]["result"]:
                 m = cast(PrometheusVectorResultEntry, data)
                 m["timestamp"], m["value"] = m["value"]  # type: ignore
+                m["value"] = float(m["value"])
                 res.append(m)
             break
         except Exception:
@@ -38,3 +39,14 @@ def query_prometheus_servers(
                 raise
             continue
     return res
+
+
+if __name__ == "__main__":
+    import pprint
+
+    subnet_id = "pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe"
+    query = "sum(ic_replica_info{" + f'ic_subnet="{subnet_id}"' + "}) by (ic_subnet)"
+    res = query_prometheus_servers(
+        ["https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query"], query
+    )
+    pprint.pprint(res)
