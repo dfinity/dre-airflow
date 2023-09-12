@@ -48,7 +48,7 @@ Thursday:
   11:00: [17, 32, 35]
   13:00: [30, 31, 14]
 Monday next week:
-  11:00: [0]
+  7:00: [0]
 # Remarks:
 # * All times are expressed in the UTC time zone.
 # * Days refer to dates relative to your current work week
