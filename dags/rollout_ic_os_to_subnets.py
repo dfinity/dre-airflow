@@ -25,7 +25,9 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
 
-BATCH_COUNT: int = 30
+# Temporary change from 30 to 31 to verify that changing DAGs
+# only affects new rendered DAGs but not old DAG runs.
+BATCH_COUNT: int = 31
 
 DEFAULT_PLANS: dict[str, str] = {
     "mainnet": """
