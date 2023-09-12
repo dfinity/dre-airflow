@@ -341,7 +341,7 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
 class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
     def execute(self, context: Context, event: Any = None) -> None:
         """
-        Wait for 30 minutes of alerts (pending or firing) on the subnet.
+        Wait for 15 minutes of alerts (pending or firing) on the subnet.
 
         Experimentally we have discovered that when the WaitForReplicaRevisionUpdated
         step has finished, there will be pending alerts on the subnet
@@ -355,7 +355,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                     ic_subnet="%(subnet_id)s",
                     alertname!="PrometheusTargetMissing",
                     severity="page"
-                }[30m]
+                }[15m]
             )""" % (
             {
                 "subnet_id": self.subnet_id,
