@@ -77,7 +77,11 @@ heading, but here is a brief summary:
   3. the contents of [shared/*](shared/)
   4. the contents of [dags](dags)
 * DAGs are loaded, but runs are not started, when the scheduler
-  notices DAGs change.
+  notices DAGs change.  DAG content is reread periodically by
+  the DAG processor, and reloaded by the workers when tasks are
+  dispatched by the workers.  Therefore, changes directly made
+  to DAG files will affect already-running flows.  This has been
+  experimentally proven in commit ce5ba7b.
 * The worker and triggerer pods always run the *most up to date*
   version of the operator / sensor code you wrote, when a task
   (sensor or operator) is started.
