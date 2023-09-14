@@ -1,4 +1,5 @@
 import unittest
+from typing import Any
 
 import mock  # type:ignore
 from dfinity.ic_api import IC_NETWORKS
@@ -21,9 +22,11 @@ class TestOperators(unittest.TestCase):
             WaitForReplicaRevisionUpdated,
             WaitUntilNoAlertsOnSubnet,
         ]:
-            kwargs = {"network": IC_NETWORKS["mainnet"]}
+            kwargs: dict[str, Any] = {"network": IC_NETWORKS["mainnet"]}
             if klass == WaitForProposalAcceptance:
                 kwargs["simulate_proposal_acceptance"] = True
+            if klass == WaitForReplicaRevisionUpdated:
+                kwargs["expected_replica_count"] = 13
             klass(
                 task_id=klass.__name__,
                 subnet_id=sid,
@@ -41,6 +44,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
             subnet_id="yinp6-35cfo-wgcd2",
             git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
             network=self.network,
+            expected_replica_count=13,
         )
         return k
 
@@ -51,7 +55,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                     "ic_subnet": "yinp6-35cfo-wgcd2",
                     "ic_active_version": "d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
                 },
-                value="13",
+                value=13.0,
                 timestamp=0.0,
             )
         ]
@@ -68,7 +72,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                     "ic_subnet": "yinp6-35cfo-wgcd2",
                     "ic_active_version": "oldversion",
                 },
-                value="4",
+                value=4.0,
                 timestamp=0.0,
             ),
             PrometheusVectorResultEntry(
@@ -76,7 +80,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                     "ic_subnet": "yinp6-35cfo-wgcd2",
                     "ic_active_version": "d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
                 },
-                value="7",
+                value=7.0,
                 timestamp=0.0,
             ),
         ]
@@ -92,7 +96,7 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                     "ic_subnet": "yinp6-35cfo-wgcd2",
                     "ic_active_version": "oldversion",
                 },
-                value="4",
+                value=4.0,
                 timestamp=0.0,
             )
         ]
