@@ -3,21 +3,21 @@ import unittest
 from datetime import timezone as tz
 
 import yaml
-from dfinity.ic_os_rollout import rollout_planner, week_planner
-from dfinity.ic_types import SubnetRolloutInstance
+from dfinity.ic_os_rollout import RolloutPlan, rollout_planner, week_planner
+
+_MONDAY = datetime.datetime(2023, 6, 12, 0, 0, 0)
 
 
 class TestWeekPlanner(unittest.TestCase):
     def test_week_planner(self) -> None:
         """Test for import errors on a file"""
-        on_monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
-        plan = week_planner(on_monday)
-        assert plan["Monday"].day == on_monday.day
-        assert plan["Friday"].day == on_monday.day + 4, plan["Friday"]
-        assert plan["Monday next week"].day == on_monday.day + 7
+        plan = week_planner(_MONDAY)
+        assert plan["Monday"].day == _MONDAY.day
+        assert plan["Friday"].day == _MONDAY.day + 4, plan["Friday"]
+        assert plan["Monday next week"].day == _MONDAY.day + 7
 
         on_friday = datetime.datetime(2023, 6, 16, 0, 0, 0)
-        plan = week_planner(on_monday)
+        plan = week_planner(_MONDAY)
         assert plan["Monday"].day == on_friday.day - 4, plan["Monday"]
         assert plan["Friday"].day == on_friday.day, plan["Friday"]
         assert plan["Monday next week"].day == on_friday.day + 3
@@ -31,9 +31,19 @@ class TestWeekPlanner(unittest.TestCase):
 class TestRolloutPlanner(unittest.TestCase):
     def transform_actual(
         self,
-        inp: list[SubnetRolloutInstance],
-    ) -> list[tuple[datetime.datetime, int]]:
-        return list((i.start_at, i.subnet_num) for i in inp)
+        inp: RolloutPlan,
+    ) -> list[tuple[int, datetime.datetime, int]]:
+        """
+        Convert RolloutPlan into simple list of batch index, date/time, subnet num.
+
+        This is done for aesthetic purposes in diffs when the tests do not return
+        the expected results.
+        """
+        ret: list[tuple[int, datetime.datetime, int]] = []
+        for nstr, (_, subnets) in inp.items():
+            for i in subnets:
+                ret.append((int(nstr) + 1, i.start_at, i.subnet_num))
+        return ret
 
     def fake_get_subnet_list(self) -> list[str]:
         return ["0000-00%02d-0000-0000" % n for n in range(38)]
@@ -50,7 +60,7 @@ Tuesday:
 Wednesday:
   7:00: [3, 7, 11]
   9:00: [10, 13, 16]
-  11:00: [20, 27, 34]
+  11:00: [20, 27]
   13:00: [21, 12, 28]
 Thursday:
   7:00: [26, 22, 23]
@@ -61,50 +71,48 @@ Monday next week:
   11:00: [0]
 """
         expected = [
-            (datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 6),
-            (datetime.datetime(2023, 6, 12, 11, 0, tzinfo=tz.utc), 8),
-            (datetime.datetime(2023, 6, 12, 11, 0, tzinfo=tz.utc), 33),
-            (datetime.datetime(2023, 6, 13, 7, 0, tzinfo=tz.utc), 15),
-            (datetime.datetime(2023, 6, 13, 7, 0, tzinfo=tz.utc), 18),
-            (datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 1),
-            (datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 5),
-            (datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 2),
-            (datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 4),
-            (datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 9),
-            (datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 34),
-            (datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 3),
-            (datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 7),
-            (datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 11),
-            (datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 10),
-            (datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 13),
-            (datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 16),
-            (datetime.datetime(2023, 6, 14, 11, 0, tzinfo=tz.utc), 20),
-            (datetime.datetime(2023, 6, 14, 11, 0, tzinfo=tz.utc), 27),
-            (datetime.datetime(2023, 6, 14, 11, 0, tzinfo=tz.utc), 34),
-            (datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 21),
-            (datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 12),
-            (datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 28),
-            (datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 26),
-            (datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 22),
-            (datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 23),
-            (datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 25),
-            (datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 29),
-            (datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 19),
-            (datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 17),
-            (datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 32),
-            (datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 35),
-            (datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 30),
-            (datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 31),
-            (datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 14),
-            (datetime.datetime(2023, 6, 19, 11, 0, tzinfo=tz.utc), 0),
+            (1, datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 6),
+            (2, datetime.datetime(2023, 6, 12, 11, 0, tzinfo=tz.utc), 8),
+            (2, datetime.datetime(2023, 6, 12, 11, 0, tzinfo=tz.utc), 33),
+            (3, datetime.datetime(2023, 6, 13, 7, 0, tzinfo=tz.utc), 15),
+            (3, datetime.datetime(2023, 6, 13, 7, 0, tzinfo=tz.utc), 18),
+            (4, datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 1),
+            (4, datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 5),
+            (4, datetime.datetime(2023, 6, 13, 9, 0, tzinfo=tz.utc), 2),
+            (5, datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 4),
+            (5, datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 9),
+            (5, datetime.datetime(2023, 6, 13, 11, 0, tzinfo=tz.utc), 34),
+            (6, datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 3),
+            (6, datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 7),
+            (6, datetime.datetime(2023, 6, 14, 7, 0, tzinfo=tz.utc), 11),
+            (7, datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 10),
+            (7, datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 13),
+            (7, datetime.datetime(2023, 6, 14, 9, 0, tzinfo=tz.utc), 16),
+            (8, datetime.datetime(2023, 6, 14, 11, 0, tzinfo=tz.utc), 20),
+            (8, datetime.datetime(2023, 6, 14, 11, 0, tzinfo=tz.utc), 27),
+            (9, datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 21),
+            (9, datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 12),
+            (9, datetime.datetime(2023, 6, 14, 13, 0, tzinfo=tz.utc), 28),
+            (10, datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 26),
+            (10, datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 22),
+            (10, datetime.datetime(2023, 6, 15, 7, 0, tzinfo=tz.utc), 23),
+            (11, datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 25),
+            (11, datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 29),
+            (11, datetime.datetime(2023, 6, 15, 9, 0, tzinfo=tz.utc), 19),
+            (12, datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 17),
+            (12, datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 32),
+            (12, datetime.datetime(2023, 6, 15, 11, 0, tzinfo=tz.utc), 35),
+            (13, datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 30),
+            (13, datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 31),
+            (13, datetime.datetime(2023, 6, 15, 13, 0, tzinfo=tz.utc), 14),
+            (14, datetime.datetime(2023, 6, 19, 11, 0, tzinfo=tz.utc), 0),
         ]
 
-        on_monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
         plan_structure = yaml.safe_load(plan)
         rollout_plan = rollout_planner(
             plan_structure,
             self.fake_get_subnet_list,
-            on_monday,
+            _MONDAY,
         )
         assert self.transform_actual(rollout_plan) == expected
 
@@ -117,19 +125,142 @@ Monday next week:
         )
         assert self.transform_actual(rollout_plan) == expected
 
+    def test_rollout_planner_with_batch_number(self) -> None:
+        plan = """
+Monday:
+  9:00: [6]
+Monday next week:
+  11:00:
+    subnets: [0]
+    batch: 30
+"""
+        expected = [
+            (1, datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 6),
+            (30, datetime.datetime(2023, 6, 19, 11, 0, tzinfo=tz.utc), 0),
+        ]
+
+        plan_structure = yaml.safe_load(plan)
+        rollout_plan = rollout_planner(
+            plan_structure,
+            self.fake_get_subnet_list,
+            _MONDAY,
+        )
+        assert self.transform_actual(rollout_plan) == expected
+
+    def test_date_time_ordered_rollout(self) -> None:
+        plan = """
+Monday next week:
+  11:00:
+    subnets: [0]
+Monday:
+  9:00: [6]
+  7:00: [22]
+"""
+        expected = [
+            (1, datetime.datetime(2023, 6, 12, 7, 0, tzinfo=tz.utc), 22),
+            (2, datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 6),
+            (3, datetime.datetime(2023, 6, 19, 11, 0, tzinfo=tz.utc), 0),
+        ]
+
+        plan_structure = yaml.safe_load(plan)
+        rollout_plan = rollout_planner(
+            plan_structure,
+            self.fake_get_subnet_list,
+            _MONDAY,
+        )
+        assert self.transform_actual(rollout_plan) == expected
+
+    def test_max_batches_exceeded(self) -> None:
+        plan = """
+Monday:
+  9:00: [6]
+Monday next week:
+  11:00:
+    subnets: [0]
+    batch: 30
+  14:00:
+    subnets: [21]
+"""
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(
+                yaml.safe_load(plan),
+                self.fake_get_subnet_list,
+                _MONDAY,
+            ),
+        )
+
+    def test_cannot_rollout_to_same_subnet_twice(self) -> None:
+        plan = """
+Monday:
+  9:00: [6]
+Monday next week:
+  11:00:
+    subnets: [6]
+"""
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(
+                yaml.safe_load(plan),
+                self.fake_get_subnet_list,
+                _MONDAY,
+            ),
+        )
+
+    def test_batch_too_low(self) -> None:
+        plan = """
+Monday:
+  9:00: [6]
+Monday next week:
+  11:00:
+    subnets: [0]
+    batch: 25
+  14:00:
+    subnets: [21]
+    batch: 24
+"""
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(
+                yaml.safe_load(plan),
+                self.fake_get_subnet_list,
+                _MONDAY,
+            ),
+        )
+
+    def test_batch_reused(self) -> None:
+        plan = """
+Monday:
+  9:00: [6]
+Monday next week:
+  11:00:
+    subnets: [0]
+    batch: 25
+  14:00:
+    subnets: [21]
+    batch: 25
+"""
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(
+                yaml.safe_load(plan),
+                self.fake_get_subnet_list,
+                _MONDAY,
+            ),
+        )
+
     def test_rollout_planner_ambiguous_rollout(self) -> None:
         plan = """
 Monday:
   9:00: ["0000"]
 """
         rollout_plan = yaml.safe_load(plan)
-        monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
         self.assertRaises(
             ValueError,
             lambda: rollout_planner(
                 rollout_plan,
                 self.fake_get_subnet_list,
-                monday,
+                _MONDAY,
             ),
         )
 
@@ -139,13 +270,12 @@ Monday:
   9:00: ["0000-0002"]
 """
         rollout_plan = yaml.safe_load(plan)
-        monday = datetime.datetime(2023, 6, 12, 0, 0, 0)
         expected = [
-            (datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 2),
+            (1, datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc), 2),
         ]
         res = rollout_planner(
             rollout_plan,
             self.fake_get_subnet_list,
-            monday,
+            _MONDAY,
         )
         assert self.transform_actual(res) == expected

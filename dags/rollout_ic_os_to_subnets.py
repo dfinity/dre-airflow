@@ -6,7 +6,6 @@ Each batch runs in parallel.
 
 import datetime
 import functools
-import itertools
 from typing import Any, cast
 
 import operators.ic_os_rollout as ic_os_rollout
@@ -15,7 +14,7 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
-from dfinity.ic_os_rollout import rollout_planner
+from dfinity.ic_os_rollout import MAX_BATCHES, rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
 from airflow import DAG
@@ -25,30 +24,30 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
 
-BATCH_COUNT: int = 30
-
 DEFAULT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 Monday:
-  9:00:  [io67a]
-  11:00: [shefu, uzr34]
+  9:00:      [io67a]
+  11:00:     [shefu, uzr34]
 Tuesday:
-  7:00:  [pjljw, qdvhd]
-  9:00:  [snjp4, w4asl, qxesv]
-  11:00: [4zbus, ejbmu, 2fq7c]
+  7:00:      [pjljw, qdvhd]
+  9:00:      [snjp4, w4asl, qxesv]
+  11:00:     [4zbus, ejbmu, 2fq7c]
 Wednesday:
-  7:00:  [pae4o, 5kdm2, csyj4]
-  9:00:  [eq6en, lhg73, brlsh]
-  11:00: [k44fs, cv73p, 4ecnw]
-  13:00: [opn46, lspz2, o3ow2]
+  7:00:      [pae4o, 5kdm2, csyj4]
+  9:00:      [eq6en, lhg73, brlsh]
+  11:00:     [k44fs, cv73p, 4ecnw]
+  13:00:     [opn46, lspz2, o3ow2]
 Thursday:
-  7:00:  [w4rem, 6pbhf, e66qm]
-  9:00:  [yinp6, fuqsr, jtdsg]
-  11:00: [mpubz, x33ed, pzp6e]
-  13:00: [3hhby, nl6hn, gmq5v]
+  7:00:      [w4rem, 6pbhf, e66qm]
+  9:00:      [yinp6, fuqsr, jtdsg]
+  11:00:     [mpubz, x33ed, pzp6e]
+  13:00:     [3hhby, nl6hn, gmq5v]
 Monday next week:
-  7:00:  [tdb26]
+  7:00:
+    subnets: [tdb26]
+    batch: 30
 # Remarks:
 # * All times are expressed in the UTC time zone.
 # * Days refer to dates relative to your current work week
@@ -56,6 +55,11 @@ Monday next week:
 #   the rollout is started during a weekend.
 # * A day name with " next week" added at the end means
 #   "add one week to this day".
+# * Each date/time can specify a simple list of subnets,
+#   or can specify a dict with two keys:
+#   * batch: an optional integer 1-30 with the batch number
+#            you want to assign to this batch.
+#   * subnets: a list of subnets.
 # * Subnets may be specified by integer number from 0
 #   to the maximum subnet number, or may be specified
 #   as full or abbreviated subnet principal ID.
@@ -123,21 +127,14 @@ for network_name, network in IC_NETWORKS.items():
                 plan_data_structure,
                 subnet_list_source=subnet_list_source,
             )
-            batches: dict[
-                str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
-            ] = {}
-            for n, (group_key, members) in enumerate(
-                itertools.groupby(plan, key=lambda x: x.start_at)
-            ):
-                print(f"Batch {n+1}:")
-                batches[str(n)] = (group_key, [])
+            for nstr, (start_time, members) in plan.items():
+                print(f"Batch {int(nstr)+1}:")
                 for item in members:
-                    batches[str(n)][1].append(item)
                     print(
                         f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
                         f" to be rolled out at {item.start_at}."
                     )
-            return batches
+            return plan
 
         sched = schedule()
 
@@ -258,7 +255,7 @@ for network_name, network in IC_NETWORKS.items():
             batch_has_work >> empty_batch >> join
 
         last_task_group = None
-        for batch in range(BATCH_COUNT):
+        for batch in range(MAX_BATCHES):
             batch_name = str(batch + 1)
             with TaskGroup(group_id=f"batch_{batch_name}") as group:
                 make_me_a_batch(batch_name, batch)

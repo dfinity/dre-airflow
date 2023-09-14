@@ -3,12 +3,13 @@ Rollout IC os to subnets.
 """
 
 import datetime
-from typing import Any, Callable
+from typing import Any, Callable, TypeAlias
 
 from dfinity.ic_types import SubnetRolloutInstance
 
 SLACK_CHANNEL = "#eng-release-bots"
 SLACK_CONNECTION_ID = "slack.ic_os_rollout"
+MAX_BATCHES: int = 30
 
 
 def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.datetime]:
@@ -39,19 +40,31 @@ def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.dat
     return days
 
 
+"""Zero-indexed rollout plan with batches of subnet instances to roll out."""
+RolloutPlan: TypeAlias = dict[
+    str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
+]
+
+
 def rollout_planner(
     plan: dict[str, Any],
     subnet_list_source: Callable[[], list[str]],
     now: datetime.datetime | None = None,
-) -> list[SubnetRolloutInstance]:
-    res = []
+) -> RolloutPlan:
     subnet_list = subnet_list_source()
     week_plan = week_planner(now)
-    for dayname, hours in plan.items():
+    batches: RolloutPlan = {}
+    current_batch_index: int = 0
+    batch_index_for_sn: dict[int, int] = {}
+
+    for dayname, hours in sorted(plan.items(), key=lambda m: week_plan[m[0]]):
         try:
             date = week_plan[dayname]
         except KeyError:
             raise ValueError(f"{dayname} is not a valid day")
+
+        realhours: dict[datetime.datetime, Any] = {}
+
         for time_s, subnet_numbers in hours.items():
             org_time_s = time_s
             if isinstance(time_s, int):
@@ -65,6 +78,38 @@ def rollout_planner(
                     f"{org_time_s} is not a valid hh:mm time on {dayname}"
                 ) from exc
             date_and_time = date.replace(hour=time.hour, minute=time.minute)
+            realhours[date_and_time] = subnet_numbers
+
+        for date_and_time, subnet_numbers in sorted(
+            realhours.items(), key=lambda m: m[0]
+        ):
+            if isinstance(subnet_numbers, dict):
+                subnet_numbers, batch_number = subnet_numbers[
+                    "subnets"
+                ], subnet_numbers.get("batch")
+                if batch_number is None:
+                    batch_index = current_batch_index
+                else:
+                    batch_index = batch_number - 1
+            else:
+                batch_index = current_batch_index
+
+            if str(batch_index) in batches:
+                raise ValueError(
+                    f"batch {batch_index+1} requested by {date_and_time} has"
+                    f" already been assigned to a prior batch"
+                )
+            if batch_index >= MAX_BATCHES:
+                raise ValueError(
+                    f"batch {batch_index+1} requested by {date_and_time} exceeds"
+                    f" the maximum batch count of {MAX_BATCHES}"
+                )
+            if batch_index < current_batch_index:
+                raise ValueError(
+                    f"batch {batch_index+1} requested by {date_and_time} is"
+                    f" lower than already-assigned batch {current_batch_index}"
+                )
+
             for n, sn in enumerate(subnet_numbers):
                 if isinstance(sn, str):
                     prefix_matches = [
@@ -80,15 +125,31 @@ def rollout_planner(
                     subnet_numbers[n] = prefix_matches[0][0]
                 elif not isinstance(sn, int) or sn < 0:
                     raise ValueError(
-                        f"subnet number {sn} in {hours} of {dayname} is"
+                        f"subnet number {sn} requested by {date_and_time} is"
                         " not a zero/positive integer or a valid subnet ID"
                     )
+
+            batches[str(batch_index)] = (date_and_time, [])
             for sn in subnet_numbers:
+                principal = subnet_list[sn]
                 if sn >= len(subnet_list):
                     raise ValueError(
-                        f"subnet number {sn} in {hours} of {dayname} is"
+                        f"subnet number {principal} requested by {date_and_time} is"
                         " larger than the known total number of subnets"
                     )
-            for sn in subnet_numbers:
-                res.append(SubnetRolloutInstance(date_and_time, sn, subnet_list[sn]))
-    return res
+
+                bsn = batch_index_for_sn.get(sn)
+                if bsn is not None:
+                    raise ValueError(
+                        f"subnet number {principal} requested by {date_and_time} is"
+                        f" already being rolled out as part of batch {bsn+1}"
+                    )
+                batch_index_for_sn[sn] = batch_index
+
+                batches[str(batch_index)][1].append(
+                    SubnetRolloutInstance(date_and_time, sn, principal),
+                )
+
+            current_batch_index = batch_index + 1
+
+    return batches
