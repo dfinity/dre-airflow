@@ -104,12 +104,15 @@ for network_name, network in IC_NETWORKS.items():
                 git_revision="{{ params.git_revision }}",
                 retries=retries,
                 network=network,
-                expected_replica_count="""{{
+                expected_replica_count=cast(
+                    int,
+                    """{{
                     ti.xcom_pull(
                         task_ids='create_proposal_if_none_exists',
                         key='replica_count'
                     ) | int
                 }}""",
+                ),
             )
             >> ic_os_sensor.WaitUntilNoAlertsOnSubnet(
                 task_id="wait_until_no_alerts",
