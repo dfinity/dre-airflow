@@ -31,24 +31,24 @@ DEFAULT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 Monday:
-  9:00: [6]
-  11:00: [8, 33]
+  9:00:  [io67a]
+  11:00: [shefu, uzr34]
 Tuesday:
-  7:00: [15, 18]
-  9:00: [1, 5, 2]
-  11:00: [4, 9, 34]
+  7:00:  [pjljw, qdvhd]
+  9:00:  [snjp4, w4asl, qxesv]
+  11:00: [4zbus, ejbmu, 2fq7c]
 Wednesday:
-  7:00: [3, 7, 11]
-  9:00: [10, 13, 16]
-  11:00: [20, 27, 24]
-  13:00: [21, 12, 28]
+  7:00:  [pae4o, 5kdm2, csyj4]
+  9:00:  [eq6en, lhg73, brlsh]
+  11:00: [k44fs, cv73p, 4ecnw]
+  13:00: [opn46, lspz2, o3ow2]
 Thursday:
-  7:00: [26, 22, 23]
-  9:00: [25, 29, 19]
-  11:00: [17, 32, 35]
-  13:00: [30, 31, 14]
+  7:00:  [w4rem, 6pbhf, e66qm]
+  9:00:  [yinp6, fuqsr, jtdsg]
+  11:00: [mpubz, x33ed, pzp6e]
+  13:00: [3hhby, nl6hn, gmq5v]
 Monday next week:
-  7:00: [0]
+  7:00:  [tdb26]
 # Remarks:
 # * All times are expressed in the UTC time zone.
 # * Days refer to dates relative to your current work week
