@@ -14,7 +14,7 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
-from dfinity.ic_os_rollout import MAX_BATCHES, rollout_planner
+from dfinity.ic_os_rollout import rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
 from airflow import DAG
@@ -24,6 +24,8 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
 
+# Also defined in dfinity.ic_os_rollout
+MAX_BATCHES: int = 30
 DEFAULT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
