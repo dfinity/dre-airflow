@@ -215,8 +215,7 @@ if __name__ == "__main__":
                 "https://dashboard.internetcomputer.org/proposal",
                 "https://dashboard.internetcomputer.org/release",
                 [
-                    "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
-                    "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+                    "https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query",
                 ],
                 80,
                 "unused",
@@ -236,8 +235,7 @@ if __name__ == "__main__":
                 "https://dashboard.internetcomputer.org/proposal",
                 "https://dashboard.internetcomputer.org/release",
                 [
-                    "https://ic-metrics-prometheus.ch1-obs1.dfinity.network/api/v1/query",
-                    "https://ic-metrics-prometheus.fr1-obs1.dfinity.network/api/v1/query",
+                    "https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"
                 ],
                 80,
                 "unused",
