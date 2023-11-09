@@ -10,8 +10,11 @@ import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
-import jinja2
-from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
+from dfinity.ic_os_rollout import (
+    SLACK_CHANNEL,
+    SLACK_CONNECTION_ID,
+    subnet_id_and_git_revision_from_args,
+)
 from operators.ic_os_rollout import RolloutParams
 
 import airflow.models.taskinstance
@@ -51,6 +54,7 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
         self,
         *,
         target_time: str | datetime.datetime,
+        _ignored=None,
         **kwargs,
     ) -> None:
         """Exists to work around inability to pass target_time as xcom arg."""
@@ -94,30 +98,22 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
         )
         self.simulate_elected = simulate_elected
 
-    def render_template_fields(
-        self,
-        context: Context,
-        jinja_env: jinja2.Environment | None = None,
-    ) -> None:
-        # Ensure our simulate variable is a bool, since
-        # Jinja rendering makes this a string.
-        super().render_template_fields(context=context, jinja_env=jinja_env)
-        self.simulate_elected = cast(str, self.simulate_elected) == "True"
-
     def execute(self, context: Context, event: Any = None) -> None:
-        if isinstance(self.git_revision, int):
-            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
-            self.git_revision = "{:040}".format(self.git_revision)
+        _, git_revision = subnet_id_and_git_revision_from_args("", self.git_revision)
 
         if self.simulate_elected:
             self.log.info(
-                f"Pretending that {self.git_revision} is elected"
+                f"Pretending that {git_revision} is elected"
                 f" (simulate_elected={self.simulate_elected})."
             )
             return
 
-        self.log.info(f"Waiting for revision {self.git_revision} to be elected.")
-        if not ic_admin.is_replica_version_blessed(self.git_revision, self.network):
+        self.log.info(f"Waiting for revision {git_revision} to be elected.")
+        if not ic_admin.is_replica_version_blessed(
+            git_revision,
+            self.network,
+            ic_admin_version=None if self.simulate_elected else self.git_revision,
+        ):
             self.log.info("Revision is not yet elected.  Waiting.")
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=15)),
@@ -164,26 +160,14 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         )
         self.simulate_proposal_acceptance = simulate_proposal_acceptance
 
-    def render_template_fields(
-        self,
-        context: Context,
-        jinja_env: jinja2.Environment | None = None,
-    ) -> None:
-        # Ensure our simulate variable is a bool, since
-        # Jinja rendering makes this a string.
-        super().render_template_fields(context=context, jinja_env=jinja_env)
-        self.simulate_proposal_acceptance = (
-            cast(str, self.simulate_proposal_acceptance) == "True"
+    def execute(self, context: Context, event: Any = None) -> None:
+        subnet_id, git_revision = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
         )
 
-    def execute(self, context: Context, event: Any = None) -> None:
-        if isinstance(self.git_revision, int):
-            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
-            self.git_revision = "{:040}".format(self.git_revision)
-
         props = ic_api.get_proposals_for_subnet_and_revision(
-            subnet_id=self.subnet_id,
-            git_revision=self.git_revision,
+            subnet_id=subnet_id,
+            git_revision=git_revision,
             limit=1000,
             network=self.network,
         )
@@ -204,7 +188,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
                 # Ah, so this is why the proposal does not exist.
                 self.log.info(
                     f"Simulating that the nonexistent proposal to update"
-                    f" {self.subnet_id} to {self.git_revision}"
+                    f" {subnet_id} to {git_revision}"
                     f" has been created and accepted."
                     f" (simulate_acceptance={self.simulate_proposal_acceptance})"
                 )
@@ -218,7 +202,7 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
 
             self.log.info(
                 "No proposal is either open or executed to update"
-                f" {self.subnet_id} to revision {self.git_revision}."
+                f" {subnet_id} to revision {git_revision}."
                 "  Waiting one minute until a proposal appears executed."
             )
             self.defer(
@@ -240,8 +224,8 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         # There is an open proposal, but not yet voted to execution.
         if self.simulate_proposal_acceptance:
             self.log.info(
-                f"Simulating that the open proposal to update {self.subnet_id} to"
-                f" {self.git_revision} has been created and accepted."
+                f"Simulating that the open proposal to update {subnet_id} to"
+                f" {git_revision} has been created and accepted."
             )
             return
 
@@ -291,38 +275,42 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
         self.expected_replica_count = expected_replica_count
 
     def execute(self, context: Context, event: Any = None) -> None:
+        subnet_id, git_revision = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
+        )
+
         self.log.info(
-            f"Waiting for all nodes on subnet ID {self.subnet_id} have "
-            + f"adopted revision {self.git_revision}."
+            f"Waiting for all nodes on subnet ID {subnet_id} have "
+            + f"adopted revision {git_revision}."
         )
 
         query = (
             "sum(ic_replica_info{"
-            + f'ic_subnet="{self.subnet_id}"'
+            + f'ic_subnet="{subnet_id}"'
             + "}) by (ic_active_version, ic_subnet)"
         )
         self.log.info(f"Querying Prometheus servers: {query}")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
-        if len(res) == 1 and res[0]["metric"]["ic_active_version"] == self.git_revision:
+        if len(res) == 1 and res[0]["metric"]["ic_active_version"] == git_revision:
             current_replica_count = int(res[0]["value"])
             if current_replica_count >= self.expected_replica_count:
                 self.log.info(
                     "All %s nodes in subnet %s have updated to revision %s.",
                     current_replica_count,
-                    self.subnet_id,
-                    self.git_revision,
+                    subnet_id,
+                    git_revision,
                 )
                 return
             else:
                 self.log.warn(
                     "The replica count of subnet %s is %d but %d is expected; waiting.",
-                    self.subnet_id,
+                    subnet_id,
                     current_replica_count,
                     self.expected_replica_count,
                 )
         if res:
             self.log.info(
-                f"Upgrade of {self.subnet_id} to {self.git_revision}"
+                f"Upgrade of {subnet_id} to {git_revision}"
                 " is not complete yet.  From Prometheus:"
             )
             for r in res:
@@ -330,7 +318,7 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
         else:
             self.log.info(
                 f"Upgrade has not begun yet -- Prometheus show no results for git"
-                f" revision {self.git_revision} on subnet {self.subnet_id}."
+                f" revision {git_revision} on subnet {subnet_id}."
             )
         self.defer(
             trigger=TimeDeltaTrigger(datetime.timedelta(minutes=3)),
@@ -348,7 +336,11 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         (IC_Replica_Behind) which must resolve themselves.  We look back
         30 minutes to ensure they are resolved.
         """
-        self.log.info(f"Waiting for alerts on subnet ID {self.subnet_id} to subside.")
+        subnet_id, git_revision = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
+        )
+
+        self.log.info(f"Waiting for alerts on subnet ID {subnet_id} to subside.")
         query = """
             sum_over_time(
                 ALERTS{
@@ -358,7 +350,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 }[15m]
             )""" % (
             {
-                "subnet_id": self.subnet_id,
+                "subnet_id": subnet_id,
             }
         )
         self.log.info(f"Querying Prometheus servers: {query}")
@@ -371,17 +363,17 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             self.xcom_push(
                 context=context,
                 key="alerts",
-                value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=True),
+                value=SubnetAlertStatus(subnet_id=subnet_id, alerts=True),
             )
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
             )
-        self.log.info(f"There are no more alerts on subnet ID {self.subnet_id}.")
+        self.log.info(f"There are no more alerts on subnet ID {subnet_id}.")
         self.xcom_push(
             context=context,
             key="alerts",
-            value=SubnetAlertStatus(subnet_id=self.subnet_id, alerts=False),
+            value=SubnetAlertStatus(subnet_id=subnet_id, alerts=False),
         )
 
 
@@ -416,6 +408,10 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
         Wait until all concurrently-running wait-for-alerts have reported there
         are no more alerts.
         """
+        subnet_id, _ = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
+        )
+
         # This value comes from task WaitUntilNoAlertsOnSubnet.
         known_alerts = cast(
             list[SubnetAlertStatus],
@@ -449,7 +445,7 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
                 else "subnets " + ", ".join(subnets_with_alerts)
             )
             text = (
-                f"While rolling out {self.subnet_id}, alerts on {subnets_text} keep"
+                f"While rolling out {subnet_id}, alerts on {subnets_text} keep"
                 f" <{url}|the rollout> stuck.  Please see the"
                 " <https://www.notion.so/dfinityorg/Weekly-IC-"
                 "OS-release-using-Airflow-1e3c3274ba4d406ebe222aa6eb569e3a#2f"
@@ -466,7 +462,7 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
             )
         self.log.info("There are no alerts on any subnet.  Safe to proceed.")
         if messaged():
-            post(f"Alerts have subsided.  Rollout of {self.subnet_id} can proceed.")
+            post(f"Alerts have subsided.  Rollout of {subnet_id} can proceed.")
 
 
 if __name__ == "__main__":

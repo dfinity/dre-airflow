@@ -45,6 +45,22 @@ class TestRolloutPlanner(unittest.TestCase):
                 ret.append((int(nstr) + 1, i.start_at, i.subnet_num))
         return ret
 
+    def transform_actual_with_git_revision(
+        self,
+        inp: RolloutPlan,
+    ) -> list[tuple[int, datetime.datetime, int, str]]:
+        """
+        Convert RolloutPlan into simple list of batch index, date/time, subnet num.
+
+        This is done for aesthetic purposes in diffs when the tests do not return
+        the expected results.
+        """
+        ret: list[tuple[int, datetime.datetime, int, str]] = []
+        for nstr, (_, subnets) in inp.items():
+            for i in subnets:
+                ret.append((int(nstr) + 1, i.start_at, i.subnet_num, i.git_revision))
+        return ret
+
     def fake_get_subnet_list(self) -> list[str]:
         return ["0000-00%02d-0000-0000" % n for n in range(38)]
 
@@ -279,3 +295,77 @@ Monday:
             _MONDAY,
         )
         assert self.transform_actual(res) == expected
+
+    def test_rollout_planner_with_git_revision(self) -> None:
+        plan = """
+Monday:
+  9:00:
+  - subnet: 0000-0002
+    git_revision: 0123456789012345678901234567890123456789
+  - subnet: 0000-0003
+  10:00:
+    subnets:
+    - subnet: 0000-0004
+      git_revision: 0123456789012345678901234567890123456789
+    - subnet: 0000-0005
+    batch: 4
+"""
+        rollout_plan = yaml.safe_load(plan)
+        expected = [
+            (
+                1,
+                datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc),
+                2,
+                "0123456789012345678901234567890123456789",
+            ),
+            (
+                1,
+                datetime.datetime(2023, 6, 12, 9, 0, tzinfo=tz.utc),
+                3,
+                None,
+            ),
+            (
+                4,
+                datetime.datetime(2023, 6, 12, 10, 0, tzinfo=tz.utc),
+                4,
+                "0123456789012345678901234567890123456789",
+            ),
+            (
+                4,
+                datetime.datetime(2023, 6, 12, 10, 0, tzinfo=tz.utc),
+                5,
+                None,
+            ),
+        ]
+        res = rollout_planner(
+            rollout_plan,
+            self.fake_get_subnet_list,
+            _MONDAY,
+        )
+        assert self.transform_actual_with_git_revision(res) == expected
+
+    def test_rollout_planner_with_bad_git_revision(self) -> None:
+        plan = """
+Monday:
+  9:00:
+  - subnet: 0000-0002
+    git_revision: 012345h7890123456789
+"""
+        rollout_plan = yaml.safe_load(plan)
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(rollout_plan, self.fake_get_subnet_list, _MONDAY),
+        )
+
+    def test_rollout_planner_with_odd_parameters(self) -> None:
+        plan = """
+Monday:
+  9:00:
+  - subnet: 0000-0002
+    revision: 0123456789012345678901234567890123456789
+"""
+        rollout_plan = yaml.safe_load(plan)
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_planner(rollout_plan, self.fake_get_subnet_list, _MONDAY),
+        )

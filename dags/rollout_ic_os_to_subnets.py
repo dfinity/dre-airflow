@@ -14,14 +14,14 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
-from dfinity.ic_os_rollout import rollout_planner
+from dfinity.ic_os_rollout import SubnetIdWithRevision, rollout_planner
 from dfinity.ic_types import SubnetRolloutInstance
 
 from airflow import DAG
 from airflow.decorators import task
+from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
-from airflow.operators.python import BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
 
 # Also defined in dfinity.ic_os_rollout
@@ -62,9 +62,22 @@ Monday next week:
 #   * batch: an optional integer 1-30 with the batch number
 #            you want to assign to this batch.
 #   * subnets: a list of subnets.
-# * Subnets may be specified by integer number from 0
-#   to the maximum subnet number, or may be specified
-#   as full or abbreviated subnet principal ID.
+# * A subnet may be specified:
+#   * as an integer number from 0 to the maximum subnet number,
+#   * as a full or abbreviated subnet principal ID,
+#   * as a dictionary of {
+#        subnet: ID or principal
+#        git_revision: revision to deploy to this subnet
+#     }
+#     with this form being able to override the Git revision
+#     that will be targeted to that specific subnet.
+#     Example of a batch specified this way:
+#       Monday next week:
+#         7:00:
+#           batch: 30
+#           subnets:
+#           - subnet: tdb26
+#             git_revision: 0123456789012345678901234567890123456789
 """
 }
 
@@ -91,8 +104,10 @@ for network_name, network in IC_NETWORKS.items():
                 "0000000000000000000000000000000000000000",
                 type="string",
                 pattern="^[a-f0-9]{40}$",
-                title="Git revision",
-                description="Git revision of the IC-OS release to roll out to subnets",
+                title="Main Git revision",
+                description="Git revision of the IC-OS release to roll out to subnets"
+                ", unless specified otherwise directly for a specific subnet; will"
+                " also determine the version of ic-admin used",
             ),
             "plan": Param(
                 default=DEFAULT_PLANS[network_name].strip(),
@@ -132,81 +147,70 @@ for network_name, network in IC_NETWORKS.items():
             for nstr, (start_time, members) in plan.items():
                 print(f"Batch {int(nstr)+1}:")
                 for item in members:
+                    if not item.git_revision:
+                        item.git_revision = ic_admin_version
                     print(
                         f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
-                        f" to be rolled out at {item.start_at}."
+                        f" to be rolled out at {item.start_at} to git"
+                        f" revision {item.git_revision}."
                     )
             return plan
 
-        sched = schedule()
+        @task
+        def revisions(schedule, **context):  # type: ignore
+            revs = set()
+            for batch in schedule.values():
+                for instance in batch[1]:
+                    revs.add(instance.git_revision)
+            return list(revs)
 
         def make_me_a_batch(batch_name: str, batch: int) -> None:
-            def work_to_do(
-                current_batch_index: int,
-                batch_name: str,
-                batches: dict[
-                    str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
-                ],
-            ) -> list[str]:
-                this_batch = batches.get(str(current_batch_index))
-                if this_batch:
-                    print("This batch will roll out the following subnets:")
-                    for item in this_batch[1]:
-                        print(
-                            f"    Subnet {item.subnet_id} ({item.subnet_num}) will"
-                            f" start to be rolled out at {item.start_at}."
-                        )
-                    return [f"batch_{batch_name}.wait_until_start_time"]
-                print("This batch does nothing.")
-                return [f"batch_{batch_name}.empty_batch"]
-
             @task
             def collect_batch_subnets(
                 current_batch_index: int, **kwargs: Any
-            ) -> list[str]:
-                subnets = cast(
-                    list[SubnetRolloutInstance],
-                    (
-                        kwargs["ti"]
-                        .xcom_pull("schedule")
-                        .get(str(current_batch_index))[1]
-                    ),
-                )
-                return [s.subnet_id for s in subnets]
+            ) -> list[SubnetIdWithRevision]:
+                try:
+                    subnets = cast(
+                        list[SubnetRolloutInstance],
+                        (
+                            kwargs["ti"]
+                            .xcom_pull("schedule")
+                            .get(str(current_batch_index))[1]
+                        ),
+                    )
+                    return [
+                        {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
+                        for s in subnets
+                    ]
+                except (KeyError, TypeError):  # no such batch
+                    print("This batch is empty.")
+                    return []
 
             proceed = collect_batch_subnets(batch)
-
-            batch_has_work = BranchPythonOperator(
-                task_id="batch_has_work",
-                python_callable=work_to_do,
-                op_args=[
-                    batch,
-                    batch_name,
-                    """{{
-                            task_instance.xcom_pull(task_ids='schedule')
-                        }}""",
-                ],
-            )
-
-            empty_batch = EmptyOperator(task_id="empty_batch")
-
-            wait_until_start_time = ic_os_sensor.CustomDateTimeSensorAsync(
-                task_id="wait_until_start_time",
-                target_time="""{{
-                            ti.xcom_pull(task_ids='schedule')["%d"][0] | string
-                        }}"""
-                % batch,
-            )
-
-            batch_has_work >> wait_until_start_time >> proceed
 
             join = EmptyOperator(
                 task_id="join",
                 trigger_rule="none_failed_min_one_success",
             )
 
+            # When proceed returns empty, all other tasks downstream
+            # from it, which use the expand() function, skip.
+            # But the join task must run unconditionally, else the
+            # downstream task (next batch) will be skipped, so we have
+            # to add an explicit linkage between proceed and join,
+            # such that join will always succeed instead of being skipped
+            # and therefore the next batch will run.
+            proceed >> join
+
             (
-                ic_os_rollout.CreateProposalIdempotently.partial(
+                ic_os_sensor.CustomDateTimeSensorAsync.partial(
+                    task_id="wait_until_start_time",
+                    target_time="""{{
+                            ti.xcom_pull(task_ids='schedule')["%d"][0] | string
+                        }}"""
+                    % batch,
+                ).expand(_ignored=proceed)
+                >> ic_os_rollout.CreateProposalIdempotently.partial(
                     task_id="create_proposal_if_none_exists",
                     git_revision="{{ params.git_revision }}",
                     simulate_proposal=cast(bool, "{{ params.simulate }}"),
@@ -254,28 +258,22 @@ for network_name, network in IC_NETWORKS.items():
                 >> join
             )
 
-            batch_has_work >> empty_batch >> join
+        sched = schedule()
+        revs = revisions(sched)
+        wait_for_election = ic_os_sensor.WaitForRevisionToBeElected.partial(
+            task_id="wait_for_revision_to_be_elected",
+            simulate_elected=cast(bool, "{{ params.simulate }}"),
+            network=network,
+            retries=retries,
+        ).expand(git_revision=revs)
 
-        last_task_group = None
+        task_groups = []
         for batch in range(MAX_BATCHES):
             batch_name = str(batch + 1)
             with TaskGroup(group_id=f"batch_{batch_name}") as group:
                 make_me_a_batch(batch_name, batch)
-                if last_task_group is not None:
-                    last_task_group >> group
-                else:
-                    sched >> group
-                last_task_group = group
-
-        wait_for_election = ic_os_sensor.WaitForRevisionToBeElected(
-            task_id="wait_for_revision_to_be_elected",
-            git_revision="{{ params.git_revision }}",
-            simulate_elected=cast(bool, "{{ params.simulate }}"),
-            network=network,
-            retries=retries,
-        )
-
-        wait_for_election >> sched
+                task_groups.append(group)
+        chain(wait_for_election, *task_groups)
 
 
 if __name__ == "__main__":
