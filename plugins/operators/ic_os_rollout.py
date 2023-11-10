@@ -5,14 +5,18 @@ IC-OS rollout operators.
 import itertools
 import re
 import subprocess
-from typing import Any, Sequence, cast
+from typing import Any, Sequence
 
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
-import jinja2
-from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
+from dfinity.ic_os_rollout import (
+    SLACK_CHANNEL,
+    SLACK_CONNECTION_ID,
+    SubnetIdWithRevision,
+    subnet_id_and_git_revision_from_args,
+)
 
 import airflow.models
 import airflow.providers.slack.operators.slack as slack
@@ -25,12 +29,16 @@ FAKE_PROPOSAL_NUMBER = -123456
 
 class RolloutParams(Templater):
     template_fields: Sequence[str] = ("subnet_id", "git_revision")
-    subnet_id: str
+    subnet_id: str | SubnetIdWithRevision
     git_revision: str
     network: ic_types.ICNetwork
 
     def __init__(
-        self, *, subnet_id: str, git_revision: str, network: ic_types.ICNetwork
+        self,
+        *,
+        subnet_id: str | SubnetIdWithRevision,
+        git_revision: str,
+        network: ic_types.ICNetwork,
     ) -> None:
         self.subnet_id = subnet_id
         self.git_revision = git_revision
@@ -42,7 +50,7 @@ class ICRolloutBaseOperator(RolloutParams, BaseOperator):
         self,
         *,
         task_id: str,
-        subnet_id: str,
+        subnet_id: str | SubnetIdWithRevision,
         git_revision: str,
         network: ic_types.ICNetwork,
         **kwargs: Any,
@@ -68,7 +76,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         self,
         *,
         task_id: str,
-        subnet_id: str,
+        subnet_id: str | SubnetIdWithRevision,
         git_revision: str,
         simulate_proposal: bool,
         network: ic_types.ICNetwork,
@@ -84,24 +92,13 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         )
         self.simulate_proposal = simulate_proposal
 
-    def render_template_fields(
-        self,
-        context: Context,
-        jinja_env: jinja2.Environment | None = None,
-    ) -> None:
-        # Ensure our simulate variable is a bool, since
-        # Jinja rendering makes this a string.
-        super().render_template_fields(context=context, jinja_env=jinja_env)
-        self.simulate_proposal = cast(str, self.simulate_proposal) == "True"
-
     def execute(self, context: Context) -> dict[str, int | str | bool]:
-        if isinstance(self.git_revision, int):
-            # Pad with zeroes in front, as Airflow "helpfully" downcast it.
-            self.git_revision = "{:040}".format(self.git_revision)
-
+        subnet_id, git_revision = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
+        )
         props = ic_api.get_proposals_for_subnet_and_revision(
-            subnet_id=self.subnet_id,
-            git_revision=self.git_revision,
+            subnet_id=subnet_id,
+            git_revision=git_revision,
             limit=1000,
             network=self.network,
         )
@@ -122,7 +119,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 prom.query_prometheus_servers(
                     self.network.prometheus_urls,
                     "sum(ic_replica_info{"
-                    f'ic_subnet="{self.subnet_id}"'
+                    f'ic_subnet="{subnet_id}"'
                     "}) by (ic_subnet)",
                 )[0]["value"]
             )
@@ -133,9 +130,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 value=res,
             )
         except IndexError:
-            raise RuntimeError(
-                f"No replicas have been found with subnet {self.subnet_id}"
-            )
+            raise RuntimeError(f"No replicas have been found with subnet {subnet_id}")
 
         if executeds:
             url = f"{self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
@@ -163,8 +158,8 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
 
         if not props:
             self.log.info(
-                f"No proposals for subnet ID {self.subnet_id} to "
-                + f"adopt revision {self.git_revision}."
+                f"No proposals for subnet ID {subnet_id} to "
+                + f"adopt revision {git_revision}."
             )
         else:
             self.log.info("The following proposals neither open nor executed exist:")
@@ -174,8 +169,8 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 )
 
         self.log.info(
-            f"Creating proposal for subnet ID {self.subnet_id} to "
-            + f"adopt revision {self.git_revision}."
+            f"Creating proposal for subnet ID {subnet_id} to "
+            + f"adopt revision {git_revision}."
         )
 
         # Use forrealz private key only when rolling out forrealz.
@@ -191,16 +186,14 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
             )
         )
         net = ic_types.augment_network_with_private_key(self.network, pkey)
-        # Force use of Git revision for ic-admin rollout,
+        # Force use of main rollout Git revision for ic-admin rollout,
         # but only when rolling out forrealz.
-        ic_admin_version = None if self.simulate_proposal else self.git_revision
-
         try:
             proc = ic_admin.propose_to_update_subnet_replica_version(
-                self.subnet_id,
-                self.git_revision,
+                subnet_id,
+                git_revision,
                 net,
-                ic_admin_version=ic_admin_version,
+                ic_admin_version=None if self.simulate_proposal else self.git_revision,
                 dry_run=self.simulate_proposal,
             )
             self.log.info("Standard output: %s", proc.stdout)

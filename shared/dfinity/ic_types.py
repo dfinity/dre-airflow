@@ -1,5 +1,6 @@
 import datetime
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -7,6 +8,7 @@ class SubnetRolloutInstance:
     start_at: datetime.datetime
     subnet_num: int
     subnet_id: str
+    git_revision: Optional[str] = None
 
 
 @dataclass

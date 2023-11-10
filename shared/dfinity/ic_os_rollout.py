@@ -3,7 +3,8 @@ Rollout IC os to subnets.
 """
 
 import datetime
-from typing import Any, Callable, TypeAlias
+import re
+from typing import Callable, TypeAlias, TypedDict, cast
 
 from dfinity.ic_types import SubnetRolloutInstance
 
@@ -40,14 +41,60 @@ def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.dat
     return days
 
 
+class SubnetIdWithRevision(TypedDict):
+    subnet_id: str
+    git_revision: str
+
+
+def subnet_id_and_git_revision_from_args(
+    original_subnet_id: str | SubnetIdWithRevision,
+    original_git_revision: str | int,
+) -> tuple[str, str]:
+    if isinstance(original_git_revision, int):
+        # Pad with zeroes in front, as Airflow "helpfully" downcast it.
+        git_revision = "{:040}".format(original_git_revision)
+    else:
+        git_revision = original_git_revision
+    if isinstance(original_subnet_id, dict):
+        subnet_id = original_subnet_id["subnet_id"]
+        git_revision = original_subnet_id["git_revision"]
+    else:
+        subnet_id = original_subnet_id
+    return subnet_id, git_revision
+
+
 """Zero-indexed rollout plan with batches of subnet instances to roll out."""
 RolloutPlan: TypeAlias = dict[
     str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
 ]
 
 
+SubnetNameOrNumber: TypeAlias = int | str
+
+
+class SubnetNameOrNumberWithRevision(TypedDict):
+    subnet: SubnetNameOrNumber
+    git_revision: str | None
+
+
+class SubnetNumberWithRevision(TypedDict):
+    subnet: int
+    git_revision: str | None
+
+
+class SubnetOrderSpec(TypedDict):
+    subnets: list[SubnetNameOrNumber | SubnetNameOrNumberWithRevision]
+    batch: int | None
+
+
 def rollout_planner(
-    plan: dict[str, Any],
+    plan: dict[
+        str,
+        dict[
+            str | int,
+            list[SubnetNameOrNumber | SubnetNameOrNumberWithRevision] | SubnetOrderSpec,
+        ],
+    ],
     subnet_list_source: Callable[[], list[str]],
     now: datetime.datetime | None = None,
 ) -> RolloutPlan:
@@ -55,17 +102,21 @@ def rollout_planner(
     week_plan = week_planner(now)
     batches: RolloutPlan = {}
     current_batch_index: int = 0
-    batch_index_for_sn: dict[int, int] = {}
+    batch_index_for_subnet: dict[int, int] = {}
 
+    # Convert date specifications to dates and times.
     for dayname, hours in sorted(plan.items(), key=lambda m: week_plan[m[0]]):
         try:
             date = week_plan[dayname]
         except KeyError:
             raise ValueError(f"{dayname} is not a valid day")
 
-        realhours: dict[datetime.datetime, Any] = {}
+        realhours: dict[
+            datetime.datetime,
+            list[SubnetNameOrNumber | SubnetNameOrNumberWithRevision] | SubnetOrderSpec,
+        ] = {}
 
-        for time_s, subnet_numbers in hours.items():
+        for time_s, subnet_numbers_raw in hours.items():
             org_time_s = time_s
             if isinstance(time_s, int):
                 hour = int(time_s / 60)
@@ -78,21 +129,45 @@ def rollout_planner(
                     f"{org_time_s} is not a valid hh:mm time on {dayname}"
                 ) from exc
             date_and_time = date.replace(hour=time.hour, minute=time.minute)
-            realhours[date_and_time] = subnet_numbers
+            realhours[date_and_time] = subnet_numbers_raw
 
-        for date_and_time, subnet_numbers in sorted(
+        # Convert subnet specifications to lists of subnets and Git
+        # revisions, grouped and ordered by time and date, and
+        # associated with their respective batches.
+        for date_and_time, subnet_numbers_list_or_dict in sorted(
             realhours.items(), key=lambda m: m[0]
         ):
-            if isinstance(subnet_numbers, dict):
-                subnet_numbers, batch_number = subnet_numbers[
-                    "subnets"
-                ], subnet_numbers.get("batch")
+            if isinstance(subnet_numbers_list_or_dict, dict):
+                try:
+                    subnets_list = subnet_numbers_list_or_dict["subnets"]
+                except KeyError:
+                    raise ValueError(
+                        f"subnets {subnet_numbers_list_or_dict} are improperly"
+                        ' specified, lacking a "subnets" entry'
+                    )
+                batch_number = subnet_numbers_list_or_dict.get("batch")
                 if batch_number is None:
-                    batch_index = current_batch_index
+                    batch_index: int = current_batch_index
                 else:
                     batch_index = batch_number - 1
             else:
+                subnets_list = subnet_numbers_list_or_dict
                 batch_index = current_batch_index
+
+            def convert(
+                ww: SubnetNameOrNumber | SubnetNameOrNumberWithRevision,
+            ) -> SubnetNameOrNumberWithRevision:
+                if isinstance(ww, dict):
+                    if "subnet" not in ww:
+                        raise ValueError(
+                            f"subnet {ww} is"
+                            '  improperly specified, lacking a "subnet" entry'
+                        )
+                    return ww
+                else:
+                    return {"subnet": ww, "git_revision": None}
+
+            subnets_and_revs = [convert(x) for x in subnets_list]
 
             if str(batch_index) in batches:
                 raise ValueError(
@@ -110,7 +185,21 @@ def rollout_planner(
                     f" lower than already-assigned batch {current_batch_index}"
                 )
 
-            for n, sn in enumerate(subnet_numbers):
+            for n, snwrev in enumerate(subnets_and_revs):
+                # Let's first check that only two keys are accepted here.
+                checked = dict(snwrev)
+                for key in ("subnet", "git_revision"):
+                    if key in checked:
+                        del checked[key]
+
+                sn = snwrev["subnet"]
+                if len(checked) > 0:
+                    raise ValueError(
+                        f"subnet specification {sn} contains extraneous keys"
+                        f" {', '.join(repr(s) for s in checked.keys())}"
+                    )
+
+                # Now let's check subnet validity.
                 if isinstance(sn, str):
                     prefix_matches = [
                         (m, s) for m, s in enumerate(subnet_list) if s.startswith(sn)
@@ -122,32 +211,50 @@ def rollout_planner(
                         )
                     if len(prefix_matches) > 1:
                         raise ValueError(f"subnet specification {sn} is ambiguous")
-                    subnet_numbers[n] = prefix_matches[0][0]
+                    subnets_and_revs[n]["subnet"] = prefix_matches[0][0]
                 elif not isinstance(sn, int) or sn < 0:
                     raise ValueError(
                         f"subnet number {sn} requested by {date_and_time} is"
                         " not a zero/positive integer or a valid subnet ID"
                     )
+            subnet_numbers_and_revs = cast(
+                list[SubnetNumberWithRevision], subnets_and_revs
+            )
 
             batches[str(batch_index)] = (date_and_time, [])
-            for sn in subnet_numbers:
-                principal = subnet_list[sn]
-                if sn >= len(subnet_list):
+            for subnet in subnet_numbers_and_revs:
+                subnet_number = subnet["subnet"]
+                if subnet_number >= len(subnet_list):
                     raise ValueError(
-                        f"subnet number {principal} requested by {date_and_time} is"
-                        " larger than the known total number of subnets"
+                        f"subnet number {subnet_number} requested by"
+                        f" {date_and_time} is larger than the known"
+                        " total number of subnets"
                     )
 
-                bsn = batch_index_for_sn.get(sn)
+                principal = subnet_list[subnet_number]
+                bsn = batch_index_for_subnet.get(subnet_number)
                 if bsn is not None:
                     raise ValueError(
                         f"subnet number {principal} requested by {date_and_time} is"
                         f" already being rolled out as part of batch {bsn+1}"
                     )
-                batch_index_for_sn[sn] = batch_index
+                batch_index_for_subnet[subnet_number] = batch_index
+                git_revision = subnet.get("git_revision")
+                if git_revision is not None and not re.match(
+                    "^[0-9a-f]{40}$", git_revision
+                ):
+                    raise ValueError(
+                        f"subnet number {principal} requested by {date_and_time} is"
+                        f" specifies invalid git revision {subnet['git_revision']}"
+                    )
 
                 batches[str(batch_index)][1].append(
-                    SubnetRolloutInstance(date_and_time, sn, principal),
+                    SubnetRolloutInstance(
+                        date_and_time,
+                        subnet_number,
+                        principal,
+                        git_revision,
+                    ),
                 )
 
             current_batch_index = batch_index + 1
