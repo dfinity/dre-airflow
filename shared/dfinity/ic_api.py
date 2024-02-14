@@ -31,6 +31,10 @@ IC_NETWORKS: dict[str, ic_types.ICNetwork] = {
 
 
 class ProposalStatus(Enum):
+    ## Weird proposal status not mentioned in the proto.
+    PROPOSAL_STATUS_UNKNOWN = -1
+
+    ## Unspecified status.
     PROPOSAL_STATUS_UNSPECIFIED = 0
 
     ## A decision (adopt/reject) has yet to be made.
@@ -209,9 +213,12 @@ def get_proposals(
         r.raise_for_status()
         for p in r.json()["data"]:
             x = cast(Proposal, p)
-            x["status"] = getattr(
-                ProposalStatus, "PROPOSAL_STATUS_" + cast(str, x["status"])
-            )
+            try:
+                x["status"] = getattr(
+                    ProposalStatus, "PROPOSAL_STATUS_" + cast(str, x["status"])
+                )
+            except AttributeError:
+                raise ValueError("Invalid status %r for proposal %s" % (x["status"], x))
             x["topic"] = getattr(ProposalTopic, cast(str, x["topic"]))
             res.append(x)
 
@@ -247,4 +254,9 @@ if __name__ == "__main__":
         limit=1000,
         network=IC_NETWORKS["mainnet"],
     ):
+        # for p in get_proposals(
+        #     topic=ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
+        #     limit=1000,
+        #     network=IC_NETWORKS["mainnet"],
+        # ):
         pprint.pprint(p)
