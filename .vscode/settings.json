@@ -2,8 +2,8 @@
     "python.linting.mypyEnabled": true,
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
-        "source.organizeImports": false,
-        "source.fixAll": true
+        "source.organizeImports": "never",
+        "source.fixAll": "explicit"
     },
     "python.testing.pytestArgs": [
         "tests"
