@@ -46,7 +46,7 @@ class AutoComputeRolloutPlan(BaseOperator):
         self.default_rollout_plan = default_rollout_plan
         super().__init__(**kwargs)
 
-    def execute(self, context: Context) -> tuple[str, str]:
+    def execute(self, context: Context) -> tuple[str, str, str]:
         release_versions = cast(
             Releases,
             context["task_instance"].xcom_pull(
@@ -183,18 +183,25 @@ class AutoComputeRolloutPlan(BaseOperator):
         self.log.info("Rollout plan prepared:\n%s", yamlified_spec)
         self.log.info("Base version of release: %s", selected_release_versions["base"])
 
-        return (selected_release_versions["base"], yamlified_spec)
+        return (
+            selected_release["rc_name"],
+            selected_release_versions["base"],
+            yamlified_spec,
+        )
 
 
 class TriggerRollout(TriggerDagRunOperator):
 
-    def __init__(self, plan_task_id: str, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
+    ) -> None:
         self.plan_task_id = plan_task_id
+        self.simulate_rollout = simulate_rollout
         TriggerDagRunOperator.__init__(self, *args, **kwargs)
 
     def execute(self, context: Context) -> None:
-        base_git_revision, rollout_plan = cast(
-            tuple[str, str],
+        rc_name, base_git_revision, rollout_plan = cast(
+            tuple[str, str, str],
             context["task_instance"].xcom_pull(
                 task_ids=self.plan_task_id,
             ),
@@ -202,6 +209,7 @@ class TriggerRollout(TriggerDagRunOperator):
         self.conf = dict(
             git_revision=base_git_revision,
             plan=rollout_plan,
-            simulate=False,
+            simulate=self.simulate_rollout,
         )
+        self.trigger_run_id = rc_name
         super().execute(context)
