@@ -124,8 +124,8 @@ class AutoComputeRolloutPlan(BaseOperator):
                 )
 
         selected_release_versions: dict[str, str] = {}
-        for v in selected_release["versions"]:
-            selected_release_versions[v["name"]] = v["version"]
+        for vv in selected_release["versions"]:
+            selected_release_versions[vv["name"]] = vv["version"]
 
         def add_release(
             subnet: SubnetNameOrNumber | SubnetNameOrNumberWithRevision,
