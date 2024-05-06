@@ -17,7 +17,7 @@ from airflow.models.param import Param
 from airflow.operators.python import BranchPythonOperator
 
 DEFAULT_ROLLOUT_PLAN_SHEETS = {
-    "mainnet": "10smPe_HeWkbIY5nljaP7ogem5AkATEFJg0ihd_jof9I",
+    "mainnet": "1ZcYB0gWjbgg7tFgy2Fhd3llzYlefJIb0Mik75UUrSXM",
 }
 
 DAGS: dict[str, DAG] = {}
