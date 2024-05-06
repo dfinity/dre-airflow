@@ -64,8 +64,15 @@ for network_name, network in IC_NETWORKS.items():
                 default=DEFAULT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
+                description="A YAML-formatted string describing the rollout schedule.",
                 custom_html_form=PLAN_FORM,
+            ),
+            "start_rollout": Param(
+                False,
+                type="boolean",
+                title="Auto start rollout",
+                description="If enabled (not currently the default), the rollout plan"
+                " will be used to create and auto start a rollout.",
             ),
         },
     ) as dag:
