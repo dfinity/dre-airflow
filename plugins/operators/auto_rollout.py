@@ -75,9 +75,9 @@ class AutoComputeRolloutPlan(BaseOperator):
             )[-1]
             self.log.info("Selected release: %s", selected_release)
         except IndexError:
-            raise ValueError(
-                f"Release list contains no releases before {now} and after {xdaysago}"
-            )
+            v = f"Release list contains no releases before {now} and after {xdaysago}"
+            self.log.error("%s.  Aborting.", v)
+            raise ValueError(v)
 
         # Select rollout features depending on the day of the week of this rollout.
         # If today is a Saturday or a Sunday, assume the rollout feature plan will
