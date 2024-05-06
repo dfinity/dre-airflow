@@ -67,13 +67,6 @@ for network_name, network in IC_NETWORKS.items():
                 description="A YAML-formatted string describing the rollout schedule",
                 custom_html_form=PLAN_FORM,
             ),
-            "simulate": Param(
-                True,
-                type="boolean",
-                title="Simulate",
-                description="If enabled (the default), the update proposal will be"
-                " simulated but not created, and its acceptance will be simulated too",
-            ),
         },
     ) as dag:
         DAGS[network_name] = dag
