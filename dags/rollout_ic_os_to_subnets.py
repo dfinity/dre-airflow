@@ -14,7 +14,13 @@ import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_api import IC_NETWORKS
-from dfinity.ic_os_rollout import SubnetIdWithRevision, rollout_planner
+from dfinity.ic_os_rollout import (
+    DEFAULT_PLANS,
+    MAX_BATCHES,
+    PLAN_FORM,
+    SubnetIdWithRevision,
+    rollout_planner,
+)
 from dfinity.ic_types import SubnetRolloutInstance
 
 from airflow import DAG
@@ -23,71 +29,6 @@ from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
 from airflow.utils.task_group import TaskGroup
-
-# Also defined in dfinity.ic_os_rollout
-MAX_BATCHES: int = 30
-DEFAULT_PLANS: dict[str, str] = {
-    "mainnet": """
-# See documentation at the end of this configuration block.
-Monday:
-  9:00:      [io67a]
-  11:00:     [shefu, uzr34]
-Tuesday:
-  7:00:      [pjljw, qdvhd, bkfrj]
-  9:00:      [snjp4, w4asl, qxesv]
-  11:00:     [4zbus, ejbmu, 2fq7c]
-Wednesday:
-  7:00:      [pae4o, 5kdm2, csyj4]
-  9:00:      [eq6en, lhg73, brlsh]
-  11:00:     [k44fs, cv73p, 4ecnw]
-  13:00:     [opn46, lspz2, o3ow2]
-Thursday:
-  7:00:      [w4rem, 6pbhf, e66qm]
-  9:00:      [yinp6, fuqsr, jtdsg]
-  11:00:     [mpubz, x33ed, pzp6e]
-  13:00:     [3hhby, nl6hn, gmq5v]
-Monday next week:
-  7:00:
-    subnets: [tdb26]
-    batch: 30
-# Remarks:
-# * All times are expressed in the UTC time zone.
-# * Days refer to dates relative to your current work week
-#   if starting a rollout during a workday, or next week if
-#   the rollout is started during a weekend.
-# * A day name with " next week" added at the end means
-#   "add one week to this day".
-# * Each date/time can specify a simple list of subnets,
-#   or can specify a dict with two keys:
-#   * batch: an optional integer 1-30 with the batch number
-#            you want to assign to this batch.
-#   * subnets: a list of subnets.
-# * A subnet may be specified:
-#   * as an integer number from 0 to the maximum subnet number,
-#   * as a full or abbreviated subnet principal ID,
-#   * as a dictionary of {
-#        subnet: ID or principal
-#        git_revision: revision to deploy to this subnet
-#     }
-#     with this form being able to override the Git revision
-#     that will be targeted to that specific subnet.
-#     Example of a batch specified this way:
-#       Monday next week:
-#         7:00:
-#           batch: 30
-#           subnets:
-#           - subnet: tdb26
-#             git_revision: 0123456789012345678901234567890123456789
-"""
-}
-
-_PLAN_FORM = """
-    <textarea class="form-control" name="{name}" 
-           id="{name}" placeholder=""
-           type="text"
-           required="" rows="24">{value}</textarea>
-"""
-
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
@@ -114,7 +55,7 @@ for network_name, network in IC_NETWORKS.items():
                 type="string",
                 title="Rollout plan",
                 description="A YAML-formatted string describing the rollout schedule",
-                custom_html_form=_PLAN_FORM,
+                custom_html_form=PLAN_FORM,
             ),
             "simulate": Param(
                 True,

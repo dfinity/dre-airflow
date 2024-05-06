@@ -53,6 +53,15 @@ connections:
   * Slack API token: ask the DRE team for the API token to post
     to Slack, which should be in the DRE team vault.
 
+On the same screen, edit the `google_cloud_default` connection, to add
+to the value `Keyfile JSON` the contents of the Google API key created
+for Airflow that our team has in the DRE team vault.  Then add the following
+scopes to the *Scopes* field:
+
+```
+https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets
+```
+
 Variables and connections are only visible to administrators.
 
 ### Developing and deploying Airflow content robustly
