@@ -16,6 +16,7 @@ from dfinity.rollout_types import (
 )
 
 from airflow.models.baseoperator import BaseOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.context import Context
 
 
@@ -45,7 +46,7 @@ class AutoComputeRolloutPlan(BaseOperator):
         self.default_rollout_plan = default_rollout_plan
         super().__init__(**kwargs)
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Context) -> tuple[str, str]:
         release_versions = cast(
             Releases,
             context["task_instance"].xcom_pull(
@@ -122,6 +123,10 @@ class AutoComputeRolloutPlan(BaseOperator):
                     "No feature map for any of the last %s days", max_days_lookbehind
                 )
 
+        selected_release_versions: dict[str, str] = {}
+        for v in selected_release["versions"]:
+            selected_release_versions[v["name"]] = v["version"]
+
         def add_release(
             subnet: SubnetNameOrNumber | SubnetNameOrNumberWithRevision,
         ) -> SubnetNameOrNumberWithRevision:
@@ -129,16 +134,12 @@ class AutoComputeRolloutPlan(BaseOperator):
                 # Manually overridden, return the same.
                 return cast(SubnetNameOrNumberWithRevision, subnet)
 
-            vers: dict[str, str] = {}
-            for v in selected_release["versions"]:
-                vers[v["name"]] = v["version"]
-
             if isinstance(subnet, dict):
                 subnet = subnet["subnet"]
 
             if isinstance(subnet, str):
                 for featured_subnet, feature in subnet_id_feature_map.items():
-                    if feature not in vers:
+                    if feature not in selected_release_versions:
                         raise ValueError(
                             f"Cannot find a variant named {feature} among the selected"
                             f" feature map {subnet_id_feature_map} in the selected"
@@ -147,17 +148,17 @@ class AutoComputeRolloutPlan(BaseOperator):
                     if featured_subnet.startswith(subnet):
                         return {
                             "subnet": subnet,
-                            "git_revision": vers[feature],
+                            "git_revision": selected_release_versions[feature],
                         }
 
-                if "base" not in vers:
+                if "base" not in selected_release_versions:
                     raise ValueError(
                         f"Cannot find a variant named base in the selected"
                         f" release {selected_release}"
                     )
                 return {
                     "subnet": subnet,
-                    "git_revision": vers["base"],
+                    "git_revision": selected_release_versions["base"],
                 }
 
             raise ValueError(
@@ -180,3 +181,27 @@ class AutoComputeRolloutPlan(BaseOperator):
 
         yamlified_spec = yaml.safe_dump(spec, sort_keys=False)
         self.log.info("Rollout plan prepared:\n%s", yamlified_spec)
+        self.log.info("Base version of release: %s", selected_release_versions["base"])
+
+        return (selected_release_versions["base"], yamlified_spec)
+
+
+class TriggerRollout(TriggerDagRunOperator):
+
+    def __init__(self, plan_task_id: str, *args: Any, **kwargs: Any) -> None:
+        self.plan_task_id = plan_task_id
+        TriggerDagRunOperator.__init__(self, *args, **kwargs)
+
+    def execute(self, context: Context) -> None:
+        base_git_revision, rollout_plan = cast(
+            tuple[str, str],
+            context["task_instance"].xcom_pull(
+                task_ids=self.plan_task_id,
+            ),
+        )
+        self.conf = dict(
+            git_revision=base_git_revision,
+            plan=rollout_plan,
+            simulate=False,
+        )
+        super().execute(context)

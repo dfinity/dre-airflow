@@ -14,6 +14,7 @@ from dfinity.ic_os_rollout import DEFAULT_PLANS, PLAN_FORM
 
 from airflow import DAG
 from airflow.models.param import Param
+from airflow.operators.python import BranchPythonOperator
 
 DEFAULT_ROLLOUT_PLAN_SHEETS = {
     "mainnet": "10smPe_HeWkbIY5nljaP7ogem5AkATEFJg0ihd_jof9I",
@@ -68,7 +69,7 @@ for network_name, network in IC_NETWORKS.items():
                 custom_html_form=PLAN_FORM,
             ),
             "start_rollout": Param(
-                False,
+                default=False,
                 type="boolean",
                 title="Auto start rollout",
                 description="If enabled (not currently the default), the rollout plan"
@@ -77,17 +78,8 @@ for network_name, network in IC_NETWORKS.items():
         },
     ) as dag:
         DAGS[network_name] = dag
+        retries = int(86400 / 60 / 5)  # one day worth of retries
 
-        features = gsheets_rollout.GetFeatureRolloutPlan(
-            task_id="get_feature_rollout_plan",
-            spreadsheet={
-                "spreadsheetId": "{{ params.release_feature_spreadsheet_id }}"
-            },
-        )
-        releases = github_rollout.GetReleases(
-            task_id="get_release_versions",
-            release_index_url="{{ params.release_index_url }}",
-        )
         compute = auto_rollout.AutoComputeRolloutPlan(
             task_id="auto_compute_rollout",
             release_versions_data_task_id="get_release_versions",
@@ -96,8 +88,42 @@ for network_name, network in IC_NETWORKS.items():
             default_rollout_plan="{{ params.plan }}",
         )
 
-        features >> compute
-        releases >> compute
+        (
+            gsheets_rollout.GetFeatureRolloutPlan(
+                task_id="get_feature_rollout_plan",
+                spreadsheet={
+                    "spreadsheetId": "{{ params.release_feature_spreadsheet_id }}"
+                },
+                retries=retries,
+            )
+            >> compute
+        )
+        (
+            github_rollout.GetReleases(
+                task_id="get_release_versions",
+                release_index_url="{{ params.release_index_url }}",
+                retries=retries,
+            )
+            >> compute
+        )
+
+        (
+            compute
+            >> BranchPythonOperator(
+                task_id="decide_to_start_rollout",
+                python_callable=lambda should_start: (
+                    ["start_rollout"] if should_start else []
+                ),
+                op_args=[
+                    "{{ params.start_rollout }}",
+                ],
+            )
+            >> auto_rollout.TriggerRollout(
+                task_id="start_rollout",
+                trigger_dag_id=f"rollout_ic_os_to_{network_name}_subnets",
+                plan_task_id="auto_compute_rollout",
+            )
+        )
 
 
 if __name__ == "__main__":
