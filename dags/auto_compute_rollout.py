@@ -24,8 +24,8 @@ DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
     with DAG(
         dag_id=f"auto_compute_rollout_to_{network_name}",
-        schedule=None,
-        start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
+        schedule="@weekly",
+        start_date=pendulum.datetime(2024, 5, 5, hour=18, minute=0, second=0, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=2),
         tags=["rollout", "DRE", "IC OS"],
