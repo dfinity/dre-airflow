@@ -155,7 +155,7 @@ class Proposal(TypedDict):
                 'to replica version '
                 '[b3b00ba59c366384e3e0cd53a69457e9053ec987](https:##dashboard.internetcomputer.org/release/b3b00ba59c366384e3e0cd53a69457e9053ec987)\n',
     'title': 'Update subnet 4zbus to replica version b3b00ba5',
-    'topic': 'IC_OS_VERSION_DEPLOYMENT',
+    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT',
     'updated_at': '2023-05-27T16:01:35.534945',
     'url': ''}
     """
@@ -237,7 +237,7 @@ def get_proposals_for_subnet_and_revision(
     return [
         r
         for r in get_proposals(
-            topic=ProposalTopic.IC_OS_VERSION_DEPLOYMENT,
+            topic=ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
             limit=limit,
             offset=offset,
             network=network,
@@ -257,7 +257,7 @@ if __name__ == "__main__":
         network=IC_NETWORKS["mainnet"],
     ):
         # for p in get_proposals(
-        #     topic=ProposalTopic.IC_OS_VERSION_DEPLOYMENT,
+        #     topic=ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
         #     limit=1000,
         #     network=IC_NETWORKS["mainnet"],
         # ):
