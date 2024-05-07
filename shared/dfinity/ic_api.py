@@ -118,11 +118,13 @@ class ProposalTopic(Enum):
     TOPIC_SNS_DECENTRALIZATION_SALE = 11
     ## Proposals handling updates of a subnet's replica version.
     ## The only proposal in this topic is UpdateSubnetReplicaVersion.
-    TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT = 12
+    TOPIC_IC_OS_VERSION_DEPLOYMENT = 12
     ## All proposals dealing with blessing and retirement of replica versions.
-    TOPIC_REPLICA_VERSION_MANAGEMENT = 13
+    TOPIC_IC_OS_VERSION_ELECTION = 13
     ## Proposals related to SNS and Community Fund.
     TOPIC_SNS_AND_COMMUNITY_FUND = 14
+    ## Proposals related to the management of API Boundary nodes
+    TOPIC_API_BOUNDARY_NODE_MANAGEMENT = 15
 
 
 class Proposal(TypedDict):
@@ -153,7 +155,7 @@ class Proposal(TypedDict):
                 'to replica version '
                 '[b3b00ba59c366384e3e0cd53a69457e9053ec987](https:##dashboard.internetcomputer.org/release/b3b00ba59c366384e3e0cd53a69457e9053ec987)\n',
     'title': 'Update subnet 4zbus to replica version b3b00ba5',
-    'topic': 'TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT',
+    'topic': 'IC_OS_VERSION_DEPLOYMENT',
     'updated_at': '2023-05-27T16:01:35.534945',
     'url': ''}
     """
@@ -235,7 +237,7 @@ def get_proposals_for_subnet_and_revision(
     return [
         r
         for r in get_proposals(
-            topic=ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
+            topic=ProposalTopic.IC_OS_VERSION_DEPLOYMENT,
             limit=limit,
             offset=offset,
             network=network,
@@ -255,7 +257,7 @@ if __name__ == "__main__":
         network=IC_NETWORKS["mainnet"],
     ):
         # for p in get_proposals(
-        #     topic=ProposalTopic.TOPIC_SUBNET_REPLICA_VERSION_MANAGEMENT,
+        #     topic=ProposalTopic.IC_OS_VERSION_DEPLOYMENT,
         #     limit=1000,
         #     network=IC_NETWORKS["mainnet"],
         # ):
