@@ -52,6 +52,13 @@ connections:
   * Description: The connection used for IC OS rollouts.
   * Slack API token: ask the DRE team for the API token to post
     to Slack, which should be in the DRE team vault.
+*
+  * Name: `google_cloud_default`
+  * Connection type: Google Cloud
+  * Description: Used to access Google spreadsheets for rollout plan.
+  * Keyfile JSON: the contents of the Google API key created
+    for Airflow that our team has in the DRE team vault.
+  * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets
 
 Variables and connections are only visible to administrators.
 

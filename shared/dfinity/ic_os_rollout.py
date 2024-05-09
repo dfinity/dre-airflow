@@ -7,10 +7,78 @@ import re
 from typing import Callable, TypeAlias, TypedDict, cast
 
 from dfinity.ic_types import SubnetRolloutInstance
+from dfinity.rollout_types import (
+    RolloutPlanSpec,
+    SubnetNameOrNumber,
+    SubnetNameOrNumberWithRevision,
+    SubnetNumberWithRevision,
+    SubnetOrderSpec,
+)
 
 SLACK_CHANNEL = "#eng-release-bots"
 SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 MAX_BATCHES: int = 30
+
+DEFAULT_PLANS: dict[str, str] = {
+    "mainnet": """
+# See documentation at the end of this configuration block.
+Monday:
+  9:00:      [io67a]
+  11:00:     [shefu, uzr34]
+Tuesday:
+  7:00:      [pjljw, qdvhd, bkfrj]
+  9:00:      [snjp4, w4asl, qxesv]
+  11:00:     [4zbus, ejbmu, 2fq7c]
+Wednesday:
+  7:00:      [pae4o, 5kdm2, csyj4]
+  9:00:      [eq6en, lhg73, brlsh]
+  11:00:     [k44fs, cv73p, 4ecnw]
+  13:00:     [opn46, lspz2, o3ow2]
+Thursday:
+  7:00:      [w4rem, 6pbhf, e66qm]
+  9:00:      [yinp6, fuqsr, jtdsg]
+  11:00:     [mpubz, x33ed, pzp6e]
+  13:00:     [3hhby, nl6hn, gmq5v]
+Monday next week:
+  7:00:
+    subnets: [tdb26]
+    batch: 30
+# Remarks:
+# * All times are expressed in the UTC time zone.
+# * Days refer to dates relative to your current work week
+#   if starting a rollout during a workday, or next week if
+#   the rollout is started during a weekend.
+# * A day name with " next week" added at the end means
+#   "add one week to this day".
+# * Each date/time can specify a simple list of subnets,
+#   or can specify a dict with two keys:
+#   * batch: an optional integer 1-30 with the batch number
+#            you want to assign to this batch.
+#   * subnets: a list of subnets.
+# * A subnet may be specified:
+#   * as an integer number from 0 to the maximum subnet number,
+#   * as a full or abbreviated subnet principal ID,
+#   * as a dictionary of {
+#        subnet: ID or principal
+#        git_revision: revision to deploy to this subnet
+#     }
+#     with this form being able to override the Git revision
+#     that will be targeted to that specific subnet.
+#     Example of a batch specified this way:
+#       Monday next week:
+#         7:00:
+#           batch: 30
+#           subnets:
+#           - subnet: tdb26
+#             git_revision: 0123456789012345678901234567890123456789
+"""
+}
+PLAN_FORM = """
+    <textarea class="form-control" name="{name}" 
+           id="{name}" placeholder=""
+           type="text"
+           required="" rows="24">{value}</textarea>
+"""
 
 
 def week_planner(now: datetime.datetime | None = None) -> dict[str, datetime.datetime]:
@@ -69,32 +137,8 @@ RolloutPlan: TypeAlias = dict[
 ]
 
 
-SubnetNameOrNumber: TypeAlias = int | str
-
-
-class SubnetNameOrNumberWithRevision(TypedDict):
-    subnet: SubnetNameOrNumber
-    git_revision: str | None
-
-
-class SubnetNumberWithRevision(TypedDict):
-    subnet: int
-    git_revision: str | None
-
-
-class SubnetOrderSpec(TypedDict):
-    subnets: list[SubnetNameOrNumber | SubnetNameOrNumberWithRevision]
-    batch: int | None
-
-
 def rollout_planner(
-    plan: dict[
-        str,
-        dict[
-            str | int,
-            list[SubnetNameOrNumber | SubnetNameOrNumberWithRevision] | SubnetOrderSpec,
-        ],
-    ],
+    plan: RolloutPlanSpec,
     subnet_list_source: Callable[[], list[str]],
     now: datetime.datetime | None = None,
 ) -> RolloutPlan:
