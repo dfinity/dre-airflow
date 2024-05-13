@@ -25,7 +25,7 @@ for network_name, network in IC_NETWORKS.items():
     with DAG(
         dag_id=f"auto_compute_rollout_to_{network_name}",
         schedule_interval="0 18 * * 0",
-        start_date=pendulum.datetime(2024, 5, 5, hour=18, minute=0, second=0, tz="UTC"),
+        start_date=pendulum.datetime(2024, 5, 5, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=2),
         tags=["rollout", "DRE", "IC OS"],
