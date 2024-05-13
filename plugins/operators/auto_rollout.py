@@ -3,7 +3,6 @@ IC-OS rollout operators.
 """
 
 import datetime
-from datetime import timezone
 from typing import Any, cast
 
 import yaml
@@ -62,7 +61,8 @@ class AutoComputeRolloutPlan(BaseOperator):
 
         max_days_lookbehind = int(self.max_days_lookbehind)
         # Select latest release no later than now and no earlier than the last X days.
-        now = datetime.datetime.now().replace(tzinfo=timezone.utc)
+        now = context["logical_date"]
+        self.log.info('Using %s as "now" date/time for rollout computation', now)
         xdaysago = now - datetime.timedelta(days=max_days_lookbehind)
         release_versions = [
             r
@@ -85,8 +85,11 @@ class AutoComputeRolloutPlan(BaseOperator):
         # and no earlier than the last X days, to prevent accidental selection of a
         # feature plan from two, three weeks ago.
         if now.weekday() in [5, 6]:
-            next_monday = next_weekday(now.date(), 0)
-            self.log.info("Using next Monday %s to select a feature plan", next_monday)
+            next_monday = next_weekday(now.date(), 0)  # type: ignore
+            self.log.info(
+                "It's a weekend; using next Monday %s to select a feature plan",
+                next_monday,
+            )
             try:
                 feature_plan = [
                     f for f in rollout_features if f["date"] == next_monday
@@ -102,11 +105,16 @@ class AutoComputeRolloutPlan(BaseOperator):
                 subnet_id_feature_map = {}
                 self.log.info("No feature map for next Monday")
         else:
-            self.log.info("Looking for feature plan no later than today %s", now)
+            self.log.info(
+                "It's a weekday; looking for feature plan no later than today"
+            )
             feature_plans = [
                 f
                 for f in rollout_features
-                if f["date"] <= now.date() and f["date"] >= xdaysago.date()
+                if (
+                    f["date"] <= now.date()  # type: ignore
+                    and f["date"] >= xdaysago.date()
+                )
             ]
             if feature_plans:
                 feature_plan = list(sorted(feature_plans, key=lambda m: m["date"]))[-1]
