@@ -26,7 +26,7 @@ Monday:
   9:00:      [io67a]
   11:00:     [shefu, fuqsr]
 Tuesday:
-  7:00:      [pjljw, qdvhd, 2fq7c] 
+  7:00:      [pjljw, qdvhd, 2fq7c]
   9:00:      [snjp4, w4asl, qxesv]
   11:00:     [4zbus, ejbmu, uzr34]
 Wednesday:
