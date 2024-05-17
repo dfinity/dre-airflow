@@ -24,11 +24,11 @@ DEFAULT_PLANS: dict[str, str] = {
 # See documentation at the end of this configuration block.
 Monday:
   9:00:      [io67a]
-  11:00:     [shefu, uzr34]
+  11:00:     [shefu, fuqsr] 
 Tuesday:
-  7:00:      [pjljw, qdvhd, bkfrj]
+  7:00:      [pjljw, qdvhd, 2fq7c] 
   9:00:      [snjp4, w4asl, qxesv]
-  11:00:     [4zbus, ejbmu, 2fq7c]
+  11:00:     [4zbus, ejbmu, uzr34] 
 Wednesday:
   7:00:      [pae4o, 5kdm2, csyj4]
   9:00:      [eq6en, lhg73, brlsh]
@@ -36,9 +36,9 @@ Wednesday:
   13:00:     [opn46, lspz2, o3ow2]
 Thursday:
   7:00:      [w4rem, 6pbhf, e66qm]
-  9:00:      [yinp6, fuqsr, jtdsg]
-  11:00:     [mpubz, x33ed, pzp6e]
-  13:00:     [3hhby, nl6hn, gmq5v]
+  9:00:      [yinp6, bkfrj, jtdsg]
+  11:00:     [mpubz, x33ed, gmq5v]
+  13:00:     [3hhby, nl6hn, pzp6e]
 Monday next week:
   7:00:
     subnets: [tdb26]
