@@ -75,7 +75,11 @@ class AutoComputeRolloutPlan(BaseOperator):
             )[-1]
             self.log.info("Selected release: %s", selected_release)
         except IndexError:
-            v = f"Release list contains no releases before {now} and after {xdaysago}"
+            v = (
+                f"Release list contains no releases before {now} and after {xdaysago};"
+                " if you are running this later than expected, re-run this DAG"
+                " with an increased maximum lookbehind in days"
+            )
             self.log.error("%s.  Aborting.", v)
             raise ValueError(v)
 
