@@ -61,7 +61,7 @@ class AutoComputeRolloutPlan(BaseOperator):
 
         max_days_lookbehind = int(self.max_days_lookbehind)
         # Select latest release no later than now and no earlier than the last X days.
-        now = context["logical_date"]
+        now = datetime.datetime.now()
         self.log.info('Using %s as "now" date/time for rollout computation', now)
         xdaysago = now - datetime.timedelta(days=max_days_lookbehind)
         release_versions = [
