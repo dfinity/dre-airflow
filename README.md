@@ -341,7 +341,7 @@ The artifacts in this repository are delivered to the relevant
 Airflow production pods by way of the `airflow-content-syncer`
 container [built from this repository](airflow-content-syncer/).
 Delivery is not done through the container, but rather by using
-`git clone` within the container periodically, running as a
+`git clone` / `git fetch` within the container periodically, running as a
 sidecar in all relevant Airflow pods.
 
 In production, the syncer container will check which is the latest
@@ -363,8 +363,11 @@ needs to have the update merged.
 To determine if / when the artifacts have been synced, look at the
 log of the container `airflow-content-syncer` in any of the
 triggerer, scheduler or worker pods of the Airflow deployment (in
-namespace `airflow`).  **The artifacts are not delivered
-simultaneously to all production pods.**  There might be a divergence
+namespace `airflow`).  These logs can be retrieved from Loki in
+production (use the cluster's Grafana instance, *Explore* tab)
+by filtering for `namespace = airflow` and further narrowing the
+filter to contain the string `Updat`.  **Artifacts are not delivered
+simultaneously to all production pods** -- there might be a divergence
 of up to 5 minutes between pods syncing.
 
 *TBD*: test these artifacts!
