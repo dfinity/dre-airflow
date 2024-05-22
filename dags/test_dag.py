@@ -9,6 +9,7 @@ import pendulum
 
 from airflow import DAG
 from airflow.decorators import task
+from airflow.sensors.time_delta import TimeDeltaSensorAsync
 
 with DAG(
     dag_id="test_dag",
@@ -30,6 +31,10 @@ with DAG(
         >> test_operator.TestTask(
             task_id="task_2",
         )
+        >> TimeDeltaSensorAsync(
+            task_id="wait_2_minutes",
+            delta=datetime.timedelta(minutes=2),
+        )  # type: ignore
         >> test_operator.TestTask(
             task_id="task_3",
         )
