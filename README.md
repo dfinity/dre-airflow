@@ -44,21 +44,29 @@ variables:
   * Description: The proposal certificate for neuron 80 to be used on mainnet.
 
 Now go to *Top menubar -> Admin -> Connections*.  Then create the following
-connections:
+connections (unless specified otherwise):
 
 *
-  * Name: `slack.ic_os_rollout`
+  * Connection ID: `slack.ic_os_rollout`
   * Connection type: Slack API
   * Description: The connection used for IC OS rollouts.
   * Slack API token: ask the DRE team for the API token to post
     to Slack, which should be in the DRE team vault.
 *
-  * Name: `google_cloud_default`
+  * Connection ID: `google_cloud_default`
   * Connection type: Google Cloud
   * Description: Used to access Google spreadsheets for rollout plan.
   * Keyfile JSON: the contents of the Google API key created
     for Airflow that our team has in the DRE team vault.
   * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets
+*
+  * Connection ID: `airflow_logging`
+  * Connection type: Amazon Web Services
+  * Description: Logging storage for Airflow.
+  * AWS Access Key ID: the value of `AWS_ACCESS_KEY_ID` in K8s secret `airflow-logging`
+  * AWS Secret Access Key: the value of `AWS_SECRET_ACCESS_KEY` in K8s secret `airflow-logging`
+  * Extra: `{ "endpoint_url": "http://rook-ceph-rgw-ceph-store.rook-ceph.svc.cluster.local" }`
+  * **Only create this connection if running under K8s**
 
 Variables and connections are only visible to administrators.
 
