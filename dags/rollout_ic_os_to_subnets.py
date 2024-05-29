@@ -212,6 +212,12 @@ for network_name, network in IC_NETWORKS.items():
             task_id="wait_for_other_rollouts"
         )
 
+        upgrade_unassigned_nodes = ic_os_rollout.UpgradeUnassignedNodes(
+            task_id="upgrade_unassigned_nodes",
+            simulate=cast(bool, "{{ params.simulate }}"),
+            network=network,
+        )
+
         task_groups = []
         for batch in range(MAX_BATCHES):
             batch_name = str(batch + 1)
@@ -224,6 +230,7 @@ for network_name, network in IC_NETWORKS.items():
                 wait_for_other_rollouts,
             ),
             *task_groups,
+            upgrade_unassigned_nodes,
         )
 
 

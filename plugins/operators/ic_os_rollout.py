@@ -7,6 +7,7 @@ import re
 import subprocess
 from typing import Any, Sequence
 
+import dfinity.dre as dre
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
@@ -20,6 +21,7 @@ from dfinity.ic_os_rollout import (
 
 import airflow.models
 import airflow.providers.slack.operators.slack as slack
+from airflow.exceptions import AirflowException
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
@@ -268,3 +270,49 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
         else:
             self.log.info("Requesting vote on proposal with text: %s", self.text)
             slack.SlackAPIPostOperator.execute(self, context=context)  # type:ignore
+
+
+class UpgradeUnassignedNodes(BaseOperator):
+    template_fields = ("simulate",)
+    network: ic_types.ICNetwork
+    simulate: bool
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        network: ic_types.ICNetwork,
+        simulate: bool,
+        **kwargs: Any,
+    ):
+        self.simulate = simulate
+        self.network = network
+        BaseOperator.__init__(self, task_id=task_id, **kwargs)
+
+    def execute(self, context: Context) -> None:
+        if self.simulate:
+            self.log.info(f"simulate={self.simulate}")
+
+        pkey = airflow.models.Variable.get(
+            self.network.proposer_neuron_private_key_variable_name
+        )
+
+        net = ic_types.augment_network_with_private_key(self.network, pkey)
+        p = dre.DRE(network=net).upgrade_unassigned_nodes(dry_run=self.simulate)
+        self.log.info("dre output:\n%s", p.stdout)
+        if p.returncode != 0:
+            raise AirflowException("dre exited with status code %d", p.returncode)
+
+
+if __name__ == "__main__":
+    network = ic_types.ICNetwork(
+        "https://ic0.app/",
+        "https://ic-api.internetcomputer.org/api/v3/proposals",
+        "https://dashboard.internetcomputer.org/proposal",
+        "https://dashboard.internetcomputer.org/release",
+        ["https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"],
+        80,
+        "dfinity.ic_admin.mainnet.proposer_key_file",
+    )
+    x = UpgradeUnassignedNodes(task_id="upgrade", simulate=True, network=network)
+    x.execute({})
