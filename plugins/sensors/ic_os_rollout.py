@@ -494,8 +494,7 @@ class WaitForOtherRollouts(BaseSensorOperator):
         """
         # Take all dag runs...
         dag_runs = DagRun.find(dag_id=self.source_dag_id)
-        # ...include only running / queued...
-        # ...and dags that aren't us....
+        # ...include only running / queued and dags that aren't us.
         dag_runs = [
             d
             for d in dag_runs
@@ -506,17 +505,26 @@ class WaitForOtherRollouts(BaseSensorOperator):
             ]
             and d.run_id != context["dag_run"].run_id
         ]
-        same_week = [
-            d
-            for d in dag_runs
-            if context["dag_run"].execution_date.isocalendar().week
-            == d.execution_date.isocalendar().week
-        ]
-        for d in same_week:
-            self.log.info(
-                "Disregarding %s as it was started the same week as us", d.run_id
-            )
-        dag_runs = [d for d in dag_runs if d not in same_week]
+        self.log.info(
+            "There are %d other DAGs named %s queued or running.",
+            len(dag_runs),
+            self.source_dag_id,
+        )
+
+        # Exclude dags started the same week as us.
+        # (Using weekday that begins on a Sunday since the automatic rollout
+        # (computation that dispatches the rollout happens on Sunday.)
+        one_day_shift = datetime.timedelta(days=1)
+        my_weekday = (
+            (context["dag_run"].execution_date + one_day_shift).isocalendar().week
+        )
+        for d in dag_runs[:]:
+            d_weekday = (d.execution_date + one_day_shift).isocalendar().week
+            if my_weekday == d_weekday:
+                self.log.info(
+                    "Ignoring %s as it was started the same week as us", d.run_id
+                )
+                dag_runs.remove(d)
 
         if dag_runs:
             interval = 3
@@ -533,7 +541,7 @@ class WaitForOtherRollouts(BaseSensorOperator):
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=interval)),
                 method_name="execute",
             )
-        self.log.info("No other rollouts are running.  Proceeding.")
+        self.log.info("No other DAGs are running.  Proceeding.")
 
 
 if __name__ == "__main__":
