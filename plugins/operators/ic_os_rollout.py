@@ -22,6 +22,7 @@ from dfinity.ic_os_rollout import (
 import airflow.models
 import airflow.providers.slack.operators.slack as slack
 from airflow.exceptions import AirflowException
+from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
@@ -298,9 +299,13 @@ class UpgradeUnassignedNodes(BaseOperator):
         )
 
         net = ic_types.augment_network_with_private_key(self.network, pkey)
-        p = dre.DRE(network=net).upgrade_unassigned_nodes(dry_run=self.simulate)
-        self.log.info("dre output:\n%s", p.stdout)
-        if p.returncode != 0:
+        print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
+        # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
+        p = dre.DRE(
+            network=net, subprocess_hook=SubprocessHook()
+        ).upgrade_unassigned_nodes(dry_run=self.simulate)
+        print("::endgroup::")
+        if p.exit_code != 0:
             raise AirflowException("dre exited with status code %d", p.returncode)
 
 

@@ -4,7 +4,6 @@ ic-admin proxy and downloader.
 
 import fcntl
 import os
-import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
@@ -13,6 +12,7 @@ from typing import IO, Any, Generator
 import requests
 
 import dfinity.ic_types
+from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
 DRE_URL = "https://github.com/dfinity/dre/releases/latest/download/dre"
 
@@ -42,7 +42,11 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 class DRE:
 
-    def __init__(self, network: dfinity.ic_types.ICNetworkWithPrivateKey):
+    def __init__(
+        self,
+        network: dfinity.ic_types.ICNetworkWithPrivateKey,
+        subprocess_hook: SubprocessHook,
+    ):
         rundir = f"/run/user/{os.getuid()}"
         if os.path.isdir(rundir):
             d = os.path.join(rundir, "dre")
@@ -53,6 +57,7 @@ class DRE:
         self.base_dir = d
         self.network = network
         self.dre_path = os.path.join(d, "dre")
+        self.subprocess_hook = subprocess_hook
 
     def _prep(self) -> None:
         d = self.base_dir
@@ -76,8 +81,12 @@ class DRE:
             os.rename(tmp_dre_path, dre_path)
 
     def run(
-        self, *args: str, dry_run: bool = False, yes: bool = False, **kwargs: Any
-    ) -> subprocess.CompletedProcess[str]:
+        self,
+        *args: str,
+        dry_run: bool = False,
+        yes: bool = False,
+        **kwargs: Any,
+    ) -> SubprocessResult:
         """
         Run dre, potentially downloading it if not present.
 
@@ -107,13 +116,12 @@ class DRE:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
                     cmd.append("--yes")
-                kwargs["text"] = True
-                return subprocess.run(cmd, **kwargs)
+                return self.subprocess_hook.run_command(cmd, **kwargs)
 
     def upgrade_unassigned_nodes(
         self,
         dry_run: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> SubprocessResult:
         """
         Create proposal to upgrade unassigned nodes.
 
@@ -121,41 +129,34 @@ class DRE:
         * dry_run: if true, tell ic-admin to only simulate the proposal.
 
         Returns:
-        A CompletedProcess with a stdout attribute combining stdout and stderr.
-        No exception is raised -- caller must check the returncode attribute
-        of the returned object.
+        A SubprocessResult with an output attribute containing the last line
+        of the combined standard output / standard error of the command, and
+        an exit_code denoting the subprocess return code.
+        No exception is raised -- caller must check the exit_code attribute
+        of the returned object to be non-zero (or whatever expected value it is).
         """
         return self.run(
             "update-unassigned-nodes",
             dry_run=dry_run,
             yes=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
         )
 
 
 if __name__ == "__main__":
-    try:
-        network = dfinity.ic_types.ICNetworkWithPrivateKey(
-            "https://ic0.app/",
-            "https://ic-api.internetcomputer.org/api/v3/proposals",
-            "https://dashboard.internetcomputer.org/proposal",
-            "https://dashboard.internetcomputer.org/release",
-            [
-                "https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"
-            ],
-            80,
-            "unused",
-            """-----BEGIN EC PRIVATE KEY-----
+    network = dfinity.ic_types.ICNetworkWithPrivateKey(
+        "https://ic0.app/",
+        "https://ic-api.internetcomputer.org/api/v3/proposals",
+        "https://dashboard.internetcomputer.org/proposal",
+        "https://dashboard.internetcomputer.org/release",
+        ["https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"],
+        80,
+        "unused",
+        """-----BEGIN EC PRIVATE KEY-----
 MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
 AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
 5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
 -----END EC PRIVATE KEY-----""",
-        )
-        p = DRE(network).upgrade_unassigned_nodes(dry_run=True)
-        print("Stdout", p.stdout)
-        print("Stderr", p.stderr)
-    except subprocess.CalledProcessError as exc:
-        print("Failure return code:", exc.returncode)
-        print("Stdout", exc.stdout)
-        print("Stderr", exc.stderr)
+    )
+    p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
+    print("Stdout", p.output)
+    print("Return code:", p.exit_code)
