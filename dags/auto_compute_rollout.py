@@ -69,10 +69,10 @@ for network_name, network in IC_NETWORKS.items():
                 custom_html_form=PLAN_FORM,
             ),
             "start_rollout": Param(
-                default=False,
+                default=True,
                 type="boolean",
                 title="Auto start rollout",
-                description="If enabled (not currently the default), the rollout plan"
+                description="If enabled, the rollout plan"
                 " will be used to create and auto start a rollout.",
             ),
         },

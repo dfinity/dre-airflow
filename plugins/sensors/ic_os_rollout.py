@@ -19,10 +19,12 @@ from operators.ic_os_rollout import RolloutParams
 
 import airflow.models.taskinstance
 import airflow.providers.slack.operators.slack as slack
+from airflow.models.dagrun import DagRun
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.triggers.temporal import TimeDeltaTrigger
 from airflow.utils.context import Context
+from airflow.utils.state import DagRunState
 
 
 class SubnetAlertStatus(TypedDict):
@@ -465,6 +467,89 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
             post(f"Alerts have subsided.  Rollout of {subnet_id} can proceed.")
 
 
+class WaitForOtherDAGs(BaseSensorOperator):
+    source_dag_id: str | None
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        source_dag_id: str | None = None,
+        **kwargs: Any,
+    ):
+        """
+        Initializes the waiter for other rollouts.
+
+        Optional parameters:
+          source_dag_id: the ID of the DAG that must be waited upon; if None,
+                         the used ID will be the same DAG ID of the DAG
+                         executing this task.
+        """
+        BaseSensorOperator.__init__(
+            self,
+            task_id=task_id,
+            **kwargs,
+        )
+        self.source_dag_id = source_dag_id
+
+    def execute(self, context: Context, event: Any = None) -> None:
+        """
+        Wait until all concurrently-running wait-for-alerts have reported there
+        are no more alerts.
+        """
+        # Take all dag runs...
+        source_dag_id = self.source_dag_id or context["dag_run"].dag_id
+        dag_runs = DagRun.find(dag_id=source_dag_id)
+        # ...include only running / queued and dags that aren't us.
+        dag_runs = [
+            d
+            for d in dag_runs
+            if d.state
+            in [
+                DagRunState.QUEUED,
+                DagRunState.RUNNING,
+            ]
+            and d.run_id != context["dag_run"].run_id
+        ]
+        self.log.info(
+            "There are %d other DAGs named %s queued or running.",
+            len(dag_runs),
+            source_dag_id,
+        )
+
+        # Exclude dags started the same week as us.
+        # (Using weekday that begins on a Sunday since the automatic rollout
+        # (computation that dispatches the rollout happens on Sunday.)
+        one_day_shift = datetime.timedelta(days=1)
+        my_weekday = (
+            (context["dag_run"].execution_date + one_day_shift).isocalendar().week
+        )
+        for d in dag_runs[:]:
+            d_weekday = (d.execution_date + one_day_shift).isocalendar().week
+            if my_weekday == d_weekday:
+                self.log.info(
+                    "Ignoring %s as it was started the same week as us", d.run_id
+                )
+                dag_runs.remove(d)
+
+        if dag_runs:
+            interval = 3
+            self.log.info("Waiting %s minutes for other DAGs to complete:", interval)
+            for d in dag_runs:
+                self.log.info(
+                    "* %s is %s: execution date %s", d.run_id, d.state, d.execution_date
+                )
+            self.log.info(
+                "If you still want to proceed, mark this task as successful"
+                " or fail the other DAGs."
+            )
+            self.defer(
+                trigger=TimeDeltaTrigger(datetime.timedelta(minutes=interval)),
+                method_name="execute",
+            )
+        self.log.info("No other DAGs are running.  Proceeding.")
+
+
 if __name__ == "__main__":
     import sys
 
@@ -477,3 +562,29 @@ if __name__ == "__main__":
             expected_replica_count=13,
         )
         kn.execute({})
+    if sys.argv[1] == "wait_for_other_rollouts":
+        kn2 = WaitForOtherDAGs(
+            task_id="x",
+            source_dag_id="rollout_ic_os_to_mainnet_subnets",
+        )
+
+        class FakeDagRun:
+            def __init__(
+                self,
+                dag_id: str,
+                run_id: str,
+                execution_date: datetime.datetime,
+            ):
+                self.dag_id = (dag_id,)
+                self.run_id = run_id
+                self.execution_date = execution_date
+
+        kn2.execute(
+            {
+                "dag_run": FakeDagRun(
+                    "rollout_ic_os_to_mainnet_subnets",
+                    "abcd",
+                    datetime.datetime.now(),
+                )  # type: ignore
+            }
+        )

@@ -208,13 +208,23 @@ for network_name, network in IC_NETWORKS.items():
             retries=retries,
         ).expand(git_revision=revs)
 
+        wait_for_other_rollouts = ic_os_sensor.WaitForOtherDAGs(
+            task_id="wait_for_other_rollouts"
+        )
+
         task_groups = []
         for batch in range(MAX_BATCHES):
             batch_name = str(batch + 1)
             with TaskGroup(group_id=f"batch_{batch_name}") as group:
                 make_me_a_batch(batch_name, batch)
                 task_groups.append(group)
-        chain(wait_for_election, *task_groups)
+        chain(
+            (
+                wait_for_election,
+                wait_for_other_rollouts,
+            ),
+            *task_groups,
+        )
 
 
 if __name__ == "__main__":
