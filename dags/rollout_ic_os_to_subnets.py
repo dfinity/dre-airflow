@@ -32,9 +32,8 @@ from airflow.utils.task_group import TaskGroup
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
-    dag_id = f"rollout_ic_os_to_{network_name}_subnets"
     with DAG(
-        dag_id=dag_id,
+        dag_id=f"rollout_ic_os_to_{network_name}_subnets",
         schedule=None,
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
@@ -209,8 +208,8 @@ for network_name, network in IC_NETWORKS.items():
             retries=retries,
         ).expand(git_revision=revs)
 
-        wait_for_other_rollouts = ic_os_sensor.WaitForOtherRollouts(
-            task_id="wait_for_other_rollouts", source_dag_id=dag_id
+        wait_for_other_rollouts = ic_os_sensor.WaitForOtherDAGs(
+            task_id="wait_for_other_rollouts"
         )
 
         task_groups = []
