@@ -17,12 +17,30 @@ set up a local development environment.  See below for instructions.
 
 ## Airflow content artifacts distributed in this repository
 
+Airflow is an extensible platform.  We can write our own pluggable components
+for Airflow: sensors (tasks that wait until a condition is true) and operators
+(tasks that do something), and DAGs (workflows that tie up a series of tasks
+to perform work on our behalf).  This repository contains all three kinds
+of components.  Here's the lowdown on what this repo contains:
+
 * Our DAGs in this repository are distributed under folder [dags](dags/README.md).
 * Our custom sensors and operators are under folder [operators](plugins/operators/README.md) and [sensors](plugins/sensors/README.md).
 * Library code is under folder [shared](shared/README.md).
   * See info on [how Airflow finds Python modules](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/modules_management.html)
-  * The local runner automatically makes this code available
   * [When are plugins reloaded?](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/plugins.html#plugins-loading)
+* The local runner (`bin/run-dag`) automatically makes this all of this code
+  available for execution after the local development enviroment is set up.
+  If you write a sensor or an operator, you can run the file locally by running
+  `bin/run-dag <path to sensor/operator>`.  Be sure to have a section at the
+  end of the file that makes execution conditional:
+
+```!python
+...
+...
+if __name__ == "__main__":
+  <invoke your operator or sensor here>
+  <existing operators and sensors have example code already>
+```
 
 ### Variables and connections required for workflows
 
