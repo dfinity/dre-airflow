@@ -68,7 +68,9 @@ def ic_admin(
     elif os.getenv("TMPDIR") and os.path.isdir(os.getenv("TMPDIR")):  # type:ignore
         d = f"{os.getenv('TMPDIR')}/.ic_admin.{os.getuid()}"
     elif os.getenv("HOME") and os.path.isdir(os.getenv("HOME")):  # type:ignore
-        d = f"{os.getenv('TMPDIR')}/.cache/ic_admin"
+        d = f"{os.getenv('HOME')}/.cache/ic_admin"
+    else:
+        assert 0, "No prudent location for downloaded DRE tool"
 
     os.makedirs(d, exist_ok=True)
     with locked_open(os.path.join(d, ".oplock")):

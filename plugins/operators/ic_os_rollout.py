@@ -245,8 +245,8 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         task_ids='%(source_task_id)s',
                         map_indexes=task_instance.map_index,
                     ).proposal_id
-                }}> is now up for voting.  The weekly IC OS release operator"""
-                """ must vote for this proposal ASAP using release neuron 80."""
+                }}> is now up for voting.  The weekly IC OS rollout operator"""
+                """ @dr-dre must vote for this proposal ASAP using release neuron 80."""
             )
             % locals()
         )
