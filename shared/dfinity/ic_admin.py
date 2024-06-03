@@ -70,7 +70,7 @@ def ic_admin(
     elif os.getenv("HOME") and os.path.isdir(os.getenv("HOME")):  # type:ignore
         d = f"{os.getenv('HOME')}/.cache/ic_admin"
     else:
-        assert 0, "No suitable location for downloading the DRE tool"
+        assert 0, "No suitable location for downloading the ic-admin tool"
 
     os.makedirs(d, exist_ok=True)
     with locked_open(os.path.join(d, ".oplock")):

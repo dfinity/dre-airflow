@@ -50,14 +50,19 @@ class DRE:
         rundir = f"/run/user/{os.getuid()}"
         if os.path.isdir(rundir):
             d = os.path.join(rundir, "dre")
+            self.log.info("Selecting run directory %s for DRE", d)
         elif os.getenv("TMPDIR") and os.path.isdir(os.getenv("TMPDIR")):  # type:ignore
             d = f"{os.getenv('TMPDIR')}/.dre.{os.getuid()}"
+            self.log.info("Selecting temporary directory %s for DRE", d)
         elif os.getenv("HOME") and os.path.isdir(os.getenv("HOME")):  # type:ignore
-            d = f"{os.getenv('TMPDIR')}/.cache/dre"
+            d = f"{os.getenv('HOME')}/.cache/dre"
+            self.log.info("Selecting home cache directory %s for DRE", d)
+        else:
+            assert 0, "No suitable location for downloading the DRE tool"
         self.base_dir = d
-        self.network = network
-        self.dre_path = os.path.join(d, "dre")
+        self.dre_path = os.path.join(self.base_dir, "dre")
         self.subprocess_hook = subprocess_hook
+        self.network = network
 
     def _prep(self) -> None:
         d = self.base_dir
