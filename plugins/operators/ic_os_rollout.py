@@ -246,7 +246,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         map_indexes=task_instance.map_index,
                     ).proposal_id
                 }}> is now up for voting.  The weekly IC OS rollout operator"""
-                """ @dr-dre must vote for this proposal ASAP using release neuron 80."""
+                """ <@dr-dre> must vote for this proposal using the HSM."""
             )
             % locals()
         )
@@ -258,6 +258,9 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             slack_conn_id=SLACK_CONNECTION_ID,
             **kwargs,
         )
+
+    def construct_api_call_params(self) -> Any:
+        self.api_params["link_names"] = True  # type:ignore
 
     def execute(self, context: Context) -> None:  # type:ignore
         proposal_creation_result = context["task_instance"].xcom_pull(
