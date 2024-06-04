@@ -287,7 +287,7 @@ class NotifyAboutStalledSubnet(slack.SlackAPIPostOperator):
         text = (
             """Subnet `%(subnet_id)s` has not finished upgrading in over an hour."""
             """  <!subteam^%(dr_dre_slack_id)s>"""
-            """ must investigate what is going on *as soon as possible*."""
+            """ please investigate *as soon as possible*."""
         ) % locals()
         slack.SlackAPIPostOperator.__init__(
             self,
