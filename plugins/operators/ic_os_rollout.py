@@ -248,7 +248,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         map_indexes=task_instance.map_index,
                     ).proposal_id
                 }}> is now up for voting.  The weekly IC OS rollout operator"""
-                """ <subteam^%(dr_dre_slack_id)s> must vote for this proposal"""
+                """ <!subteam^%(dr_dre_slack_id)s> must vote for this proposal"""
                 """ using the HSM."""
             )
             % locals()
