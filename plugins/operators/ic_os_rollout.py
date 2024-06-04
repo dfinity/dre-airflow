@@ -13,6 +13,7 @@ import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 from dfinity.ic_os_rollout import (
+    DR_DRE_SLACK_ID,
     SLACK_CHANNEL,
     SLACK_CONNECTION_ID,
     SubnetIdWithRevision,
@@ -233,6 +234,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
         **kwargs: Any,
     ) -> None:
         self.source_task_id = source_task_id
+        dr_dre_slack_id = DR_DRE_SLACK_ID
         text = (
             (
                 """Proposal <{{
@@ -246,7 +248,8 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         map_indexes=task_instance.map_index,
                     ).proposal_id
                 }}> is now up for voting.  The weekly IC OS rollout operator"""
-                """ <@dr-dre> must vote for this proposal using the HSM."""
+                """ <subteam^%(dr_dre_slack_id)s> must vote for this proposal"""
+                """ using the HSM."""
             )
             % locals()
         )
@@ -258,10 +261,6 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             slack_conn_id=SLACK_CONNECTION_ID,
             **kwargs,
         )
-
-    def construct_api_call_params(self) -> Any:
-        slack.SlackAPIPostOperator.construct_api_call_params(self)
-        self.api_params["link_names"] = True  # type:ignore
 
     def execute(self, context: Context) -> None:  # type:ignore
         proposal_creation_result = context["task_instance"].xcom_pull(
