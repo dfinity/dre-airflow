@@ -276,6 +276,29 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             slack.SlackAPIPostOperator.execute(self, context=context)  # type:ignore
 
 
+class NotifyAboutStalledSubnet(slack.SlackAPIPostOperator):
+    def __init__(
+        self,
+        subnet_id: str,
+        _ignored: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        dr_dre_slack_id = DR_DRE_SLACK_ID
+        text = (
+            """Subnet `%(subnet_id)s` has not finished upgrading in over an hour."""
+            """  <!subteam^%(dr_dre_slack_id)s>"""
+            """ must investigate what is going on *as soon as possible*."""
+        ) % locals()
+        slack.SlackAPIPostOperator.__init__(
+            self,
+            channel=SLACK_CHANNEL,
+            username="Airflow",
+            text=text,
+            slack_conn_id=SLACK_CONNECTION_ID,
+            **kwargs,
+        )
+
+
 class UpgradeUnassignedNodes(BaseOperator):
     template_fields = ("simulate",)
     network: ic_types.ICNetwork

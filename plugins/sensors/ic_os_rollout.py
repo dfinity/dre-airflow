@@ -4,6 +4,7 @@ IC-OS rollout sensors.
 
 import datetime
 import itertools
+import time
 from typing import Any, TypedDict, cast
 
 import dfinity.ic_admin as ic_admin
@@ -15,7 +16,7 @@ from dfinity.ic_os_rollout import (
     SLACK_CONNECTION_ID,
     subnet_id_and_git_revision_from_args,
 )
-from operators.ic_os_rollout import RolloutParams
+from operators.ic_os_rollout import NotifyAboutStalledSubnet, RolloutParams
 
 import airflow.models.taskinstance
 import airflow.providers.slack.operators.slack as slack
@@ -25,6 +26,8 @@ from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.triggers.temporal import TimeDeltaTrigger
 from airflow.utils.context import Context
 from airflow.utils.state import DagRunState
+
+SUBNET_UPDATE_STALL_TIMEOUT_SECONDS = 3600  # One hour between messages.
 
 
 class SubnetAlertStatus(TypedDict):
@@ -336,8 +339,41 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
         Experimentally we have discovered that when the WaitForReplicaRevisionUpdated
         step has finished, there will be pending alerts on the subnet
         (IC_Replica_Behind) which must resolve themselves.  We look back
-        30 minutes to ensure they are resolved.
+        15 minutes to ensure they are resolved.
         """
+
+        def send_notification_if_necessary(subnet_id: str) -> None:
+            # Small bit of code to reuse an Airflow operator that sends
+            # a message to Slack notifying the DRE operator that a subnet
+            # has not exited the alerts condition in over an hour.
+            now = time.time()
+            first_alert_check_timestamp = self.xcom_pull(
+                context=context, key="first_alert_check_timestamp"
+            )
+            if not first_alert_check_timestamp:
+                # Value is not yet xcommed.
+                self.xcom_push(
+                    context=context,
+                    key="first_alert_check_timestamp",
+                    value=now,
+                )
+            elif (
+                first_alert_check_timestamp > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
+            ):
+                # Value is xcommed and is old enough.
+                NotifyAboutStalledSubnet(
+                    task_id="notify_about_stalled_subnet",
+                    subnet_id=subnet_id,
+                ).execute(
+                    context=context
+                )  # type: ignore
+                # send message here, then
+                self.xcom_push(
+                    context=context,
+                    key="first_alert_check_timestamp",
+                    value=now + 3600,
+                )
+
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
@@ -367,6 +403,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 key="alerts",
                 value=SubnetAlertStatus(subnet_id=subnet_id, alerts=True),
             )
+            send_notification_if_necessary(subnet_id)
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=1)),
                 method_name="execute",
