@@ -260,6 +260,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
         )
 
     def construct_api_call_params(self) -> Any:
+        slack.SlackAPIPostOperator.construct_api_call_params(self)
         self.api_params["link_names"] = True  # type:ignore
 
     def execute(self, context: Context) -> None:  # type:ignore
