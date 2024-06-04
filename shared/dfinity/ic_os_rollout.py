@@ -17,7 +17,7 @@ from dfinity.rollout_types import (
 
 SLACK_CHANNEL = "#eng-release-bots"
 SLACK_CONNECTION_ID = "slack.ic_os_rollout"
-DR_DRE_SLACK_ID = "S05TUANEU4U"
+DR_DRE_SLACK_ID = "S05GPUNS7EX"
 MAX_BATCHES: int = 30
 
 DEFAULT_PLANS: dict[str, str] = {
