@@ -352,6 +352,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 map_indexes=context["task_instance"].map_index,
             )
             if not first_alert_check_timestamp:
+                self.log.info("Storing timestamp %s", now)
                 # Value is not yet xcommed.
                 context["task_instance"].xcom_push(
                     key="first_alert_check_timestamp",
@@ -360,6 +361,9 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             elif (
                 first_alert_check_timestamp > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
             ):
+                self.log.info(
+                    "Checking first defer timestamp: %s", first_alert_check_timestamp
+                )
                 # Value is xcommed and is old enough.
                 NotifyAboutStalledSubnet(
                     task_id="notify_about_stalled_subnet",
