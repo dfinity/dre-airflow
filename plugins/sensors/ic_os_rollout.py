@@ -347,13 +347,13 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             # a message to Slack notifying the DRE operator that a subnet
             # has not exited the alerts condition in over an hour.
             now = time.time()
-            first_alert_check_timestamp = self.xcom_pull(
-                context=context, key="first_alert_check_timestamp"
+            first_alert_check_timestamp = context["task_instance"].xcom_pull(
+                key="first_alert_check_timestamp",
+                map_indexes=context["task_instance"].map_index,
             )
             if not first_alert_check_timestamp:
                 # Value is not yet xcommed.
-                self.xcom_push(
-                    context=context,
+                context["task_instance"].xcom_push(
                     key="first_alert_check_timestamp",
                     value=now,
                 )
@@ -368,8 +368,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                     context=context
                 )  # type: ignore
                 # send message here, then
-                self.xcom_push(
-                    context=context,
+                context["task_instance"].xcom_push(
                     key="first_alert_check_timestamp",
                     value=now + 3600,
                 )
