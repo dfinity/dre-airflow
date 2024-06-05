@@ -247,9 +247,8 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         task_ids='%(source_task_id)s',
                         map_indexes=task_instance.map_index,
                     ).proposal_id
-                }}> is now up for voting.  The <!subteam^%(dr_dre_slack_id)s>"""
-                """ weekly IC OS rollout operator must vote for this proposal"""
-                """ using the HSM."""
+                }}> is now up for voting. <!subteam^%(dr_dre_slack_id)s>"""
+                """ please vote for the proposal using your HSM."""
             )
             % locals()
         )
