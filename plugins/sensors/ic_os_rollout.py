@@ -358,24 +358,31 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                     key="first_alert_check_timestamp",
                     value=now,
                 )
-            elif (
-                first_alert_check_timestamp > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
-            ):
+            else:
                 self.log.info(
-                    "Checking first defer timestamp: %s", first_alert_check_timestamp
+                    "Timestamp already stored: %r", first_alert_check_timestamp
                 )
-                # Value is xcommed and is old enough.
-                NotifyAboutStalledSubnet(
-                    task_id="notify_about_stalled_subnet",
-                    subnet_id=subnet_id,
-                ).execute(
-                    context=context
-                )  # type: ignore
-                # send message here, then
-                context["task_instance"].xcom_push(
-                    key="first_alert_check_timestamp",
-                    value=now + 3600,
-                )
+                first_alert_check_timestamp = list(first_alert_check_timestamp)[0]
+                if (
+                    first_alert_check_timestamp
+                    > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
+                ):
+                    self.log.info(
+                        "Checking first defer timestamp: %s",
+                        first_alert_check_timestamp,
+                    )
+                    # Value is xcommed and is old enough.
+                    NotifyAboutStalledSubnet(
+                        task_id="notify_about_stalled_subnet",
+                        subnet_id=subnet_id,
+                    ).execute(
+                        context=context
+                    )  # type: ignore
+                    # send message here, then
+                    context["task_instance"].xcom_push(
+                        key="first_alert_check_timestamp",
+                        value=now + 3600,
+                    )
 
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
