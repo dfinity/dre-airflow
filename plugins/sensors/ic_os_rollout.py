@@ -362,7 +362,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 self.log.info(
                     "Timestamp already stored: %r", first_alert_check_timestamp
                 )
-                first_alert_check_timestamp = list(first_alert_check_timestamp)[0]
+                first_alert_check_timestamp = float(first_alert_check_timestamp)
                 if (
                     first_alert_check_timestamp
                     > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
