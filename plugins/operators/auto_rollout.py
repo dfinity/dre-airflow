@@ -64,6 +64,11 @@ class AutoComputeRolloutPlan(BaseOperator):
         now = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
         self.log.info('Using %s as "now" date/time for rollout computation', now)
         xdaysago = now - datetime.timedelta(days=max_days_lookbehind)
+        print("::group::Dates")  # This will work in Airflow 2.9.x and above.
+        self.log.info("Now: %s", now)
+        for r in release_versions:
+            self.log.info("%s: %s", r["rc_name"], r["rc_date"])
+        print("::endgroup::")
         release_versions = [
             r
             for r in release_versions
