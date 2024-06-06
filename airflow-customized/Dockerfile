@@ -1,11 +1,6 @@
-FROM apache/airflow:2.7.0-python3.10
+FROM apache/airflow:2.9.1-python3.12
 
-# We used to have support for CockroachDB in production.
-# No more.
-# RUN pip3 install --user sqlalchemy_cockroachdb
-
-# Install support for the Loki log read provider
-# as it exists in its github repository.
+# We need Git.
 USER root
 
 RUN \
@@ -16,5 +11,8 @@ RUN \
 
 USER airflow
 
-RUN pip3 install --user \
-    git+https://github.com/snjypl/airflow-provider-grafana-loki@943e0c8795c4accd09fd38ea371877bc3ec6e424
+# Disabled.
+# Install support for the Loki log read provider
+# as it exists in its github repository.
+# RUN pip3 install --user \
+#     git+https://github.com/snjypl/airflow-provider-grafana-loki@943e0c8795c4accd09fd38ea371877bc3ec6e424
