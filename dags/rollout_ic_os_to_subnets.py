@@ -112,20 +112,17 @@ for network_name, network in IC_NETWORKS.items():
             def collect_batch_subnets(
                 current_batch_index: int, **kwargs: Any
             ) -> list[SubnetIdWithRevision]:
-                try:
-                    batch = cast(
-                        RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
-                    ).get(str(current_batch_index))
-                    if not batch:
-                        raise KeyError("This batch is empty")
-                    subnets = batch[1]
-                    return [
-                        {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
-                        for s in subnets
-                    ]
-                except (KeyError, TypeError):  # no such batch
+                batch = cast(
+                    RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
+                ).get(str(current_batch_index))
+                if not batch:
                     print("This batch is empty.")
                     return []
+                subnets = batch[1]
+                return [
+                    {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
+                    for s in subnets
+                ]
 
             proceed = collect_batch_subnets(batch)
 
