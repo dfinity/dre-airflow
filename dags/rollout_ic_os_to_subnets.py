@@ -116,7 +116,8 @@ for network_name, network in IC_NETWORKS.items():
                     batch = cast(
                         RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
                     ).get(str(current_batch_index))
-                    assert batch
+                    if not batch:
+                        raise KeyError("This batch is empty")
                     subnets = batch[1]
                     return [
                         {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
