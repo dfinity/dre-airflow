@@ -18,8 +18,8 @@ from dfinity.ic_os_rollout import (
     DEFAULT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
-    RolloutPlanWithRevision,
     SubnetIdWithRevision,
+    assign_default_revision,
     rollout_planner,
 )
 from dfinity.ic_types import SubnetRolloutInstanceWithRevision
@@ -82,30 +82,22 @@ for network_name, network in IC_NETWORKS.items():
             if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
                 kwargs["ic_admin_version"] = ic_admin_version
             subnet_list_source = functools.partial(get_subnet_list, **kwargs)
-            plan = rollout_planner(
-                plan_data_structure,
-                subnet_list_source=subnet_list_source,
+            plan = assign_default_revision(
+                rollout_planner(
+                    plan_data_structure,
+                    subnet_list_source=subnet_list_source,
+                ),
+                ic_admin_version,
             )
-            finalplan: RolloutPlanWithRevision = {}
-            for nstr, (start_time, members) in plan.items():
+            for nstr, (_, members) in plan.items():
                 print(f"Batch {int(nstr)+1}:")
-                finalmembers: list[SubnetRolloutInstanceWithRevision] = []
                 for item in members:
-                    finalmembers.append(
-                        SubnetRolloutInstanceWithRevision(
-                            item.start_at,
-                            item.subnet_num,
-                            item.subnet_id,
-                            item.git_revision or ic_admin_version,
-                        )
-                    )
                     print(
                         f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
                         f" to be rolled out at {item.start_at} to git"
                         f" revision {item.git_revision}."
                     )
-                finalplan[nstr] = (start_time, finalmembers)
-            return finalplan
+            return plan
 
         @task
         def revisions(schedule, **context):  # type: ignore

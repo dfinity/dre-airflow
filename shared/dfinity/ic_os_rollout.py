@@ -142,6 +142,26 @@ RolloutPlanWithRevision: TypeAlias = dict[
 ]
 
 
+def assign_default_revision(
+    r: RolloutPlan, fallback_git_revision: str
+) -> RolloutPlanWithRevision:
+    finalplan: RolloutPlanWithRevision = {}
+    for nstr, (start_time, members) in r.items():
+        print(f"Batch {int(nstr)+1}:")
+        finalmembers: list[SubnetRolloutInstanceWithRevision] = []
+        for item in members:
+            finalmembers.append(
+                SubnetRolloutInstanceWithRevision(
+                    item.start_at,
+                    item.subnet_num,
+                    item.subnet_id,
+                    item.git_revision or fallback_git_revision,
+                )
+            )
+        finalplan[nstr] = (start_time, finalmembers)
+    return finalplan
+
+
 def rollout_planner(
     plan: RolloutPlanSpec,
     subnet_list_source: Callable[[], list[str]],
