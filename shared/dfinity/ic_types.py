@@ -169,61 +169,6 @@ class ProposalTopic(Enum):
     TOPIC_SUBNET_RENTAL = 16
 
 
-class Proposal(TypedDict):
-    """
-    {'action': 'ExecuteNnsFunction',
-    'action_nns_function': 'UpdateSubnetReplicaVersion',
-    'deadline_timestamp_seconds': 1685189780,
-    'decided_timestamp_seconds': 1684844290,
-    'executed_timestamp_seconds': 1684844290,
-    'failed_timestamp_seconds': 0,
-    'id': 102768,
-    'latest_tally': {'no': 0,
-                    'timestamp_seconds': 1684844290,
-                    'total': 44511285100798545,
-                    'yes': 44247798987033488},
-    'payload': {'replica_version_id': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
-                'subnet_id': ('4zbus-z2bmt-ilreg-'
-                    'xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe')},
-    'proposal_id': 122572,
-    'proposal_timestamp_seconds': 1684844180,
-    'proposer': '80',
-    'reject_cost_e8s': 1000000000,
-    'reward_status': 'SETTLED',
-    'settled_at': 1685203200,
-    'status': 'EXECUTED',
-    'summary': 'Update subnet '
-                '4zbus-z2bmt-ilreg-xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe '
-                'to replica version '
-                '[b3b00ba59c366384e3e0cd53a69457e9053ec987](https:##dashboard.internetcomputer.org/release/b3b00ba59c366384e3e0cd53a69457e9053ec987)\n',
-    'title': 'Update subnet 4zbus to replica version b3b00ba5',
-    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT',
-    'updated_at': '2023-05-27T16:01:35.534945',
-    'url': ''}
-    """
-
-    action: str
-    action_nns_function: str
-    deadline_timestamp_seconds: int
-    decided_timestamp_seconds: int
-    executed_timestamp_seconds: int
-    failed_timestamp_seconds: int
-    id: int
-    payload: dict[str, str]
-    proposal_id: int
-    proposal_timestamp_seconds: int
-    proposer: int
-    reject_cost_e8s: int
-    reward_status: str
-    settled_at: int
-    status: ProposalStatus
-    summary: str
-    title: str
-    topic: ProposalTopic
-    updated_at: str
-    url: str
-
-
 class AbbrevProposal(TypedDict):
     """
     {'proposal_id': 102768,
