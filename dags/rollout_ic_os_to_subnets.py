@@ -121,8 +121,6 @@ for network_name, network in IC_NETWORKS.items():
                             .get(str(current_batch_index))[1]
                         ),
                     )
-                    for s in subnets:
-                        assert s.git_revision  # must have been written there
                     return [
                         {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
                         for s in subnets
