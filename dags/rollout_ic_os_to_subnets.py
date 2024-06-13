@@ -18,11 +18,11 @@ from dfinity.ic_os_rollout import (
     DEFAULT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
+    RolloutPlanWithRevision,
     SubnetIdWithRevision,
     assign_default_revision,
     rollout_planner,
 )
-from dfinity.ic_types import SubnetRolloutInstanceWithRevision
 
 from airflow import DAG
 from airflow.decorators import task
@@ -114,13 +114,8 @@ for network_name, network in IC_NETWORKS.items():
             ) -> list[SubnetIdWithRevision]:
                 try:
                     subnets = cast(
-                        list[SubnetRolloutInstanceWithRevision],
-                        (
-                            kwargs["ti"]
-                            .xcom_pull("schedule")
-                            .get(str(current_batch_index))[1]
-                        ),
-                    )
+                        RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
+                    ).get(str(current_batch_index))[1]
                     return [
                         {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
                         for s in subnets
