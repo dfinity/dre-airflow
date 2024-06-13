@@ -6,7 +6,7 @@ import datetime
 import re
 from typing import Callable, TypeAlias, TypedDict, cast
 
-from dfinity.ic_types import SubnetRolloutInstance
+from dfinity.ic_types import SubnetRolloutInstance, SubnetRolloutInstanceWithRevision
 from dfinity.rollout_types import (
     RolloutPlanSpec,
     SubnetNameOrNumber,
@@ -135,6 +135,10 @@ def subnet_id_and_git_revision_from_args(
 """Zero-indexed rollout plan with batches of subnet instances to roll out."""
 RolloutPlan: TypeAlias = dict[
     str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
+]
+
+RolloutPlanWithRevision: TypeAlias = dict[
+    str, tuple[datetime.datetime, list[SubnetRolloutInstanceWithRevision]]
 ]
 
 

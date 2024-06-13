@@ -7,6 +7,7 @@ import itertools
 import time
 from typing import Any, TypedDict, cast
 
+import dfinity.dre as dre
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
@@ -20,6 +21,7 @@ from operators.ic_os_rollout import NotifyAboutStalledSubnet, RolloutParams
 
 import airflow.models.taskinstance
 import airflow.providers.slack.operators.slack as slack
+from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.dagrun import DagRun
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
@@ -169,23 +171,28 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
+        pkey = airflow.models.Variable.get(
+            self.network.proposer_neuron_private_key_variable_name
+        )
 
-        props = ic_api.get_proposals_for_subnet_and_revision(
+        net = ic_types.augment_network_with_private_key(self.network, pkey)
+        print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
+        # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
+        props = dre.DRE(
+            network=net, subprocess_hook=SubprocessHook()
+        ).get_ic_os_version_deployment_proposals_for_subnet_and_revision(
             subnet_id=subnet_id,
             git_revision=git_revision,
-            limit=1000,
-            network=self.network,
         )
-        executeds = [
-            p
-            for p in props
-            if p["status"] == ic_api.ProposalStatus.PROPOSAL_STATUS_EXECUTED
-        ]
-        opens = [
-            p
-            for p in props
-            if p["status"] == ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN
-        ]
+        print("::endgroup::")
+
+        def per_status(
+            props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus
+        ) -> list[ic_types.AbbrevProposal]:
+            return [p for p in props if p["status"] == status]
+
+        executeds = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
+        opens = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN)
 
         if not opens and not executeds:
             # No proposal exists.

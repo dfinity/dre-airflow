@@ -3,15 +3,20 @@ ic-admin proxy and downloader.
 """
 
 import fcntl
+import json
 import os
+import pprint
+import re
+import shlex
 import tempfile
 import time
 from contextlib import contextmanager
-from typing import IO, Any, Generator
+from typing import IO, Generator, cast
 
 import requests
 
-import dfinity.ic_types
+import dfinity.ic_types as ic_types
+from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
 DRE_URL = "https://github.com/dfinity/dre/releases/latest/download/dre"
@@ -44,7 +49,7 @@ class DRE:
 
     def __init__(
         self,
-        network: dfinity.ic_types.ICNetworkWithPrivateKey,
+        network: ic_types.ICNetworkWithPrivateKey,
         subprocess_hook: SubprocessHook,
     ):
         rundir = f"/run/user/{os.getuid()}"
@@ -87,7 +92,7 @@ class DRE:
         *args: str,
         dry_run: bool = False,
         yes: bool = False,
-        **kwargs: Any,
+        full_stdout: bool = False,
     ) -> SubprocessResult:
         """
         Run dre, potentially downloading it if not present.
@@ -97,9 +102,6 @@ class DRE:
           appended at the end.
         * yes: if true, --yes appended at the end, but only if
           dry_run is not true.
-        * capture_output: if true, the returned CompletedProcess
-          will have the stdout and stderr of the process as
-          attributes.
         """
         self._prep()
         # Locking to prevent clashes in
@@ -118,7 +120,15 @@ class DRE:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
                     cmd.append("--yes")
-                return self.subprocess_hook.run_command(cmd, **kwargs)
+                if full_stdout:
+                    with tempfile.NamedTemporaryFile(mode="r") as f:
+                        cmd = ["bash", "-c", shlex.join(cmd) + " > " + f.name]
+                        r = self.subprocess_hook.run_command(cmd)
+                        f.seek(0)
+                        data = f.read()
+                        return SubprocessResult(r.exit_code, data)
+                else:
+                    return self.subprocess_hook.run_command(cmd)
 
     def upgrade_unassigned_nodes(
         self,
@@ -143,11 +153,79 @@ class DRE:
             yes=True,
         )
 
+    def get_proposals(
+        self,
+        topic: ic_types.ProposalTopic | None = None,
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevProposal]:
+        """
+        List proposals.
+
+        Returns: a list of AbbrevProposals.
+        On failure, raises AirflowException.
+        """
+
+        def topic_to_str(t: ic_types.ProposalTopic) -> str:
+            return t.name.lower()[6:].replace("_", "-")
+
+        def str_to_topic(t: str) -> ic_types.ProposalTopic:
+            return cast(
+                ic_types.ProposalTopic,
+                getattr(ic_types.ProposalTopic, t),
+            )
+
+        def str_to_status(t: str) -> ic_types.ProposalStatus:
+            return cast(
+                ic_types.ProposalStatus,
+                getattr(ic_types.ProposalStatus, t),
+            )
+
+        topicdata = ["--topic", topic_to_str(topic)] if topic is not None else []
+        limitdata = ["--limit", str(limit)]
+        cmd = ["proposals", "filter"] + topicdata + limitdata
+        r = self.run(*cmd, full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        data = json.loads(r.output)
+        results: list[ic_types.AbbrevProposal] = []
+        for d in data:
+            d["proposal_id"] = d["id"]
+            del d["id"]
+            d["status"] = str_to_status("PROPOSAL_STATUS_" + d["status"].upper())
+            d["topic"] = re.sub("([A-Z])", "_\\1", d["topic"])
+            d["topic"] = "TOPIC" + d["topic"].upper()
+            d["topic"] = str_to_topic(d["topic"])
+            if isinstance(d["payload"], str):
+                if not d["payload"]:
+                    d["payload"] = {}
+                else:
+                    try:
+                        d["payload"] = json.loads(d["payload"])
+                    except json.decoder.JSONDecodeError:
+                        assert 0, "Invalid proposal payload: " + pprint.pformat(d)
+            results.append(cast(ic_types.AbbrevProposal, d))
+        return results
+
+    def get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+        self,
+        git_revision: str,
+        subnet_id: str,
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevProposal]:
+        return [
+            r
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if r["payload"].get("subnet_id") == subnet_id
+            and r["payload"].get("replica_version_id") == git_revision
+        ]
+
 
 if __name__ == "__main__":
-    network = dfinity.ic_types.ICNetworkWithPrivateKey(
+    network = ic_types.ICNetworkWithPrivateKey(
         "https://ic0.app/",
-        "https://ic-api.internetcomputer.org/api/v3/proposals",
         "https://dashboard.internetcomputer.org/proposal",
         "https://dashboard.internetcomputer.org/release",
         ["https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"],
@@ -159,6 +237,17 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
 5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
 -----END EC PRIVATE KEY-----""",
     )
-    p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
-    print("Stdout", p.output)
-    print("Return code:", p.exit_code)
+    d = DRE(network, SubprocessHook())
+    p = d.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+        subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
+        git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
+    )
+    p = d.get_proposals(
+        limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
+    )
+
+    pprint.pprint(p)
+    print(len(p))
+    # p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
+    # print("Stdout", p.output)
+    # print("Return code:", p.exit_code)

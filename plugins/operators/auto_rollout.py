@@ -94,7 +94,7 @@ class AutoComputeRolloutPlan(BaseOperator):
         # and no earlier than the last X days, to prevent accidental selection of a
         # feature plan from two, three weeks ago.
         if now.weekday() in [5, 6]:
-            next_monday = next_weekday(now.date(), 0)  # type: ignore
+            next_monday = next_weekday(now.date(), 0)
             self.log.info(
                 "It's a weekend; using next Monday %s to select a feature plan",
                 next_monday,
@@ -120,10 +120,7 @@ class AutoComputeRolloutPlan(BaseOperator):
             feature_plans = [
                 f
                 for f in rollout_features
-                if (
-                    f["date"] <= now.date()  # type: ignore
-                    and f["date"] >= xdaysago.date()
-                )
+                if (f["date"] <= now.date() and f["date"] >= xdaysago.date())
             ]
             if feature_plans:
                 feature_plan = list(sorted(feature_plans, key=lambda m: m["date"]))[-1]

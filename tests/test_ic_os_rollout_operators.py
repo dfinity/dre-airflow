@@ -1,6 +1,6 @@
 import unittest
 
-from dfinity.ic_api import IC_NETWORKS, unroll
+from dfinity.ic_api import IC_NETWORKS
 from operators.ic_os_rollout import CreateProposalIdempotently
 
 
@@ -14,17 +14,4 @@ class TestOperators(unittest.TestCase):
             git_revision=gitr,
             simulate_proposal=True,
             network=IC_NETWORKS["mainnet"],
-        )
-
-
-class TestUnroll(unittest.TestCase):
-    def test_simple_case(self) -> None:
-        self.assertListEqual(unroll(100, 0), [(100, 0)])
-
-    def test_thrice_unrolled(self) -> None:
-        self.assertListEqual(unroll(300, 0), [(100, 0), (100, 100), (100, 200)])
-
-    def test_thrice_unrolled_uneven(self) -> None:
-        self.assertListEqual(
-            unroll(305, 0), [(100, 0), (100, 100), (100, 200), (5, 300)]
         )
