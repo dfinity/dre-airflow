@@ -1,4 +1,4 @@
-import dfinity.ic_api as ic_api
+import dfinity.ic_types as ic_types
 from pendulum import datetime
 from sensors.ic_os_rollout import WaitUntilNoAlertsOnSubnet
 
@@ -20,7 +20,7 @@ if 0:
             task_id="x",
             subnet_id="snjp4-xlbw4-mnbog-ddwy6-6ckfd-2w5a2-eipqo-7l436-pxqkh-l6fuv-vae",
             git_revision="0" * 32,
-            network=ic_api.IC_NETWORKS["mainnet"],
+            network=ic_types.IC_NETWORKS["mainnet"],
         )
 
     if __name__ == "__main__":

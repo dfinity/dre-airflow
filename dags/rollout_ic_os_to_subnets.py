@@ -13,7 +13,6 @@ import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
-from dfinity.ic_api import IC_NETWORKS
 from dfinity.ic_os_rollout import (
     DEFAULT_PLANS,
     MAX_BATCHES,
@@ -23,6 +22,7 @@ from dfinity.ic_os_rollout import (
     assign_default_revision,
     rollout_planner,
 )
+from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
 from airflow.decorators import task
@@ -113,9 +113,11 @@ for network_name, network in IC_NETWORKS.items():
                 current_batch_index: int, **kwargs: Any
             ) -> list[SubnetIdWithRevision]:
                 try:
-                    subnets = cast(
+                    batch = cast(
                         RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
-                    ).get(str(current_batch_index))[1]
+                    ).get(str(current_batch_index))
+                    assert batch
+                    subnets = batch[1]
                     return [
                         {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
                         for s in subnets

@@ -53,6 +53,22 @@ def augment_network_with_private_key(
     )
 
 
+IC_NETWORKS: dict[str, ICNetwork] = {
+    "mainnet": ICNetwork(
+        "https://ic0.app/",
+        "https://dashboard.internetcomputer.org/proposal",
+        "https://dashboard.internetcomputer.org/release",
+        [
+            "https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query",
+        ],
+        80,
+        "dfinity.ic_admin.mainnet.proposer_key_file",
+    ),
+    # "staging": ic_types.ICNetwork("http://[2600:3004:1200:1200:5000:11ff:fe37:c55d]:8080/"),
+    # FIXME we do not have a proposals URL for staging
+}
+
+
 class ProposalStatus(Enum):
     ## Weird proposal status not mentioned in the proto.
     PROPOSAL_STATUS_UNKNOWN = -1

@@ -1,6 +1,6 @@
 import unittest
 
-from dfinity.ic_api import IC_NETWORKS
+from dfinity.ic_types import IC_NETWORKS
 from operators.ic_os_rollout import CreateProposalIdempotently
 
 

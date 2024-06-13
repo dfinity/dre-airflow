@@ -9,7 +9,6 @@ from typing import Any, TypedDict, cast
 
 import dfinity.dre as dre
 import dfinity.ic_admin as ic_admin
-import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 from dfinity.ic_os_rollout import (
@@ -616,7 +615,7 @@ if __name__ == "__main__":
             task_id="x",
             subnet_id=sys.argv[2],
             git_revision=sys.argv[3],
-            network=ic_api.IC_NETWORKS["mainnet"],
+            network=ic_types.IC_NETWORKS["mainnet"],
             expected_replica_count=13,
         )
         kn.execute({})
