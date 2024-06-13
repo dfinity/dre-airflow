@@ -147,7 +147,6 @@ def assign_default_revision(
 ) -> RolloutPlanWithRevision:
     finalplan: RolloutPlanWithRevision = {}
     for nstr, (start_time, members) in r.items():
-        print(f"Batch {int(nstr)+1}:")
         finalmembers: list[SubnetRolloutInstanceWithRevision] = []
         for item in members:
             finalmembers.append(
