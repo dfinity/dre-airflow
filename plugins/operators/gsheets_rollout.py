@@ -85,7 +85,7 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
     `__init__` takes the same parameters as `GoogleSheetsCreateSpreadsheetOperator`.
     """
 
-    def execute(self, context: Any) -> RolloutFeatures:
+    def execute(self, context: Any) -> RolloutFeatures:  # type: ignore
         hook = GSheetsHook(
             gcp_conn_id=self.gcp_conn_id,
             delegate_to=self.delegate_to,

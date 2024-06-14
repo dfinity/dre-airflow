@@ -9,7 +9,6 @@ from typing import Any, Sequence
 
 import dfinity.dre as dre
 import dfinity.ic_admin as ic_admin
-import dfinity.ic_api as ic_api
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 from dfinity.ic_os_rollout import (
@@ -100,20 +99,28 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
-        props = ic_api.get_proposals_for_subnet_and_revision(
-            subnet_id=subnet_id,
-            git_revision=git_revision,
-            limit=1000,
-            network=self.network,
+        pkey = airflow.models.Variable.get(
+            self.network.proposer_neuron_private_key_variable_name
         )
 
+        net = ic_types.augment_network_with_private_key(self.network, pkey)
+        print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
+        # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
+        props = dre.DRE(
+            network=net, subprocess_hook=SubprocessHook()
+        ).get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+            subnet_id=subnet_id,
+            git_revision=git_revision,
+        )
+        print("::endgroup::")
+
         def per_status(
-            props: list[ic_api.Proposal], status: ic_api.ProposalStatus
-        ) -> list[ic_api.Proposal]:
+            props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus
+        ) -> list[ic_types.AbbrevProposal]:
             return [p for p in props if p["status"] == status]
 
-        executeds = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
-        opens = per_status(props, ic_api.ProposalStatus.PROPOSAL_STATUS_OPEN)
+        executeds = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
+        opens = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN)
 
         if self.simulate_proposal:
             self.log.info(f"simulate_proposal={self.simulate_proposal}")
@@ -332,13 +339,12 @@ class UpgradeUnassignedNodes(BaseOperator):
         ).upgrade_unassigned_nodes(dry_run=self.simulate)
         print("::endgroup::")
         if p.exit_code != 0:
-            raise AirflowException("dre exited with status code %d", p.returncode)
+            raise AirflowException("dre exited with status code %d", p.exit_code)
 
 
 if __name__ == "__main__":
     network = ic_types.ICNetwork(
         "https://ic0.app/",
-        "https://ic-api.internetcomputer.org/api/v3/proposals",
         "https://dashboard.internetcomputer.org/proposal",
         "https://dashboard.internetcomputer.org/release",
         ["https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query"],

@@ -213,7 +213,6 @@ if __name__ == "__main__":
             "b314222935b7d06c70036b0b54aa80a33252d79c",
             dfinity.ic_types.ICNetwork(
                 "https://ic0.app/",
-                "https://ic-api.internetcomputer.org/api/v3/proposals",
                 "https://dashboard.internetcomputer.org/proposal",
                 "https://dashboard.internetcomputer.org/release",
                 [
@@ -233,7 +232,6 @@ if __name__ == "__main__":
             "0000000000000000000000000000000000000000",
             dfinity.ic_types.ICNetworkWithPrivateKey(
                 "https://ic0.app/",
-                "https://ic-api.internetcomputer.org/api/v3/proposals",
                 "https://dashboard.internetcomputer.org/proposal",
                 "https://dashboard.internetcomputer.org/release",
                 [

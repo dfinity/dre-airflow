@@ -2,7 +2,7 @@ import unittest
 from typing import Any
 
 import mock  # type:ignore
-from dfinity.ic_api import IC_NETWORKS
+from dfinity.ic_types import IC_NETWORKS
 from dfinity.prom_api import PrometheusVectorResultEntry
 from sensors.ic_os_rollout import (
     WaitForProposalAcceptance,

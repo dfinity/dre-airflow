@@ -9,7 +9,7 @@ from typing import cast
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-from dfinity.ic_api import IC_NETWORKS
+from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
 from airflow.models.param import Param

@@ -13,15 +13,16 @@ import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 import yaml
 from dfinity.ic_admin import get_subnet_list
-from dfinity.ic_api import IC_NETWORKS
 from dfinity.ic_os_rollout import (
     DEFAULT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
+    RolloutPlanWithRevision,
     SubnetIdWithRevision,
+    assign_default_revision,
     rollout_planner,
 )
-from dfinity.ic_types import SubnetRolloutInstance
+from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
 from airflow.decorators import task
@@ -81,15 +82,16 @@ for network_name, network in IC_NETWORKS.items():
             if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
                 kwargs["ic_admin_version"] = ic_admin_version
             subnet_list_source = functools.partial(get_subnet_list, **kwargs)
-            plan = rollout_planner(
-                plan_data_structure,
-                subnet_list_source=subnet_list_source,
+            plan = assign_default_revision(
+                rollout_planner(
+                    plan_data_structure,
+                    subnet_list_source=subnet_list_source,
+                ),
+                ic_admin_version,
             )
-            for nstr, (start_time, members) in plan.items():
+            for nstr, (_, members) in plan.items():
                 print(f"Batch {int(nstr)+1}:")
                 for item in members:
-                    if not item.git_revision:
-                        item.git_revision = ic_admin_version
                     print(
                         f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
                         f" to be rolled out at {item.start_at} to git"
@@ -110,22 +112,17 @@ for network_name, network in IC_NETWORKS.items():
             def collect_batch_subnets(
                 current_batch_index: int, **kwargs: Any
             ) -> list[SubnetIdWithRevision]:
-                try:
-                    subnets = cast(
-                        list[SubnetRolloutInstance],
-                        (
-                            kwargs["ti"]
-                            .xcom_pull("schedule")
-                            .get(str(current_batch_index))[1]
-                        ),
-                    )
-                    return [
-                        {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
-                        for s in subnets
-                    ]
-                except (KeyError, TypeError):  # no such batch
+                batch = cast(
+                    RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
+                ).get(str(current_batch_index))
+                if not batch:
                     print("This batch is empty.")
                     return []
+                subnets = batch[1]
+                return [
+                    {"subnet_id": s.subnet_id, "git_revision": s.git_revision}
+                    for s in subnets
+                ]
 
             proceed = collect_batch_subnets(batch)
 

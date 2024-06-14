@@ -6,7 +6,7 @@ import datetime
 import re
 from typing import Callable, TypeAlias, TypedDict, cast
 
-from dfinity.ic_types import SubnetRolloutInstance
+from dfinity.ic_types import SubnetRolloutInstance, SubnetRolloutInstanceWithRevision
 from dfinity.rollout_types import (
     RolloutPlanSpec,
     SubnetNameOrNumber,
@@ -136,6 +136,29 @@ def subnet_id_and_git_revision_from_args(
 RolloutPlan: TypeAlias = dict[
     str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
 ]
+
+RolloutPlanWithRevision: TypeAlias = dict[
+    str, tuple[datetime.datetime, list[SubnetRolloutInstanceWithRevision]]
+]
+
+
+def assign_default_revision(
+    r: RolloutPlan, fallback_git_revision: str
+) -> RolloutPlanWithRevision:
+    finalplan: RolloutPlanWithRevision = {}
+    for nstr, (start_time, members) in r.items():
+        finalmembers: list[SubnetRolloutInstanceWithRevision] = []
+        for item in members:
+            finalmembers.append(
+                SubnetRolloutInstanceWithRevision(
+                    item.start_at,
+                    item.subnet_num,
+                    item.subnet_id,
+                    item.git_revision or fallback_git_revision,
+                )
+            )
+        finalplan[nstr] = (start_time, finalmembers)
+    return finalplan
 
 
 def rollout_planner(
