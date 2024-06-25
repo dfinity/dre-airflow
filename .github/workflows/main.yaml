@@ -1,0 +1,23 @@
+name: Main
+on:
+  push:
+    branches:
+      - "main"
+  pull_request: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  CI:
+    runs-on: ubuntu-latest
+    # This image is based on ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      ########################################
+      # Test
+      ########################################
+      - name: "Test"
+        uses: ./.github/workflows/test

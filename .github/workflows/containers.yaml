@@ -1,0 +1,63 @@
+name: Containers
+on:
+  push:
+    branches:
+      - "main"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  airflow-content-syncer:
+    runs-on: ubuntu-latest
+    # This image is based on ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}/airflow-content-syncer
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: int128/kaniko-action@v1
+        name: Create airflow-content-syncer container
+        with:
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache: false
+          cache-repository: ghcr.io/${{ github.repository }}/cache
+          context: airflow-content-syncer
+  airflow-customized:
+    runs-on: ubuntu-latest
+    # This image is based on ubuntu:20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}/airflow-customized
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: int128/kaniko-action@v1
+        name: Create airflow-customized container
+        with:
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache: false
+          cache-repository: ghcr.io/${{ github.repository }}/cache
+          context: airflow-customized

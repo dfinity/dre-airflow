@@ -225,8 +225,21 @@ class DRE:
             raise AirflowException("dre exited with status code %d", r.exit_code)
         return cast(list[str], json.loads(r.output))
 
+    def get_blessed_replica_versions(self) -> list[str]:
+        r = self.run("get", "blessed-replica-versions", "--json", full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        return cast(list[str], json.loads(r.output)["value"]["blessed_version_ids"])
+
+    def is_replica_version_blessed(self, git_revision: str) -> bool:
+        return git_revision.lower() in [
+            x.lower() for x in self.get_blessed_replica_versions()
+        ]
+
 
 class AuthenticatedDRE(DRE):
+
+    network: ic_types.ICNetworkWithPrivateKey
 
     def upgrade_unassigned_nodes(
         self,

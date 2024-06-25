@@ -1,0 +1,35 @@
+name: Test
+description: Run battery of tests
+
+runs:
+  using: composite
+  steps:
+    - name: "Prepare"
+      id: prep
+      run: |
+        out=$(make venv/bin venv/bin/mypy venv/bin/ruff venv/bin/pytest venv/lib/*/site-packages/mock 2>&1)
+        ret=$?
+        if [ $ret != 0 ]
+        then
+          echo "$out" >&2
+          exit $ret
+        fi
+      shell: bash
+
+    - name: "Ruff"
+      id: ruff
+      run: |
+        make ruff
+      shell: bash
+
+    - name: "MyPy"
+      id: mypy
+      run: |
+        make mypy
+      shell: bash
+
+    - name: "Unit tests"
+      id: pytest
+      run: |
+        make pytest
+      shell: bash

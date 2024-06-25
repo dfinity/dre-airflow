@@ -16,7 +16,16 @@ default:
       - runner_system_failure
 
 stages:
+  - test
   - release
+
+run-tests:
+  stage: test
+  tags:
+    - ubuntu
+    - dfinity-shared
+  script:
+    - make test
 
 release-content:
   stage: release
