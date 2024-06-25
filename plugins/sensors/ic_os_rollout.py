@@ -8,7 +8,6 @@ import time
 from typing import Any, TypedDict, cast
 
 import dfinity.dre as dre
-import dfinity.ic_admin as ic_admin
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 from dfinity.ic_os_rollout import (
@@ -115,11 +114,12 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
             return
 
         self.log.info(f"Waiting for revision {git_revision} to be elected.")
-        if not ic_admin.is_replica_version_blessed(
+        print("::group::DRE output")
+        blessed = dre.DRE(self.network, SubprocessHook()).is_replica_version_blessed(
             git_revision,
-            self.network,
-            ic_admin_version=None if self.simulate_elected else self.git_revision,
-        ):
+        )
+        print("::endgroup::")
+        if not blessed:
             self.log.info("Revision is not yet elected.  Waiting.")
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=15)),
