@@ -228,6 +228,8 @@ class DRE:
 
 class AuthenticatedDRE(DRE):
 
+    network: ic_types.ICNetworkWithPrivateKey
+
     def upgrade_unassigned_nodes(
         self,
         dry_run: bool = False,
