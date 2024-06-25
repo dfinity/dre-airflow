@@ -1,5 +1,7 @@
 FROM apache/airflow:2.9.1-python3.12
 
+LABEL org.opencontainers.image.source="https://github.com/dfinity/dre-airflow"
+
 # We need Git.
 USER root
 
