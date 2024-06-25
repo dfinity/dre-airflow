@@ -5,22 +5,17 @@ Each batch runs in parallel.
 """
 
 import datetime
-import functools
 from typing import Any, cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-import yaml
-from dfinity.ic_admin import get_subnet_list
 from dfinity.ic_os_rollout import (
     DEFAULT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
     RolloutPlanWithRevision,
     SubnetIdWithRevision,
-    assign_default_revision,
-    rollout_planner,
 )
 from dfinity.ic_types import IC_NETWORKS
 
@@ -69,35 +64,6 @@ for network_name, network in IC_NETWORKS.items():
     ) as dag:
         DAGS[network_name] = dag
         retries = int(86400 / 60 / 5)  # one day worth of retries
-
-        @task
-        def schedule(**context):  # type: ignore
-            plan_data_structure = yaml.safe_load(
-                context["task"].render_template("{{ params.plan }}", context)
-            )
-            ic_admin_version = "{:040}".format(
-                context["task"].render_template("{{ params.git_revision }}", context)
-            )
-            kwargs: dict[str, Any] = {"network": network}
-            if ic_admin_version not in ["0000000000000000000000000000000000000000", 0]:
-                kwargs["ic_admin_version"] = ic_admin_version
-            subnet_list_source = functools.partial(get_subnet_list, **kwargs)
-            plan = assign_default_revision(
-                rollout_planner(
-                    plan_data_structure,
-                    subnet_list_source=subnet_list_source,
-                ),
-                ic_admin_version,
-            )
-            for nstr, (_, members) in plan.items():
-                print(f"Batch {int(nstr)+1}:")
-                for item in members:
-                    print(
-                        f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
-                        f" to be rolled out at {item.start_at} to git"
-                        f" revision {item.git_revision}."
-                    )
-            return plan
 
         @task
         def revisions(schedule, **context):  # type: ignore
@@ -196,7 +162,7 @@ for network_name, network in IC_NETWORKS.items():
                 >> join
             )
 
-        sched = schedule()
+        sched = ic_os_rollout.schedule(network)
         revs = revisions(sched)
         wait_for_election = ic_os_sensor.WaitForRevisionToBeElected.partial(
             task_id="wait_for_revision_to_be_elected",
