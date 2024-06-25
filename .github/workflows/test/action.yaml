@@ -10,7 +10,7 @@ runs:
         make ruff
       shell: bash
 
-    - name: "Mypy"
+    - name: "MyPy"
       id: mypy
       run: |
         make mypy

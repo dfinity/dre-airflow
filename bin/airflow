@@ -20,7 +20,8 @@ then
     pushd "$AIRFLOW_HOME"
     ln -sfT ../dags dags
     ln -sfT ../plugins plugins
-    sed -i 's/allowed_deserialization_classes.*/allowed_deserialization_classes = (airflow|dfinity)[.].*/' airflow.cfg
+    sed -i 's/allowed_deserialization_classes_regex.*/allowed_deserialization_classes_regex = (airflow|dfinity)[.].*/' airflow.cfg
+    sed -i 's/^allowed_deserialization_classes /# allowed_deserialization_classes.../' airflow.cfg
     sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow.cfg
     sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
     popd
