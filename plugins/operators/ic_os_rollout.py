@@ -269,7 +269,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             **kwargs,
         )
 
-    def execute(self, context: Context) -> None:  # type:ignore
+    def execute(self, context: Context) -> None:
         proposal_creation_result = context["task_instance"].xcom_pull(
             task_ids=self.source_task_id,
             map_indexes=context["task_instance"].map_index,
@@ -280,7 +280,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             self.log.info("Proposal does not need vote.  Not requesting vote.")
         else:
             self.log.info("Requesting vote on proposal with text: %s", self.text)
-            slack.SlackAPIPostOperator.execute(self, context=context)  # type:ignore
+            slack.SlackAPIPostOperator.execute(self, context=context)
 
 
 class NotifyAboutStalledSubnet(slack.SlackAPIPostOperator):

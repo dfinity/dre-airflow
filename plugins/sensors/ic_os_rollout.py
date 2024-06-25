@@ -385,9 +385,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                     NotifyAboutStalledSubnet(
                         task_id="notify_about_stalled_subnet",
                         subnet_id=subnet_id,
-                    ).execute(
-                        context=context
-                    )  # type: ignore
+                    ).execute(context=context)
                     # send message here, then
                     context["task_instance"].xcom_push(
                         key="first_alert_check_timestamp",
