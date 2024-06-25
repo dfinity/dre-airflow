@@ -1,0 +1,47 @@
+name: Test
+on:
+  push:
+    branches:
+      - "main"
+      - "v*"
+  pull_request:
+    paths-ignore:
+      - "release-index.yaml"
+      - "replica-releases/**"
+      - "node-labels/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bazel:
+    runs-on:
+      labels: dre-runner-custom
+    # This image is based on ubuntu:20.04
+    container: ghcr.io/dfinity/dre/actions-runner:0.2.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      ########################################
+      # Set up up runner
+      ########################################
+      - name: "Set up runner"
+        uses: ./.github/workflows/manage-runner-pre
+
+      ########################################
+      # Build and test
+      ########################################
+      - name: "Test"
+        uses: ./.github/workflows/test
+
+      ########################################
+      # Clean up runner
+      ########################################
+      - uses: ./.github/workflows/manage-runner-post
+        name: "Tear down runner"
+        if: ${{ !startsWith(runner.name, 'dre-runner-custom') }}
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

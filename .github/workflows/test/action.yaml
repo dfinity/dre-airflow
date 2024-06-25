@@ -1,0 +1,23 @@
+name: Test
+description: Run battery of tests
+
+runs:
+  using: composite
+  steps:
+    - name: "Ruff"
+      id: ruff
+      run: |
+        make ruff
+      shell: bash
+
+    - name: "Mypy"
+      id: mypy
+      run: |
+        make mypy
+      shell: bash
+
+    - name: "Unit tests"
+      id: pytest
+      run: |
+        make pytest
+      shell: bash
