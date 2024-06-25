@@ -220,8 +220,7 @@ class DRE:
         ]
 
     def get_subnet_list(self) -> list[str]:
-        cmd = ["get", "subnet-list"]
-        r = self.run(*cmd, full_stdout=True)
+        r = self.run("get", "subnet-list", "--json", full_stdout=True)
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
         return cast(list[str], json.loads(r.output))
