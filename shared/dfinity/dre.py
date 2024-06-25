@@ -15,6 +15,7 @@ from typing import IO, Generator, cast
 
 import requests
 
+import airflow.models
 import dfinity.ic_types as ic_types
 from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
@@ -47,25 +48,6 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 class DRE:
 
-    def __init__(
-        self,
-        network: ic_types.ICNetworkWithPrivateKey,
-        subprocess_hook: SubprocessHook,
-    ):
-        rundir = f"/run/user/{os.getuid()}"
-        if os.path.isdir(rundir):
-            d = os.path.join(rundir, "dre")
-        elif os.getenv("TMPDIR") and os.path.isdir(os.getenv("TMPDIR")):  # type:ignore
-            d = f"{os.getenv('TMPDIR')}/.dre.{os.getuid()}"
-        elif os.getenv("HOME") and os.path.isdir(os.getenv("HOME")):  # type:ignore
-            d = f"{os.getenv('HOME')}/.cache/dre"
-        else:
-            assert 0, "No suitable location for downloading the DRE tool"
-        self.base_dir = d
-        self.dre_path = os.path.join(self.base_dir, "dre")
-        self.subprocess_hook = subprocess_hook
-        self.network = network
-
     def _prep(self) -> None:
         d = self.base_dir
         os.makedirs(d, exist_ok=True)
@@ -86,6 +68,40 @@ class DRE:
                 dre_tmp.write(dre_data)
             os.chmod(tmp_dre_path, 0o755)
             os.rename(tmp_dre_path, dre_path)
+
+    def __init__(
+        self,
+        network: ic_types.ICNetwork,
+        subprocess_hook: SubprocessHook,
+    ):
+        rundir = f"/run/user/{os.getuid()}"
+        if os.path.isdir(rundir):
+            d = os.path.join(rundir, "dre")
+        elif os.getenv("TMPDIR") and os.path.isdir(os.getenv("TMPDIR")):  # type:ignore
+            d = f"{os.getenv('TMPDIR')}/.dre.{os.getuid()}"
+        elif os.getenv("HOME") and os.path.isdir(os.getenv("HOME")):  # type:ignore
+            d = f"{os.getenv('HOME')}/.cache/dre"
+        else:
+            assert 0, "No suitable location for downloading the DRE tool"
+        self.base_dir = d
+        self.dre_path = os.path.join(self.base_dir, "dre")
+        self.subprocess_hook = subprocess_hook
+        self.network = network
+
+    def authenticated(self) -> "AuthenticatedDRE":
+        """
+        Transforms a DRE into an authenticated DRE.
+
+        May only be called in operator / sensor context."""
+        return AuthenticatedDRE(
+            ic_types.augment_network_with_private_key(
+                self.network,
+                airflow.models.Variable.get(
+                    self.network.proposer_neuron_private_key_variable_name
+                ),
+            ),
+            self.subprocess_hook,
+        )
 
     def run(
         self,
@@ -110,11 +126,15 @@ class DRE:
                 "w",
                 suffix=".proposal-cert.pem" if not dry_run else ".fake-cert.pem",
             ) as w:
-                w.write(self.network.proposer_neuron_private_key)
-                w.flush()
+                if isinstance(self, AuthenticatedDRE):
+                    w.write(self.network.proposer_neuron_private_key)
+                    w.flush()
                 nnsurl = ["--nns-urls", self.network.nns_url]
-                pem = ["--private-key-pem", w.name]
-                nid = ["--neuron-id", str(self.network.proposer_neuron_id)]
+                if isinstance(self, AuthenticatedDRE):
+                    pem = ["--private-key-pem", w.name]
+                    nid = ["--neuron-id", str(self.network.proposer_neuron_id)]
+                else:
+                    pem, nid = [], []
                 cmd = [self.dre_path] + nnsurl + nid + pem + list(args)
                 if dry_run:
                     cmd.append("--dry-run")
@@ -129,29 +149,6 @@ class DRE:
                         return SubprocessResult(r.exit_code, data)
                 else:
                     return self.subprocess_hook.run_command(cmd)
-
-    def upgrade_unassigned_nodes(
-        self,
-        dry_run: bool = False,
-    ) -> SubprocessResult:
-        """
-        Create proposal to upgrade unassigned nodes.
-
-        Args:
-        * dry_run: if true, tell ic-admin to only simulate the proposal.
-
-        Returns:
-        A SubprocessResult with an output attribute containing the last line
-        of the combined standard output / standard error of the command, and
-        an exit_code denoting the subprocess return code.
-        No exception is raised -- caller must check the exit_code attribute
-        of the returned object to be non-zero (or whatever expected value it is).
-        """
-        return self.run(
-            "update-unassigned-nodes",
-            dry_run=dry_run,
-            yes=True,
-        )
 
     def get_proposals(
         self,
@@ -221,6 +218,39 @@ class DRE:
             if r["payload"].get("subnet_id") == subnet_id
             and r["payload"].get("replica_version_id") == git_revision
         ]
+
+    def get_subnet_list(self) -> list[str]:
+        cmd = ["get", "subnet-list"]
+        r = self.run(*cmd, full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        return cast(list[str], json.loads(r.output))
+
+
+class AuthenticatedDRE(DRE):
+
+    def upgrade_unassigned_nodes(
+        self,
+        dry_run: bool = False,
+    ) -> SubprocessResult:
+        """
+        Create proposal to upgrade unassigned nodes.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        A SubprocessResult with an output attribute containing the last line
+        of the combined standard output / standard error of the command, and
+        an exit_code denoting the subprocess return code.
+        No exception is raised -- caller must check the exit_code attribute
+        of the returned object to be non-zero (or whatever expected value it is).
+        """
+        return self.run(
+            "update-unassigned-nodes",
+            dry_run=dry_run,
+            yes=True,
+        )
 
 
 if __name__ == "__main__":

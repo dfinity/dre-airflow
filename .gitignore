@@ -7,3 +7,6 @@ airflow/plugins/sensors/*
 .pytest_cache
 .ruff_cache
 plugins/dags/*
+tests/logs
+tests/airflow.cfg
+tests/airflow.db

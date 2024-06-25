@@ -11,16 +11,21 @@ import dfinity.dre as dre
 import dfinity.ic_admin as ic_admin
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
+import yaml
 from dfinity.ic_os_rollout import (
     DR_DRE_SLACK_ID,
     SLACK_CHANNEL,
     SLACK_CONNECTION_ID,
+    RolloutPlanWithRevision,
     SubnetIdWithRevision,
+    assign_default_revision,
+    rollout_planner,
     subnet_id_and_git_revision_from_args,
 )
 
 import airflow.models
 import airflow.providers.slack.operators.slack as slack
+from airflow.decorators import task
 from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.baseoperator import BaseOperator
@@ -99,15 +104,10 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
-        pkey = airflow.models.Variable.get(
-            self.network.proposer_neuron_private_key_variable_name
-        )
-
-        net = ic_types.augment_network_with_private_key(self.network, pkey)
         print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
         # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
         props = dre.DRE(
-            network=net, subprocess_hook=SubprocessHook()
+            network=self.network, subprocess_hook=SubprocessHook()
         ).get_ic_os_version_deployment_proposals_for_subnet_and_revision(
             subnet_id=subnet_id,
             git_revision=git_revision,
@@ -332,14 +332,58 @@ class UpgradeUnassignedNodes(BaseOperator):
         )
 
         net = ic_types.augment_network_with_private_key(self.network, pkey)
-        print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
+        print("::group::DRE output")
         # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
-        p = dre.DRE(
-            network=net, subprocess_hook=SubprocessHook()
-        ).upgrade_unassigned_nodes(dry_run=self.simulate)
+        p = (
+            dre.DRE(network=net, subprocess_hook=SubprocessHook())
+            .authenticated()
+            .upgrade_unassigned_nodes(dry_run=self.simulate)
+        )
         print("::endgroup::")
         if p.exit_code != 0:
             raise AirflowException("dre exited with status code %d", p.exit_code)
+
+
+@task
+def schedule(
+    network: ic_types.ICNetwork, **context: dict[str, Any]
+) -> RolloutPlanWithRevision:
+    plan_data_structure = yaml.safe_load(
+        context["task"].render_template(  # type: ignore
+            "{{ params.plan }}",
+            context,
+        )
+    )
+    ic_admin_version = "{:040}".format(
+        context["task"].render_template(  # type: ignore
+            "{{ params.git_revision }}",
+            context,
+        )
+    )
+    subnet_list_source = dre.DRE(
+        network=network,
+        subprocess_hook=SubprocessHook(),
+    ).get_subnet_list
+
+    print("::group::DRE output")
+    plan = assign_default_revision(
+        rollout_planner(
+            plan_data_structure,
+            subnet_list_source=subnet_list_source,
+        ),
+        ic_admin_version,
+    )
+    print("::endgroup::")
+
+    for nstr, (_, members) in plan.items():
+        print(f"Batch {int(nstr)+1}:")
+        for item in members:
+            print(
+                f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
+                f" to be rolled out at {item.start_at} to git"
+                f" revision {item.git_revision}."
+            )
+    return plan
 
 
 if __name__ == "__main__":

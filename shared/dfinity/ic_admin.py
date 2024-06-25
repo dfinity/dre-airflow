@@ -107,20 +107,6 @@ def ic_admin(
         return subprocess.run(cmd, **kwargs)
 
 
-def get_subnet_list(
-    network: dfinity.ic_types.ICNetwork,
-    ic_admin_version: str | None = None,
-) -> list[str]:
-    listp = ic_admin(
-        "get-subnet-list",
-        network=network,
-        capture_output=True,
-        check=True,
-        ic_admin_version=ic_admin_version,
-    )
-    return cast(list[str], yaml.safe_load(listp.stdout))
-
-
 def propose_to_update_subnet_replica_version(
     subnet_id: str,
     git_revision: str,
