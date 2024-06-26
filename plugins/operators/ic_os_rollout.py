@@ -99,11 +99,10 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
+        runner = dre.DRE(network=self.network, subprocess_hook=SubprocessHook())
         print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
         # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
-        props = dre.DRE(
-            network=self.network, subprocess_hook=SubprocessHook()
-        ).get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+        props = runner.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
             subnet_id=subnet_id,
             git_revision=git_revision,
         )
@@ -181,9 +180,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
 
         print("::group::DRE output")
         proposal_number = (
-            dre.DRE(network=network, subprocess_hook=SubprocessHook())
-            .authenticated()
-            .propose_to_update_subnet_replica_version(
+            runner.authenticated().propose_to_update_subnet_replica_version(
                 subnet_id, git_revision, dry_run=self.simulate_proposal
             )
         )
