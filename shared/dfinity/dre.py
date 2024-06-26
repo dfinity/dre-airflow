@@ -140,7 +140,11 @@ class DRE:
                 if dry_run:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
-                    cmd.append("--yes")
+                    pos = cmd.index("propose")
+                    if pos == -1:
+                        cmd.append("--yes")
+                    else:
+                        cmd.insert(pos + 1, "--yes")
                 if full_stdout:
                     with tempfile.NamedTemporaryFile(mode="r") as f:
                         cmd = ["bash", "-c", shlex.join(cmd) + " > " + f.name]
@@ -303,6 +307,7 @@ class AuthenticatedDRE(DRE):
             subnet_id,
             git_revision,
             dry_run=dry_run,
+            yes=not dry_run,
         )
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
