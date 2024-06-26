@@ -3,12 +3,9 @@ IC-OS rollout operators.
 """
 
 import itertools
-import re
-import subprocess
 from typing import Any, Sequence
 
 import dfinity.dre as dre
-import dfinity.ic_admin as ic_admin
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 import yaml
@@ -31,8 +28,6 @@ from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.baseoperator import BaseOperator
 from airflow.template.templater import Templater
 from airflow.utils.context import Context
-
-FAKE_PROPOSAL_NUMBER = -123456
 
 
 class RolloutParams(Templater):
@@ -181,50 +176,19 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
 
         self.log.info(
             f"Creating proposal for subnet ID {subnet_id} to "
-            + f"adopt revision {git_revision}."
+            + f"adopt revision {git_revision} (simulate {self.simulate_proposal})."
         )
 
-        # Use forrealz private key only when rolling out forrealz.
-        pkey = (
-            """-----BEGIN EC PRIVATE KEY-----
-MHcCAQEEIEFRa42BSz1uuRxWBh60vePDrpkgtELJJMZtkJGlExuLoAoGCCqGSM49
-AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
-5YjfGWFuNLqyxLGGvDUq6HlGsBJ9QIcPtA==
------END EC PRIVATE KEY-----"""
-            if self.simulate_proposal
-            else airflow.models.Variable.get(
-                self.network.proposer_neuron_private_key_variable_name
+        print("::group::DRE output")
+        proposal_number = (
+            dre.DRE(network=network, subprocess_hook=SubprocessHook())
+            .authenticated()
+            .propose_to_update_subnet_replica_version(
+                subnet_id, git_revision, dry_run=self.simulate_proposal
             )
         )
-        net = ic_types.augment_network_with_private_key(self.network, pkey)
-        # Force use of main rollout Git revision for ic-admin rollout,
-        # but only when rolling out forrealz.
-        try:
-            proc = ic_admin.propose_to_update_subnet_replica_version(
-                subnet_id,
-                git_revision,
-                net,
-                ic_admin_version=None if self.simulate_proposal else self.git_revision,
-                dry_run=self.simulate_proposal,
-            )
-            self.log.info("Standard output: %s", proc.stdout)
-            self.log.info("Standard error: %s", proc.stderr)
-        except subprocess.CalledProcessError as exc:
-            self.log.error(
-                "Failure to execute ic-admin (return code %d)", exc.returncode
-            )
-            self.log.error("Standard output: %s", exc.stdout)
-            self.log.error("Standard error: %s", exc.stderr)
-            raise
+        print("::endgroup::")
 
-        if self.simulate_proposal:
-            proposal_number = FAKE_PROPOSAL_NUMBER
-        else:
-            search_result = re.search("^proposal ([0-9]+)$", proc.stdout, re.MULTILINE)
-            assert (
-                search_result
-            ), "Proposal creation did not create a proposal number yet it did not bomb."
-            proposal_number = int(search_result.groups(1)[0])
         url = f"{self.network.proposal_display_url}/{proposal_number}"
         return {
             "proposal_id": proposal_number,
@@ -273,7 +237,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             task_ids=self.source_task_id,
             map_indexes=context["task_instance"].map_index,
         )
-        if proposal_creation_result["proposal_id"] == FAKE_PROPOSAL_NUMBER:
+        if proposal_creation_result["proposal_id"] == dre.FAKE_PROPOSAL_NUMBER:
             self.log.info("Fake proposal.  Not requesting vote.")
         elif not proposal_creation_result["needs_vote"]:
             self.log.info("Proposal does not need vote.  Not requesting vote.")
@@ -353,7 +317,7 @@ def schedule(
             context,
         )
     )
-    ic_admin_version = "{:040}".format(
+    default_git_revision = "{:040}".format(
         context["task"].render_template(  # type: ignore
             "{{ params.git_revision }}",
             context,
@@ -370,7 +334,7 @@ def schedule(
             plan_data_structure,
             subnet_list_source=subnet_list_source,
         ),
-        ic_admin_version,
+        default_git_revision,
     )
     print("::endgroup::")
 

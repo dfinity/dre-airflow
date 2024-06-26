@@ -1,5 +1,5 @@
 """
-ic-admin proxy and downloader.
+DRE utility proxy and downloader.
 """
 
 import fcntl
@@ -21,6 +21,7 @@ from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
 DRE_URL = "https://github.com/dfinity/dre/releases/latest/download/dre"
+FAKE_PROPOSAL_NUMBER = -123456
 
 
 @contextmanager
@@ -263,6 +264,52 @@ class AuthenticatedDRE(DRE):
             dry_run=dry_run,
             yes=True,
         )
+
+    def propose_to_update_subnet_replica_version(
+        self,
+        subnet_id: str,
+        git_revision: str,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create proposal to update subnet to a blessed version.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        subnet_id_short = subnet_id.split("-")[0]
+        git_revision_short = git_revision[:7]
+        proposal_title = (
+            f"Update subnet {subnet_id_short} to replica version {git_revision_short}"
+        )
+        proposal_summary = (
+            f"""Update subnet {subnet_id} to replica version """
+            f"""[{git_revision}]({network.release_display_url}/{git_revision})
+""".strip()
+        )
+        r = self.run(
+            "propose",
+            "update-subnet-replica-version",
+            "--proposal-title",
+            proposal_title,
+            "--summary",
+            proposal_summary,
+            subnet_id,
+            git_revision,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        return int(r.output.rstrip().splitlines()[-1].split()[1])
 
 
 if __name__ == "__main__":
