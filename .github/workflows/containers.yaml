@@ -19,6 +19,12 @@ jobs:
         id: metadata
         with:
           images: ghcr.io/${{ github.repository }}/airflow-content-syncer
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha,format=long
 
       - uses: docker/login-action@v3
         with:
@@ -45,6 +51,12 @@ jobs:
         id: metadata
         with:
           images: ghcr.io/${{ github.repository }}/airflow-customized
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha,format=long
 
       - uses: docker/login-action@v3
         with:
