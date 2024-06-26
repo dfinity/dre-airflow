@@ -114,11 +114,9 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
             return
 
         self.log.info(f"Waiting for revision {git_revision} to be elected.")
-        print("::group::DRE output")
         blessed = dre.DRE(self.network, SubprocessHook()).is_replica_version_blessed(
             git_revision,
         )
-        print("::endgroup::")
         if not blessed:
             self.log.info("Revision is not yet elected.  Waiting.")
             self.defer(
@@ -170,20 +168,14 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
             self.subnet_id, self.git_revision
         )
-        pkey = airflow.models.Variable.get(
-            self.network.proposer_neuron_private_key_variable_name
-        )
 
-        net = ic_types.augment_network_with_private_key(self.network, pkey)
-        print("::group::DRE output")  # This will work in Airflow 2.9.x and above.
         # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
         props = dre.DRE(
-            network=net, subprocess_hook=SubprocessHook()
+            network=self.network, subprocess_hook=SubprocessHook()
         ).get_ic_os_version_deployment_proposals_for_subnet_and_revision(
             subnet_id=subnet_id,
             git_revision=git_revision,
         )
-        print("::endgroup::")
 
         def per_status(
             props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus

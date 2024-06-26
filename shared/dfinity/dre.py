@@ -145,15 +145,20 @@ class DRE:
                         cmd.append("--yes")
                     else:
                         cmd.insert(pos + 1, "--yes")
+
+                print("::group::DRE output")
                 if full_stdout:
                     with tempfile.NamedTemporaryFile(mode="r") as f:
                         cmd = ["bash", "-c", shlex.join(cmd) + " > " + f.name]
                         r = self.subprocess_hook.run_command(cmd)
                         f.seek(0)
                         data = f.read()
-                        return SubprocessResult(r.exit_code, data)
+                        result = SubprocessResult(r.exit_code, data)
                 else:
-                    return self.subprocess_hook.run_command(cmd)
+                    result = self.subprocess_hook.run_command(cmd)
+                print("::endgroup::")
+
+                return result
 
     def get_proposals(
         self,
