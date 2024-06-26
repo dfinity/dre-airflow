@@ -290,7 +290,7 @@ class AuthenticatedDRE(DRE):
         )
         proposal_summary = (
             f"""Update subnet {subnet_id} to replica version """
-            f"""[{git_revision}]({network.release_display_url}/{git_revision})
+            f"""[{git_revision}]({self.network.release_display_url}/{git_revision})
 """.strip()
         )
         r = self.run(
