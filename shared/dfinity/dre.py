@@ -303,7 +303,6 @@ class AuthenticatedDRE(DRE):
             subnet_id,
             git_revision,
             dry_run=dry_run,
-            yes=not dry_run,
         )
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
