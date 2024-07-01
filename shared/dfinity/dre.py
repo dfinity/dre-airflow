@@ -140,11 +140,11 @@ class DRE:
                 if dry_run:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
-                    pos = cmd.index("propose")
-                    if pos == -1:
-                        cmd.append("--yes")
-                    else:
+                    try:
+                        pos = cmd.index("propose")
                         cmd.insert(pos + 1, "--yes")
+                    except ValueError:
+                        cmd.append("--yes")
 
                 print("::group::DRE output")
                 if full_stdout:
