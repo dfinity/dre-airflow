@@ -7,7 +7,7 @@ export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared
 
 if [ "$1" == "setup" ]
 then
-    python3.11 -m venv "$VENV_DIR"
+    python -m venv "$VENV_DIR"
     "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
