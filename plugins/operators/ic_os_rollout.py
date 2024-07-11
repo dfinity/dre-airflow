@@ -99,19 +99,17 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
             self.subnet_id, self.git_revision
         )
         runner = dre.DRE(network=self.network, subprocess_hook=SubprocessHook())
-        # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/logging-tasks.html#grouping-of-log-lines
-        props = runner.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
-            subnet_id=subnet_id,
-            git_revision=git_revision,
+
+        # Get proposals sorted by proposal number.
+        props = sorted(
+            runner.get_ic_os_version_deployment_proposals_for_subnet(
+                subnet_id=subnet_id,
+            ),
+            key=lambda prop: -prop["proposal_id"],
         )
-
-        def per_status(
-            props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus
-        ) -> list[ic_types.AbbrevProposal]:
-            return [p for p in props if p["status"] == status]
-
-        executeds = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
-        opens = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN)
+        props_for_git_revision = [
+            p for p in props if p["payload"]["replica_version_id"] == git_revision
+        ]
 
         if self.simulate_proposal:
             self.log.info(f"simulate_proposal={self.simulate_proposal}")
@@ -134,41 +132,52 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
         except IndexError:
             raise RuntimeError(f"No replicas have been found with subnet {subnet_id}")
 
-        if executeds:
-            url = f"{self.network.proposal_display_url}/{executeds[0]['proposal_id']}"
+        if not props:
+            self.log.info("No proposals for subnet.  Will create.")
+        elif not props_for_git_revision:
             self.log.info(
-                "Proposal " + url + f" titled {executeds[0]['title']}"
+                "No proposals with revision %s for subnet.  Will create.", git_revision
+            )
+        elif props_for_git_revision[0]["proposal_id"] < props[0]["proposal_id"]:
+            self.log.info(
+                "Proposal %s with git revision %s for subnet "
+                "is not the last (%s).  Will create.",
+                props_for_git_revision[0]["proposal_id"],
+                git_revision,
+                props[0]["proposal_id"],
+            )
+        elif props_for_git_revision[0]["status"] not in (
+            ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+            ic_types.ProposalStatus.PROPOSAL_STATUS_ADOPTED,
+            ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED,
+        ):
+            self.log.info(
+                "Proposal %s with git revision %s for subnet "
+                "is in state %s and must be created again.  Will create.",
+                props_for_git_revision[0]["proposal_id"],
+                git_revision,
+                props_for_git_revision[0]["status"],
+            )
+        else:
+            prop = props_for_git_revision[0]
+            self.log.info(
+                "Proposal %s with git revision %s for subnet "
+                "is in state %s and does not need to be created.",
+                ["proposal_id"],
+                git_revision,
+                prop["status"],
+            )
+            url = f"{self.network.proposal_display_url}/{prop['proposal_id']}"
+            self.log.info(
+                "Proposal " + url + f" titled {prop['title']}"
                 f" has executed.  No need to do anything."
             )
             return {
-                "proposal_id": int(executeds[0]["proposal_id"]),
+                "proposal_id": int(prop["proposal_id"]),
                 "proposal_url": url,
-                "needs_vote": False,
+                "needs_vote": prop["status"]
+                == ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
             }
-
-        if opens:
-            url = f"{self.network.proposal_display_url}/{opens[0]['proposal_id']}"
-            self.log.info(
-                "Proposal " + url + f" titled {opens[0]['title']}"
-                " is open.  Continuing to next step until proposal has executed."
-            )
-            return {
-                "proposal_id": int(opens[0]["proposal_id"]),
-                "proposal_url": url,
-                "needs_vote": True,
-            }
-
-        if not props:
-            self.log.info(
-                f"No proposals for subnet ID {subnet_id} to "
-                + f"adopt revision {git_revision}."
-            )
-        else:
-            self.log.info("The following proposals neither open nor executed exist:")
-            for p in props:
-                self.log.info(
-                    f"* {self.network.proposal_display_url}/{p['proposal_id']}"
-                )
 
         self.log.info(
             f"Creating proposal for subnet ID {subnet_id} to "
