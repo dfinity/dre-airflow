@@ -7,7 +7,13 @@ runs:
     - name: "Prepare"
       id: prep
       run: |
-        make venv/bin venv/bin/mypy venv/bin/ruff venv/bin/pytest venv/lib/*/site-packages/mock
+        ret=0
+        out=$(make venv/bin venv/bin/mypy venv/bin/ruff venv/bin/pytest venv/lib/*/site-packages/mock 2>&1) || ret=$?
+        if [ $ret != 0 ]
+        then
+          echo "$out" >&2
+          exit $ret
+        fi
       shell: bash
 
     - name: "Ruff"
