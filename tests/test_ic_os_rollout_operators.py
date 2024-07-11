@@ -1,3 +1,4 @@
+import contextlib
 import unittest
 
 import mock
@@ -57,7 +58,8 @@ class TestCreateProposal(unittest.TestCase):
             "topic": ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
         }
 
-    def test_no_proposals(self) -> None:
+    @contextlib.contextmanager
+    def _ctx(self):  # type:ignore
         with mock.patch(
             "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
         ) as m, mock.patch(
@@ -67,31 +69,25 @@ class TestCreateProposal(unittest.TestCase):
         ) as p, mock.patch(
             "airflow.models.variable.Variable.get"
         ) as v:
-            m.return_value = []
             n.return_value = [{"value": 13}]
-            p.return_value = -123456
             v.return_value = "FAKE CERT"
+            yield m, p
+
+    def test_no_proposals(self) -> None:
+        with self._ctx() as (m, p):
+            m.return_value = []
+            p.return_value = -123456
             res = self._exercise().execute({})
             assert res["needs_vote"] is True
             assert res["proposal_id"] == p.return_value
 
     def test_latest_proposal_matches(self) -> None:
-        with mock.patch(
-            "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
-        ) as m, mock.patch(
-            "dfinity.prom_api.query_prometheus_servers"
-        ) as n, mock.patch(
-            "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
-        ) as p, mock.patch(
-            "airflow.models.variable.Variable.get"
-        ) as v:
+        with self._ctx() as (m, p):
             props: list[AbbrevProposal] = [
                 self._prop(123456, ProposalStatus.PROPOSAL_STATUS_OPEN),
             ]
             m.return_value = props
-            n.return_value = [{"value": 13}]
             p.return_value = -123456
-            v.return_value = "FAKE CERT"
             res = self._exercise().execute({})
             assert res["needs_vote"] is True
             assert res["proposal_id"] == props[0]["proposal_id"]
@@ -103,15 +99,7 @@ class TestCreateProposal(unittest.TestCase):
             assert res["proposal_id"] == props[0]["proposal_id"]
 
     def test_match_exists_but_not_latest(self) -> None:
-        with mock.patch(
-            "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
-        ) as m, mock.patch(
-            "dfinity.prom_api.query_prometheus_servers"
-        ) as n, mock.patch(
-            "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
-        ) as p, mock.patch(
-            "airflow.models.variable.Variable.get"
-        ) as v:
+        with self._ctx() as (m, p):
             props: list[AbbrevProposal] = [
                 self._prop(123456, ProposalStatus.PROPOSAL_STATUS_EXECUTED),
                 self._prop(
@@ -121,23 +109,13 @@ class TestCreateProposal(unittest.TestCase):
                 ),
             ]
             m.return_value = props
-            n.return_value = [{"value": 13}]
             p.return_value = -123456
-            v.return_value = "FAKE CERT"
             res = self._exercise().execute({})
             assert res["needs_vote"] is True
             assert res["proposal_id"] == p.return_value
 
     def test_match_exists_is_latest(self) -> None:
-        with mock.patch(
-            "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
-        ) as m, mock.patch(
-            "dfinity.prom_api.query_prometheus_servers"
-        ) as n, mock.patch(
-            "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
-        ) as p, mock.patch(
-            "airflow.models.variable.Variable.get"
-        ) as v:
+        with self._ctx() as (m, p):
             props: list[AbbrevProposal] = [
                 self._prop(123458, ProposalStatus.PROPOSAL_STATUS_EXECUTED),
                 self._prop(
@@ -147,9 +125,7 @@ class TestCreateProposal(unittest.TestCase):
                 ),
             ]
             m.return_value = props
-            n.return_value = [{"value": 13}]
             p.return_value = -123456
-            v.return_value = "FAKE CERT"
             res = self._exercise().execute({})
             assert res["needs_vote"] is False
             assert res["proposal_id"] == props[0]["proposal_id"]
