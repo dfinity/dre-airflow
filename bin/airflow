@@ -7,7 +7,7 @@ export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared
 
 if [ "$1" == "setup" ]
 then
-    python3 -m venv "$VENV_DIR"
+    python3.11 -m venv "$VENV_DIR"
     "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
@@ -20,8 +20,6 @@ then
     pushd "$AIRFLOW_HOME"
     ln -sfT ../dags dags
     ln -sfT ../plugins plugins
-    sed -i 's/allowed_deserialization_classes_regex.*/allowed_deserialization_classes_regex = (airflow|dfinity)[.].*/' airflow.cfg
-    sed -i 's/^allowed_deserialization_classes /# allowed_deserialization_classes.../' airflow.cfg
     sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow.cfg
     sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
     popd
@@ -52,5 +50,6 @@ then
     exit
 fi
 
+export AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(dfinity|airflow).*"
 export PATH="$VENV_DIR/bin:$PATH"
 exec "$VENV_DIR"/bin/airflow "$@"

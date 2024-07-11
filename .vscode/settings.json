@@ -1,5 +1,4 @@
 {
-    "python.linting.mypyEnabled": true,
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
         "source.organizeImports": "never",
@@ -17,11 +16,5 @@
         "-p",
         "test_*.py"
     ],
-    "python.analysis.diagnosticMode": "workspace",
-    "python.linting.mypyArgs": [
-        "--config=mypy.ini",
-        "--show-column-numbers",
-        "--no-pretty"
-    ],
-    "python.linting.mypyPath": "venv/bin/mypy"
+    "python.analysis.diagnosticMode": "workspace"
 }

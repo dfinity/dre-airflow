@@ -400,7 +400,8 @@ of up to 5 minutes between pods syncing.
 ## Local development environment setup
 
 To get the right libraries loaded into your IDE, you will need a
-virtual environment with them installed.  Run `bin/airflow setup`
+virtual environment with them installed, which uses Python 3.11.
+With `python3.11` in your PATH environment, run `bin/airflow setup`
 to get yourself set up.  You can then tell your IDE to use the
 specific venv `python3` binary under the folder `venv` in this
 repository.
