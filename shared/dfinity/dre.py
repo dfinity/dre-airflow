@@ -140,6 +140,8 @@ class DRE:
                 if dry_run:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
+                    # In dry-run mode, this kicks in, but cmd.index raises
+                    # ValueError when it cannot find the value.
                     try:
                         pos = cmd.index("propose")
                         cmd.insert(pos + 1, "--yes")
@@ -196,7 +198,7 @@ class DRE:
         data = json.loads(r.output)
         results: list[ic_types.AbbrevProposal] = []
         for d in data:
-            d["proposal_id"] = d["id"]
+            d["proposal_id"] = int(d["id"])
             del d["id"]
             d["status"] = str_to_status("PROPOSAL_STATUS_" + d["status"].upper())
             d["topic"] = re.sub("([A-Z])", "_\\1", d["topic"])
@@ -227,6 +229,21 @@ class DRE:
             )
             if r["payload"].get("subnet_id") == subnet_id
             and r["payload"].get("replica_version_id") == git_revision
+        ]
+
+    def get_ic_os_version_deployment_proposals_for_subnet(
+        self,
+        subnet_id: str,
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevProposal]:
+        return [
+            r
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if r["payload"].get("subnet_id") == subnet_id
+            and r["payload"].get("replica_version_id") is not None
         ]
 
     def get_subnet_list(self) -> list[str]:
