@@ -14,7 +14,7 @@ use chrono::{DateTime, FixedOffset, TimeDelta, Utc};
 use log::{debug, info, trace, warn};
 use regex::Regex;
 use reqwest::cookie::Jar;
-use reqwest::header::REFERER;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
 use reqwest::Url;
 use serde::de::Error;
 use serde::Serialize;
@@ -588,7 +588,13 @@ impl AirflowApi {
         let c = self.client.clone();
 
         info!(target: "http_client", "GET {}", url);
-        let res = match c.get(url).send().await {
+        let res = match c
+            .get(url)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .send()
+            .await
+        {
             Ok(resp) => {
                 let status = resp.status();
                 info!(target: "http_client", "HTTP status {}", status);
