@@ -50,6 +50,16 @@ then
     exit
 fi
 
+if [ "$1" == "unlockdb" ]
+then
+    cd "$AIRFLOW_HOME"
+    echo .dump | sqlite3 airflow.db | sqlite3 airflow.db-new
+    mv -f airflow.db-new airflow.db
+    echo "Database is now unlocked." >&2
+    exit
+fi
+
 export AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(dfinity|airflow).*"
+export AIRFLOW__WEBSERVER__ALLOW_RAW_HTML_DESCRIPTIONS=true
 export PATH="$VENV_DIR/bin:$PATH"
 exec "$VENV_DIR"/bin/airflow "$@"
