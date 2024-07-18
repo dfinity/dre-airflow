@@ -49,6 +49,7 @@ To build the static parts of the frontend, use
 
 ## To-do
 
+* Fix tests for the paged gets.  If they are broken.  Check for boundary conditions.
 * Optimize merge() because right now it's O(n^2).
 * Optimize HTTP requests to happen only when the Airflow API says there has been an update.
   * Further optimize by only querying for data that is known to have changed and no more.
@@ -57,7 +58,6 @@ To build the static parts of the frontend, use
   * Parallelize API requests when it makes sense.
 * Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
 * Provide a way to switch between ongoing, failed and successful rollouts in the UI (probably using tabs or some other selector).
-* Fix tests for the paged gets.  If they are broken.  Check for boundary conditions.
 * Favicon.ico!
 * Handle errors contacting the backend.  Make backend improve errors by returning JSON
   structured errors so the frontend can show reasonable things.
