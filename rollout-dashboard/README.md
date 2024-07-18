@@ -57,8 +57,14 @@ To build the static parts of the frontend, use
   * Parallelize API requests when it makes sense.
 * Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
 * Provide a way to switch between ongoing, failed and successful rollouts in the UI (probably using tabs or some other selector).
-* Prettify the UI further.  Right now it looks like shit.
 * Fix tests for the paged gets.  If they are broken.  Check for boundary conditions.
 * Favicon.ico!
 * Handle errors contacting the backend.  Make backend improve errors by returning JSON
   structured errors so the frontend can show reasonable things.
+
+## Things this project uses:
+
+This project uses
+
+* [TailwindCSS](https://tailwindcss.com/)
+* [Flowbite:](https://flowbite-svelte.com/docs/components)
