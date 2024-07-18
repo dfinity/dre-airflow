@@ -61,6 +61,9 @@ To build the static parts of the frontend, use
 * Favicon.ico!
 * Handle errors contacting the backend.  Make backend improve errors by returning JSON
   structured errors so the frontend can show reasonable things.
+* Actually build production container, which requires making the static
+  files built by NPM available to the Rust server so the Rust server
+  can serve them to the browser client.
 
 ## Things this project uses:
 
