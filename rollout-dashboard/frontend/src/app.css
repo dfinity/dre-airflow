@@ -17,19 +17,18 @@ body {
   margin: 0;
   display: flex;
   /* place-items: center; */
-  min-width: 620px;
+  /* min-width: 620px; */
   /* min-height: 100vh; */
 }
 
-.card {
-  padding: 2em;
+nav {
+  text-align: center;
 }
 
 #app {
   max-width: 1280px;
   margin: 0 auto;
   padding: 2rem;
-  text-align: center;
 }
 
 .tooltip {

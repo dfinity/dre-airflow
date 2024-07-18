@@ -42,15 +42,22 @@
     }
     .rollout .state_icon {
         order: 0;
+        flex-grow: 0;
     }
     .rollout .name {
         order: 1;
+        flex-grow: 1;
         margin-left: 2em;
         margin-right: 2em;
         font-weight: bold;
+        text-align: center;
     }
     .rollout .start_time {
         order: 2;
+    }
+    .rollout .note {
+        color: #333;
+        font-style: italic;
     }
 </style>
 
@@ -60,6 +67,9 @@
         <div class="state_icon tooltip">{rollout_states[rollout.state].icon}<span class="state tooltiptext">{rollout_states[rollout.state].name}</span></div>
         <div class="start_time"><Time live relative timestamp="{rollout.dispatch_time}" /></div>
     </div>
+    {#if rollout.note}
+    <p class="note">{rollout.note}</p>
+    {/if}
     <ul>
         {#each Object.entries(rollout.batches) as [batch_num, batch]}
         <li>

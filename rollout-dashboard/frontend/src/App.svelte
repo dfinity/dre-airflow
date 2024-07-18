@@ -13,12 +13,14 @@
 
 </script>
 
+<nav>
 <ButtonGroup class="*:!ring-primary-700">
   <Button href="#active">Active</Button>
   <Button href="#complete">Complete</Button>
   <Button href="#failed">Failed</Button>
   <Button href="#all">All</Button>
 </ButtonGroup>
+</nav>
 
 {#each $my_rollouts as rollout}
 {#if

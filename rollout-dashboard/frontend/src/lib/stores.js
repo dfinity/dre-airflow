@@ -11,12 +11,12 @@ export const rollouts = (() => {
         if (res.ok) {
             let json = await res.json()
             store.set(json)
-            setTimeout(updater, 5000)
+            setTimeout(updater, 15000)
         } else {
             // Sometimes the API will fail!
             // FIXME: we should handle this with an error shown to the user.
             console.log('Request failed: ' + res.ok);
-            setTimeout(updater, 5000)
+            setTimeout(updater, 15000)
         }
     }
     setTimeout(updater, 1)

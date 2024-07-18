@@ -99,15 +99,17 @@ enum RolloutState {
 #[derive(Debug, Serialize)]
 struct Rollout {
     name: String,
+    note: Option<String>,
     state: RolloutState,
     dispatch_time: DateTime<Utc>,
     batches: HashMap<usize, Batch>,
 }
 
 impl Rollout {
-    fn new(name: String, dispatch_time: DateTime<Utc>) -> Self {
+    fn new(name: String, note: Option<String>, dispatch_time: DateTime<Utc>) -> Self {
         Self {
             name: name,
+            note,
             state: RolloutState::Preparing,
             dispatch_time: dispatch_time,
             batches: HashMap::new(),
@@ -968,7 +970,11 @@ impl Proxy {
                 .await?;
             let sorted_task_instances = sorter.sort_instances(task_instances);
 
-            let mut rollout = Rollout::new(dag_run.dag_run_id.to_string(), start_date);
+            let mut rollout = Rollout::new(
+                dag_run.dag_run_id.to_string(),
+                dag_run.note.clone(),
+                start_date,
+            );
 
             for task_instance in sorted_task_instances {
                 if task_instance.task_id == "schedule" {
