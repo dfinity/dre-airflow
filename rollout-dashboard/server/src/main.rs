@@ -959,11 +959,6 @@ impl Proxy {
         let mut res: Vec<Rollout> = vec![];
 
         for dag_run in dag_runs.dag_runs.iter() {
-            let start_date = match dag_run.start_date {
-                Some(d) => d,
-                None => continue,
-            };
-
             let task_instances = self
                 .airflow_api
                 .task_instances(dag_id, dag_run.dag_run_id.as_str(), 500, 0)
@@ -973,7 +968,7 @@ impl Proxy {
             let mut rollout = Rollout::new(
                 dag_run.dag_run_id.to_string(),
                 dag_run.note.clone(),
-                start_date,
+                dag_run.logical_date,
             );
 
             for task_instance in sorted_task_instances {
