@@ -22,16 +22,17 @@
         margin: 0;
         padding: 0;
         list-style-type: none;
-        dborder: 1px solid red;
 	}
     li {
-        dborder: 1px solid blue;
         background-color: #e4e4e4;
         padding: 0.6em;
     }
     .rollout {
         border-left: 10px solid #999;
         padding-left: 1em;
+        display: flex;
+        flex-direction: column;
+        row-gap: 0.6em;
     }
     .rollout .general_info {
 		display: flex;
@@ -67,6 +68,7 @@
     {#if rollout.note}
     <p class="note">{rollout.note}</p>
     {/if}
+    {#if rollout.batches && Object.keys(rollout.batches).length  > 0}
     <ul>
         {#each Object.entries(rollout.batches) as [batch_num, batch]}
         <li>
@@ -74,4 +76,15 @@
         </li>
         {/each}
     </ul>
+    {:else}
+    <div class="flex items-center p-4 text-sm text-gray-800 border border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600" role="alert">
+        <svg class="flex-shrink-0 inline w-4 h-4 me-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"/>
+        </svg>
+        <span class="sr-only">Info</span>
+        <div>
+            This rollout {#if rollout.state == "complete" || rollout.state == "failed"}never{:else}has not yet{/if} computed a rollout plan.
+        </div>
+    </div>
+    {/if}
 </section>
