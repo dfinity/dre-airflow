@@ -50,7 +50,6 @@ To build the static parts of the frontend, use
 ## To-do
 
 * Fix tests for the paged gets.  If they are broken.  Check for boundary conditions.
-* Optimize merge() because right now it's O(n^2).
 * Optimize HTTP requests to happen only when the Airflow API says there has been an update.
   * Further optimize by only querying for data that is known to have changed and no more.
   * Serve the rollout API request from cache unless there have been changes.

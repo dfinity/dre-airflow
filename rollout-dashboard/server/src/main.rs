@@ -20,7 +20,7 @@ use serde::de::Error;
 use serde::Serialize;
 use serde::{Deserialize, Deserializer};
 use std::cmp::{min, Ordering};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -41,7 +41,6 @@ trait Pageable {
     fn is_empty(&self) -> bool;
     fn max_entries(&self) -> usize;
     fn len(&self) -> usize;
-    fn has_id(&self, id: &String) -> bool;
     fn merge(&mut self, other: Self) -> ();
 }
 
@@ -195,7 +194,7 @@ impl RolloutPlan {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum DagRunState {
     Queued,
@@ -204,7 +203,7 @@ enum DagRunState {
     Failed,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct DagRunsResponseItem {
     conf: HashMap<String, serde_json::Value>,
     dag_run_id: String,
@@ -219,7 +218,9 @@ struct DagRunsResponseItem {
 
 #[derive(Debug, Deserialize, Default)]
 struct DagRunsResponse {
-    dag_runs: VecDeque<DagRunsResponseItem>,
+    dag_runs: Vec<DagRunsResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<String, usize>,
     total_entries: usize,
 }
 
@@ -233,29 +234,18 @@ impl Pageable for DagRunsResponse {
     fn len(&self) -> usize {
         self.dag_runs.len()
     }
-    fn has_id(&self, id: &String) -> bool {
-        let mut found = false;
-        for j in (0..self.dag_runs.len()).rev() {
-            if *id == self.dag_runs[j].dag_id.clone() + self.dag_runs[j].dag_run_id.as_str() {
-                found = true;
-                break;
-            }
-        }
-        found
-    }
-    fn merge(&mut self, mut other: Self) -> () {
-        loop {
-            let next = other.dag_runs.pop_front();
-            match next {
-                None => break,
-                Some(v) => {
-                    let id = v.dag_id.clone() + v.dag_run_id.as_str();
-                    if self.has_id(&id) {
-                        debug!(target: "processing", "Discarding {}", id);
-                    } else {
-                        debug!(target: "processing", "Consuming {}", id);
-                        self.dag_runs.push_back(v);
-                    }
+    fn merge(&mut self, other: Self) -> () {
+        for v in other.dag_runs.clone().into_iter() {
+            let id = v.dag_id.clone() + v.dag_run_id.as_str();
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.dag_runs[*pos] = v;
+                }
+                None => {
+                    debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.dag_runs.len());
+                    self.dag_runs.push(v);
                 }
             }
         }
@@ -348,7 +338,9 @@ struct TaskInstancesResponseItem {
 #[derive(Debug, Deserialize, Default)]
 
 struct TaskInstancesResponse {
-    task_instances: VecDeque<TaskInstancesResponseItem>,
+    task_instances: Vec<TaskInstancesResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<String, usize>,
     total_entries: usize,
 }
 
@@ -362,37 +354,21 @@ impl Pageable for TaskInstancesResponse {
     fn len(&self) -> usize {
         self.task_instances.len()
     }
-    fn has_id(&self, id: &String) -> bool {
-        let mut found = false;
-        for j in (0..self.task_instances.len()).rev() {
-            if *id
-                == self.task_instances[j].dag_id.clone()
-                    + self.task_instances[j].dag_run_id.as_str()
-                    + self.task_instances[j].task_id.as_str()
-                    + format!("{:?}", self.task_instances[j].map_index).as_str()
-            {
-                found = true;
-                break;
-            }
-        }
-        found
-    }
-    fn merge(&mut self, mut other: Self) -> () {
-        loop {
-            let next = other.task_instances.pop_front();
-            match next {
-                None => break,
-                Some(v) => {
-                    let id = v.dag_id.clone()
-                        + v.dag_run_id.as_str()
-                        + v.task_id.as_str()
-                        + format!("{:?}", v.map_index).as_str();
-                    if self.has_id(&id) {
-                        debug!(target: "processing", "Discarding {}", id);
-                    } else {
-                        debug!(target: "processing", "Consuming {}", id);
-                        self.task_instances.push_back(v);
-                    }
+    fn merge(&mut self, other: Self) -> () {
+        for v in other.task_instances.clone().into_iter() {
+            let id = v.dag_id.clone()
+                + v.dag_run_id.as_str()
+                + v.task_id.as_str()
+                + format!("{:?}", v.map_index).as_str();
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.task_instances[*pos] = v;
+                }
+                None => {
+                    debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.task_instances.len());
+                    self.task_instances.push(v);
                 }
             }
         }
@@ -400,7 +376,7 @@ impl Pageable for TaskInstancesResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct TasksResponseItem {
     task_id: String,
     task_display_name: String,
@@ -427,7 +403,9 @@ struct TasksResponseItem {
 #[derive(Debug, Deserialize, Default)]
 
 struct TasksResponse {
-    tasks: VecDeque<TasksResponseItem>,
+    tasks: Vec<TasksResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<String, usize>,
     total_entries: usize,
 }
 
@@ -441,29 +419,18 @@ impl Pageable for TasksResponse {
     fn len(&self) -> usize {
         self.tasks.len()
     }
-    fn has_id(&self, id: &String) -> bool {
-        let mut found = false;
-        for j in (0..self.tasks.len()).rev() {
-            if *id == self.tasks[j].task_id.clone() {
-                found = true;
-                break;
-            }
-        }
-        found
-    }
-    fn merge(&mut self, mut other: Self) -> () {
-        loop {
-            let next = other.tasks.pop_front();
-            match next {
-                None => break,
-                Some(v) => {
-                    let id = v.task_id.clone();
-                    if self.has_id(&id) {
-                        debug!(target: "processing", "Discarding {}", id);
-                    } else {
-                        debug!(target: "processing", "Consuming {}", id);
-                        self.tasks.push_back(v);
-                    }
+    fn merge(&mut self, other: Self) -> () {
+        for v in other.tasks.clone().into_iter() {
+            let id = v.task_id.clone();
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.tasks[*pos] = v;
+                }
+                None => {
+                    debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.tasks.len());
+                    self.tasks.push(v);
                 }
             }
         }
@@ -1244,6 +1211,7 @@ mod tests {
     use super::*;
     use futures::FutureExt;
     use serde_json::{from_str, json};
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     #[derive(Default, Deserialize, Serialize, Debug)]
