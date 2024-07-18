@@ -23,7 +23,6 @@
         padding: 0;
         list-style-type: none;
         dborder: 1px solid red;
-        margin-top: 0.6em;
 	}
     li {
         dborder: 1px solid blue;
@@ -33,8 +32,6 @@
     .rollout {
         border-left: 10px solid #999;
         padding-left: 1em;
-        margin-top: 2em;
-        margin-bottom: 2em;
     }
     .rollout .general_info {
 		display: flex;

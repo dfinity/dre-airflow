@@ -56,9 +56,8 @@ To build the static parts of the frontend, use
   * This will require important changes to the data structures used to hold the rollout state.
   * Parallelize API requests when it makes sense.
 * Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
-* Provide a way to switch between ongoing, failed and successful rollouts in the UI (probably using tabs or some other selector).
 * Favicon.ico!
-* Handle errors contacting the backend.  Make backend improve errors by returning JSON
+* Make backend improve errors by returning JSON
   structured errors so the frontend can show reasonable things.
 * Actually build production container, which requires making the static
   files built by NPM available to the Rust server so the Rust server
@@ -69,4 +68,5 @@ To build the static parts of the frontend, use
 This project uses
 
 * [TailwindCSS](https://tailwindcss.com/)
-* [Flowbite:](https://flowbite-svelte.com/docs/components)
+* [Flowbite](https://flowbite-svelte.com/docs/components)
+* [Flowbite icons](https://flowbite.com/icons/)

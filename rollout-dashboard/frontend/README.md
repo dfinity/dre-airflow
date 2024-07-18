@@ -1,6 +1,6 @@
 # Svelte + TS + Vite
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+**Please read [the upper level README.md](../README.md) first.**
 
 ## Recommended IDE Setup
 
