@@ -29,7 +29,7 @@
     }
     .rollout {
         border-left: 10px solid #999;
-        padding-left: 1em;
+        padding-left: 0.6em;
         display: flex;
         flex-direction: column;
         row-gap: 0.6em;
