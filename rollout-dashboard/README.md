@@ -49,19 +49,24 @@ To build the static parts of the frontend, use
 
 ## To-do
 
-* Fix tests for the paged gets.  If they are broken.  Check for boundary conditions.
-* Optimize HTTP requests to happen only when the Airflow API says there has been an update.
-  * Further optimize by only querying for data that is known to have changed and no more.
-  * Serve the rollout API request from cache unless there have been changes.
-  * This will require important changes to the data structures used to hold the rollout state.
-  * Parallelize API requests when it makes sense.
-* Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
-* Favicon.ico!
-* Make backend improve errors by returning JSON
-  structured errors so the frontend can show reasonable things.
+### Necessary for production
+
+* Make Rust server handle serving static content for production.
 * Actually build production container, which requires making the static
   files built by NPM available to the Rust server so the Rust server
   can serve them to the browser client.
+  * These must be built with a static set of versions for npm and npx
+    in a separate container designed to build the static files.
+
+### Wishlist
+
+* Optimize HTTP requests to happen only when the Airflow API says there has been an update.
+  * Further optimize by only querying for data that is known to have changed and no more.
+  * This will require important changes to the data structures used to hold the rollout state.
+* Parallelize API requests when it makes sense.
+* Favicon.ico!
+* Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
+* Make backend improve errors by returning JSON   structured errors so the frontend can show reasonable things.
 
 ## Things this project uses:
 

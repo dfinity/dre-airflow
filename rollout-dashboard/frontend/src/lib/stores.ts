@@ -11,21 +11,25 @@ export const rollout_query = (() => {
     let updater = async () => {
         const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v1";
         const url = API_URL + "/rollouts"
-        console.log("Hitting URL " + url)
         const res = await fetch(url);
         if (res.ok) {
-            let json = await res.json()
-            store.set({
-                rollouts: json,
-                error: null
-            })
-            setTimeout(updater, 15000)
+            if (res.status == 204) {
+                console.log('Data is not yet available.  Retrying soon.')
+                store.set({ rollouts: [], error: "loading" })
+            } else {
+                let json = await res.json()
+                store.set({
+                    rollouts: json,
+                    error: null
+                })
+            }
+            setTimeout(updater, 5000)
         } else {
             // Sometimes the API will fail!
             // FIXME: we should handle this with an error shown to the user.
-            console.log('Request for rollout data failed: ' + res.ok);
+            console.log('Request for rollout data failed: ' + res.ok)
             let responseText = await res.text()
-            let errorText = res.status + " " + res.statusText;
+            let errorText = res.status + " " + res.statusText
             if (responseText) {
                 responseText = responseText.split("\n")[0]
                 errorText = errorText + ": " + responseText

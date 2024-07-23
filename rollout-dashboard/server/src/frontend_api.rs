@@ -35,14 +35,14 @@ pub enum SubnetRolloutState {
     Error,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct Subnet {
     pub subnet_id: String,
     pub git_revision: String,
     pub state: SubnetRolloutState,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct Batch {
     pub start_time: DateTime<Utc>,
     pub subnets: Vec<Subnet>,
@@ -61,7 +61,7 @@ impl Batch {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum RolloutState {
     Preparing,
@@ -73,7 +73,7 @@ pub enum RolloutState {
     Failed,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Rollout {
     pub name: String,
     pub note: Option<String>,
@@ -282,19 +282,6 @@ impl RolloutPlan {
     }
 }
 
-#[derive(Clone)]
-pub struct DashboardApi {
-    airflow_api: Arc<AirflowClient>,
-}
-
-impl DashboardApi {
-    pub fn new(client: AirflowClient) -> Self {
-        Self {
-            airflow_api: Arc::new(client),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum RolloutDataGatherError {
     AirflowError(AirflowError),
@@ -313,9 +300,21 @@ impl From<RolloutPlanParseError> for RolloutDataGatherError {
     }
 }
 
-// FIXME handle unwraps everywhere else!
+#[derive(Clone)]
+pub struct RolloutApi {
+    airflow_api: Arc<AirflowClient>,
+}
 
-impl DashboardApi {
+impl RolloutApi {
+    pub fn new(client: AirflowClient) -> Self {
+        Self {
+            airflow_api: Arc::new(client),
+        }
+    }
+}
+
+// FIXME handle unwraps everywhere else!
+impl RolloutApi {
     pub async fn get_rollout_data(&self) -> Result<Vec<Rollout>, RolloutDataGatherError> {
         let dag_id = "rollout_ic_os_to_mainnet_subnets";
         let dag_runs = self.airflow_api.dag_runs(dag_id, 20, 0).await?;
