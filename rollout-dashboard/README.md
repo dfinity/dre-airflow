@@ -57,6 +57,8 @@ To build the static parts of the frontend, use
   can serve them to the browser client.
   * These must be built with a static set of versions for npm and npx
     in a separate container designed to build the static files.
+* Solve all Cargo warnings and remove all `unwrap()`s in favor of proper
+  error handling.
 
 ### Wishlist
 
