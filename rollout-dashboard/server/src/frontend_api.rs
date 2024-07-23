@@ -79,16 +79,23 @@ pub struct Rollout {
     pub note: Option<String>,
     pub state: RolloutState,
     pub dispatch_time: DateTime<Utc>,
+    pub last_scheduling_decision: Option<DateTime<Utc>>,
     pub batches: HashMap<usize, Batch>,
 }
 
 impl Rollout {
-    fn new(name: String, note: Option<String>, dispatch_time: DateTime<Utc>) -> Self {
+    fn new(
+        name: String,
+        note: Option<String>,
+        dispatch_time: DateTime<Utc>,
+        last_scheduling_decision: Option<DateTime<Utc>>,
+    ) -> Self {
         Self {
             name: name,
             note,
             state: RolloutState::Preparing,
             dispatch_time: dispatch_time,
+            last_scheduling_decision: last_scheduling_decision,
             batches: HashMap::new(),
         }
     }
@@ -329,6 +336,7 @@ impl DashboardApi {
                 dag_run.dag_run_id.to_string(),
                 dag_run.note.clone(),
                 dag_run.logical_date,
+                dag_run.last_scheduling_decision,
             );
 
             for task_instance in sorted_task_instances {
