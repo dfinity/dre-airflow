@@ -25,10 +25,10 @@ export const rollout_query = (() => {
             // FIXME: we should handle this with an error shown to the user.
             console.log('Request for rollout data failed: ' + res.ok);
             let responseText = await res.text()
-            let errorText = "Status " + res.status + " from server"
+            let errorText = res.status + " " + res.statusText;
             if (responseText) {
                 responseText = responseText.split("\n")[0]
-                errorText = errorText + " (" + responseText + ")"
+                errorText = errorText + ": " + responseText
             }
             store.set({
                 rollouts: get(store).rollouts,

@@ -36,6 +36,7 @@
     }
     .rollout .general_info {
 		display: flex;
+        gap: 0.3em;
         flex-direction: row;
     }
     .rollout .state_icon {
@@ -45,17 +46,17 @@
     .rollout .name {
         order: 1;
         flex-grow: 1;
-        margin-left: 2em;
-        margin-right: 2em;
         font-weight: bold;
-        text-align: center;
+        text-align: left;
     }
-    .rollout .start_time {
+    .rollout .times {
         order: 2;
+        color: #666;
     }
-    .rollout .note {
-        color: #333;
+    p.note {
+        color: #444;
         font-style: italic;
+        white-space: pre-wrap;
     }
 </style>
 
@@ -63,7 +64,7 @@
     <div class="general_info">
         <div class="name">{rollout.name}</div>
         <div class="state_icon tooltip">{rollout_states[rollout.state].icon}<span class="state tooltiptext">{rollout_states[rollout.state].name}</span></div>
-        <div class="start_time"><Time live relative timestamp="{rollout.dispatch_time}" /></div>
+        <div class="times">Started <Time live relative timestamp="{rollout.dispatch_time}" />{#if rollout.last_scheduling_decision}, updated <Time live relative timestamp="{rollout.last_scheduling_decision}" />{/if}</div>
     </div>
     {#if rollout.note}
     <p class="note">{rollout.note}</p>
