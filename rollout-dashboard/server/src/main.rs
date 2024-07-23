@@ -14,10 +14,10 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::vec::Vec;
-use tokio::select;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
+use tokio::{select, spawn};
 
 mod airflow_client;
 mod frontend_api;
@@ -122,10 +122,10 @@ async fn main() -> ExitCode {
     let app = Router::new().route("/api/v1/rollouts", get(rollouts_handler));
     let addr: SocketAddr = backend_host.parse().unwrap();
 
-    let (serve_fut, poll_fut) = (
-        axum_server::bind(addr).serve(app.into_make_service()),
-        server_clone_for_update.update_rollout_data(receiver),
-    );
+    let serve_fut = axum_server::bind(addr).serve(app.into_make_service());
+
+    let background_poll =
+        spawn(async move { server_clone_for_update.update_rollout_data(receiver).await });
 
     let exit_code = match serve_fut.await {
         Ok(()) => ExitCode::SUCCESS,
@@ -135,6 +135,6 @@ async fn main() -> ExitCode {
         }
     };
     let _ = sender.send(0);
-    let _ = poll_fut.await;
+    let _ = background_poll.await;
     exit_code
 }
