@@ -6,7 +6,6 @@
 use axum::http::StatusCode;
 use axum::Json;
 use axum::{routing::get, Router};
-use axum_server;
 use log::error;
 use reqwest::Url;
 use std::env;

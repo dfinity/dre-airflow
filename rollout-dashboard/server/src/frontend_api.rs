@@ -91,11 +91,11 @@ impl Rollout {
         last_scheduling_decision: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
-            name: name,
+            name,
             note,
             state: RolloutState::Preparing,
-            dispatch_time: dispatch_time,
-            last_scheduling_decision: last_scheduling_decision,
+            dispatch_time,
+            last_scheduling_decision,
             batches: HashMap::new(),
         }
     }
@@ -113,7 +113,7 @@ impl TaskInstanceTopologicalSorter {
         for task in r.tasks.into_iter() {
             let taskid = task.task_id.clone();
             let downstream_taskids: Vec<String> =
-                task.downstream_task_ids.iter().map(|x| x.clone()).collect();
+                task.downstream_task_ids.to_vec();
             all_nodes.insert(taskid.clone(), Arc::new(task));
             for subtask in downstream_taskids.iter() {
                 ts.add_dependency(taskid.clone(), subtask);
@@ -124,8 +124,8 @@ impl TaskInstanceTopologicalSorter {
 
         loop {
             let round = ts.pop_all();
-            if round.len() == 0 {
-                if ts.len() != 0 {
+            if round.is_empty() {
+                if !ts.is_empty() {
                     panic!("cyclic dependencies: {:?}", ts);
                 }
                 break;
@@ -144,10 +144,10 @@ impl TaskInstanceTopologicalSorter {
 
         for task_instance in r.task_instances.into_iter() {
             let taskid = task_instance.task_id.clone();
-            let mapindex = task_instance.map_index.clone();
+            let mapindex = task_instance.map_index;
             let tasklist = all_task_instances
                 .entry(taskid.clone())
-                .or_insert_with(|| vec![]);
+                .or_default();
             let rctaskinstance = Rc::new(task_instance);
             match tasklist.binary_search_by(|probe| {
                 let probe_idx = match probe.map_index {
@@ -185,7 +185,7 @@ impl TaskInstanceTopologicalSorter {
                 // That can happen, so we ignore it.
                 None => continue,
             };
-            for ti in task_instances.into_iter() {
+            for ti in task_instances.iter() {
                 let task = ti.as_ref();
                 sorted_task_instances.push(task.clone());
             }
@@ -245,7 +245,7 @@ impl RolloutPlan {
         };
         for (batch_number_str, (start_time_str, subnets)) in python_string_plan.iter() {
             let batch_number: usize = usize::from_str(batch_number_str)
-                .map_err(|e| RolloutPlanParseError::BatchNumberParseError(e))?
+                .map_err(RolloutPlanParseError::BatchNumberParseError)?
                 + 1;
             let start_time: DateTime<Utc> = match DateTime::parse_from_str(
                 start_time_str.as_str(),

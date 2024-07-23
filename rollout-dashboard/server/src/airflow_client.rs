@@ -26,10 +26,10 @@ trait Pageable {
     /// Append all elements from other into self (to the end
     /// of the storage), replacing any element that already
     /// exists in self with the corresponding element in other.
-    fn merge(&mut self, other: Self) -> ();
+    fn merge(&mut self, other: Self);
     /// Remove all elements from the end beyond usize - 1.
     /// The modified structure has maximum max_entries elements.
-    fn truncate(&mut self, max_entries: usize) -> ();
+    fn truncate(&mut self, max_entries: usize);
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -66,7 +66,7 @@ impl Pageable for DagRunsResponse {
     fn len(&self) -> usize {
         self.dag_runs.len()
     }
-    fn merge(&mut self, other: Self) -> () {
+    fn merge(&mut self, other: Self) {
         for v in other.dag_runs.clone().into_iter() {
             let id = v.dag_id.clone() + v.dag_run_id.as_str();
             match self.position_cache.get(&id) {
@@ -83,7 +83,7 @@ impl Pageable for DagRunsResponse {
         }
         self.total_entries = other.total_entries;
     }
-    fn truncate(&mut self, max_entries: usize) -> () {
+    fn truncate(&mut self, max_entries: usize) {
         if self.dag_runs.len() > max_entries {
             self.dag_runs.truncate(max_entries)
         }
@@ -185,7 +185,7 @@ impl Pageable for TaskInstancesResponse {
     fn len(&self) -> usize {
         self.task_instances.len()
     }
-    fn merge(&mut self, other: Self) -> () {
+    fn merge(&mut self, other: Self) {
         for v in other.task_instances.clone().into_iter() {
             let id = v.dag_id.clone()
                 + v.dag_run_id.as_str()
@@ -205,7 +205,7 @@ impl Pageable for TaskInstancesResponse {
         }
         self.total_entries = other.total_entries;
     }
-    fn truncate(&mut self, max_entries: usize) -> () {
+    fn truncate(&mut self, max_entries: usize) {
         if self.task_instances.len() > max_entries {
             self.task_instances.truncate(max_entries)
         }
@@ -249,7 +249,7 @@ impl Pageable for TasksResponse {
     fn len(&self) -> usize {
         self.tasks.len()
     }
-    fn merge(&mut self, other: Self) -> () {
+    fn merge(&mut self, other: Self) {
         for v in other.tasks.clone().into_iter() {
             let id = v.task_id.clone();
             match self.position_cache.get(&id) {
@@ -266,7 +266,7 @@ impl Pageable for TasksResponse {
         }
         self.total_entries = other.total_entries;
     }
-    fn truncate(&mut self, max_entries: usize) -> () {
+    fn truncate(&mut self, max_entries: usize) {
         if self.tasks.len() > max_entries {
             self.tasks.truncate(max_entries)
         }
@@ -311,7 +311,7 @@ where
         if paging_parameters.is_some() {
             for (k, v) in [("limit", batch_limit), ("offset", current_offset)].iter() {
                 suburl = suburl.clone()
-                    + match suburl.find("?") {
+                    + match suburl.find('?') {
                         Some(_) => "&",
                         None => "?",
                     }
@@ -374,7 +374,7 @@ where
                 }
             }
         }
-        current_offset = current_offset + batch_limit;
+        current_offset += batch_limit;
     }
     Ok(results)
 }
@@ -404,8 +404,8 @@ impl AirflowClient {
         Self {
             client: Arc::new(c),
             url: censored_url,
-            username: username,
-            password: password,
+            username,
+            password,
         }
     }
 
@@ -644,10 +644,10 @@ impl AirflowClient {
             Ok(deserialized) => Ok(deserialized),
             Err(e) => {
                 warn!("Error deserializing ({})\n{:?}", e, json_value);
-                return Err(AirflowError::Other(format!(
+                Err(AirflowError::Other(format!(
                     "Could not deserialize structure: {}",
                     e
-                )));
+                )))
             }
         }
     }
@@ -673,7 +673,7 @@ mod tests {
         fn len(&self) -> usize {
             self.elements.len()
         }
-        fn merge(&mut self, other: Response) -> () {
+        fn merge(&mut self, other: Response) {
             for v in other.elements.clone().into_iter() {
                 let id = v.clone();
                 let mut found = false;
@@ -689,7 +689,7 @@ mod tests {
             }
             self.max_elements = other.max_elements;
         }
-        fn truncate(&mut self, max_entries: usize) -> () {
+        fn truncate(&mut self, max_entries: usize) {
             if self.elements.len() > max_entries {
                 self.elements.truncate(max_entries)
             }
@@ -749,7 +749,7 @@ mod tests {
             adjustment.push_front(1);
         } else {
             let val = adjustment.pop_front().unwrap();
-            offset = offset - val;
+            offset -= val;
             adjustment.push_front(val + 1);
         };
         //println!(
