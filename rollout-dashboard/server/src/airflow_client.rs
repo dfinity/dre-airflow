@@ -16,10 +16,13 @@ use std::convert::TryFrom;
 use std::f64;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{vec, vec::Vec};
 use urlencoding::decode;
 /// Default maximum batch size for paged requests in Airflow.
+
 const MAX_BATCH_SIZE: usize = 100;
+const PER_REQUEST_TIMEOUT: u64 = 15;
 
 trait Pageable {
     fn len(&self) -> usize;
@@ -390,6 +393,7 @@ impl AirflowClient {
         let jar = Jar::default();
         let arcjar = Arc::new(jar);
         let c = reqwest::Client::builder()
+            .timeout(Duration::from_secs(PER_REQUEST_TIMEOUT))
             .cookie_provider(arcjar.clone())
             .build()
             .unwrap();
