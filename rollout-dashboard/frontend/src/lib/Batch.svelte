@@ -39,9 +39,11 @@
     .git_revision {
         color: #999;
     }
+    .start_time {
+        text-align: center;
+    }
 </style>
 
-<div class="start_time"><Time live relative timestamp="{batch.start_time}" /></div>
 {#each batch.subnets as subnet}
 <ul>
     <li>
@@ -51,3 +53,4 @@
     </li>
 </ul>
 {/each}
+<div class="start_time text-gray-500"><Time live relative timestamp="{batch.start_time}"  format="dddd @ h:mm A · MMMM D, YYYY" /></div>

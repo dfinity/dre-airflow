@@ -51,7 +51,6 @@
     }
     .rollout .times {
         order: 2;
-        color: #666;
     }
     p.note {
         color: #444;
@@ -64,7 +63,7 @@
     <div class="general_info">
         <div class="name">{rollout.name}</div>
         <div class="state_icon tooltip">{rollout_states[rollout.state].icon}<span class="state tooltiptext">{rollout_states[rollout.state].name}</span></div>
-        <div class="times">Started <Time live relative timestamp="{rollout.dispatch_time}" />{#if rollout.last_scheduling_decision}, updated <Time live relative timestamp="{rollout.last_scheduling_decision}" />{/if}</div>
+        <div class="times text-gray-500">Started <Time live relative timestamp="{rollout.dispatch_time}"  format="dddd @ h:mm A · MMMM D, YYYY" />{#if rollout.last_scheduling_decision}, updated <Time live relative timestamp="{rollout.last_scheduling_decision}"  format="dddd @ h:mm A · MMMM D, YYYY" />{/if}</div>
     </div>
     {#if rollout.note}
     <p class="note">{rollout.note}</p>
@@ -72,7 +71,7 @@
     {#if rollout.batches && Object.keys(rollout.batches).length  > 0}
     <ul>
         {#each Object.entries(rollout.batches) as [batch_num, batch]}
-        <li>
+        <li class="rounded-lg border">
         <Batch batch_num={batch_num} batch={batch}/>
         </li>
         {/each}
