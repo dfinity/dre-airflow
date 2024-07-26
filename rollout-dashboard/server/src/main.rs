@@ -10,12 +10,14 @@ use log::{error, info};
 use reqwest::Url;
 use std::env;
 use std::error::Error;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::vec::Vec;
-use tokio::sync::oneshot;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
+use tokio::sync::{oneshot, watch};
 use tokio::time::{sleep, Duration};
 use tokio::{select, spawn};
 use tower_http::services::ServeDir;
@@ -76,11 +78,13 @@ impl Server {
         }
     }
 
-    async fn update_rollout_data(
-        &self,
-        mut cancel: oneshot::Receiver<u64>,
-    ) -> Result<(), std::io::Error> {
+    async fn update_rollout_data<F>(&self, cancel: F) -> ()
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let mut errored = false;
+        tokio::pin!(cancel);
+
         loop {
             let data = select! {
                d = self.fetch_rollout_data() => {
@@ -107,12 +111,12 @@ impl Server {
             let mut container = self.last_rollout_data.lock().await;
             *container = data;
             drop(container);
+
             select! {
                 _ = sleep(Duration::from_secs(BACKEND_REFRESH_UPDATE_INTERVAL)) => (),
                 __ = &mut cancel => break,
             }
         }
-        Ok(())
     }
 
     // #[debug_handler]
@@ -141,26 +145,48 @@ async fn main() -> ExitCode {
     )))));
     let server_background_update = server.clone();
 
-    let (sender, receiver): (oneshot::Sender<u64>, oneshot::Receiver<u64>) = oneshot::channel();
+    let (stop_loop_tx, mut stop_loop_rx) = watch::channel(());
+    let (stop_serve_tx, mut stop_serve_rx) = watch::channel(());
+    let (finish_loop_tx, mut finish_loop_rx) = watch::channel(());
 
     let rollouts_handler = move || async move { server.get_rollout_data().await };
     let mut tree = Router::new();
     tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
-    let serve_fut = axum_server::bind(addr).serve(tree.into_make_service());
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
-    let background_poll =
-        spawn(async move { server_background_update.update_rollout_data(receiver).await });
+    tokio::spawn(async move {
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
+        select! {
+            _ = sigterm.recv() => info!("Received SIGTERM"),
+            __ = finish_loop_rx.changed() => info!("Shutting down"),
+        };
+        stop_serve_tx.send(()).unwrap_or(());
+        stop_loop_tx.send(()).unwrap_or(());
+    });
 
-    let exit_code = match serve_fut.await {
+    let serve_fut =
+        axum::serve(listener, tree.into_make_service()).with_graceful_shutdown(async move {
+            let _ = stop_serve_rx.changed().await;
+        });
+
+    let background_loop_fut = spawn(async move {
+        server_background_update
+            .update_rollout_data(async move {
+                let _ = stop_loop_rx.changed().await;
+            })
+            .await
+    });
+
+    let ret = match serve_fut.await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             error!(target: "main", "Error serving: {}", err);
             ExitCode::FAILURE
         }
     };
-    let _ = sender.send(0);
-    let _ = background_poll.await;
-    exit_code
+    finish_loop_tx.send(()).unwrap_or(());
+    background_loop_fut.await.unwrap();
+    ret
 }
