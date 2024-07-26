@@ -31,9 +31,11 @@ use crate::frontend_api::{Rollout, RolloutApi, RolloutDataGatherError};
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 
+type CurrentRolloutStatus = Result<Vec<Rollout>, (StatusCode, String)>;
+
 struct Server {
     rollout_api: Arc<RolloutApi>,
-    last_rollout_data: Arc<Mutex<Result<Vec<Rollout>, (StatusCode, String)>>>,
+    last_rollout_data: Arc<Mutex<CurrentRolloutStatus>>,
 }
 
 impl Server {
@@ -78,7 +80,7 @@ impl Server {
         }
     }
 
-    async fn update_rollout_data<F>(&self, cancel: F) -> ()
+    async fn update_rollout_data<F>(&self, cancel: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -105,7 +107,7 @@ impl Server {
                    };
                    d
                },
-               __ = &mut cancel => break,
+               _ignored = &mut cancel => break,
             };
 
             let mut container = self.last_rollout_data.lock().await;
@@ -113,8 +115,8 @@ impl Server {
             drop(container);
 
             select! {
-                _ = sleep(Duration::from_secs(BACKEND_REFRESH_UPDATE_INTERVAL)) => (),
-                __ = &mut cancel => break,
+                _ignored1 = sleep(Duration::from_secs(BACKEND_REFRESH_UPDATE_INTERVAL)) => (),
+                _ignored2 = &mut cancel => break,
             }
         }
     }
@@ -159,8 +161,8 @@ async fn main() -> ExitCode {
     tokio::spawn(async move {
         let mut sigterm = signal(SignalKind::terminate()).unwrap();
         select! {
-            _ = sigterm.recv() => info!("Received SIGTERM"),
-            __ = finish_loop_rx.changed() => info!("Shutting down"),
+            _ignored1 = sigterm.recv() => info!("Received SIGTERM"),
+            _ignored2 = finish_loop_rx.changed() => info!("Shutting down"),
         };
         stop_serve_tx.send(()).unwrap_or(());
         stop_loop_tx.send(()).unwrap_or(());

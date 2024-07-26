@@ -6,7 +6,6 @@ use crate::python;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::Serialize;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::num::ParseIntError;
@@ -150,21 +149,14 @@ impl TaskInstanceTopologicalSorter {
             let tasklist = all_task_instances.entry(taskid.clone()).or_default();
             let rctaskinstance = Rc::new(task_instance);
             match tasklist.binary_search_by(|probe| {
-                let probe_idx = match probe.map_index {
+                match mapindex {
                     None => 0,
                     Some(i) => i + 1,
-                };
-                let task_idx = match mapindex {
-                    None => 0,
-                    Some(i) => i + 1,
-                };
-                if task_idx == probe_idx {
-                    Ordering::Equal
-                } else if task_idx > probe_idx {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
                 }
+                .cmp(&match probe.map_index {
+                    None => 0,
+                    Some(i) => i + 1,
+                })
             }) {
                 Ok(pos) => {
                     panic!(
@@ -206,25 +198,25 @@ type PythonFormattedRolloutPlan = HashMap<String, (String, Vec<String>)>;
 
 #[derive(Debug)]
 pub enum RolloutPlanParseError {
-    PythonParseError(python::ErrorImpl),
-    BatchNumberParseError(ParseIntError),
-    DateTimeParseError(chrono::format::ParseError),
-    SubnetParseError(String),
+    UndecipherablePython(python::ErrorImpl),
+    BadBatchNumber(ParseIntError),
+    BadDateTime(chrono::format::ParseError),
+    InvalidSubnet(String),
 }
 
 impl Display for RolloutPlanParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::PythonParseError(e) => {
+            Self::UndecipherablePython(e) => {
                 write!(f, "Invalid Python in rollout plan: {}", e)
             }
-            Self::BatchNumberParseError(e) => {
+            Self::BadBatchNumber(e) => {
                 write!(f, "Could not parse batch number in rollout plan: {}", e)
             }
-            Self::DateTimeParseError(e) => {
+            Self::BadDateTime(e) => {
                 write!(f, "Could not parse date/time in rollout plan: {}", e)
             }
-            Self::SubnetParseError(e) => {
+            Self::InvalidSubnet(e) => {
                 write!(f, "Could not regex find subnets in {}", e)
             }
         }
@@ -241,11 +233,11 @@ impl RolloutPlan {
         let python_string_plan: PythonFormattedRolloutPlan = match python::from_str(value.as_str())
         {
             Ok(s) => s,
-            Err(e) => return Err(RolloutPlanParseError::PythonParseError(e)),
+            Err(e) => return Err(RolloutPlanParseError::UndecipherablePython(e)),
         };
         for (batch_number_str, (start_time_str, subnets)) in python_string_plan.iter() {
             let batch_number: usize = usize::from_str(batch_number_str)
-                .map_err(RolloutPlanParseError::BatchNumberParseError)?
+                .map_err(RolloutPlanParseError::BadBatchNumber)?
                 + 1;
             let start_time: DateTime<Utc> = match DateTime::parse_from_str(
                 start_time_str.as_str(),
@@ -256,7 +248,7 @@ impl RolloutPlan {
                     start_time_str.as_str(),
                     "datetime.datetime@version=2(timestamp=%s%.f,tz=(UTC,pendulum.tz.timezone.FixedTimezone,1,True))",
                 ) {
-                    Err(e) => Err(RolloutPlanParseError::DateTimeParseError(e)),
+                    Err(e) => Err(RolloutPlanParseError::BadDateTime(e)),
                     Ok(s) => Ok(s.with_timezone(&Utc)),
                 },
             }?;
@@ -269,7 +261,7 @@ impl RolloutPlan {
                         git_revision: capped[2].to_string(),
                         state: SubnetRolloutState::Pending,
                     },
-                    None => return Err(RolloutPlanParseError::SubnetParseError(subnet.clone())),
+                    None => return Err(RolloutPlanParseError::InvalidSubnet(subnet.clone())),
                 });
             }
             let batch = Batch {
@@ -344,9 +336,7 @@ impl RolloutApi {
                     match task_instance.state {
                         Some(TaskInstanceState::Skipped)
                         | Some(TaskInstanceState::Removed)
-                        | None => {
-                            ();
-                        }
+                        | None => (),
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
                             rollout.state = RolloutState::Problem;
@@ -393,9 +383,7 @@ impl RolloutApi {
                     match task_instance.state {
                         Some(TaskInstanceState::Skipped)
                         | Some(TaskInstanceState::Removed)
-                        | None => {
-                            ();
-                        }
+                        | None => (),
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
                             rollout.state = RolloutState::Problem;
@@ -489,9 +477,7 @@ impl RolloutApi {
                     match task_instance.state {
                         Some(TaskInstanceState::Skipped)
                         | Some(TaskInstanceState::Removed)
-                        | None => {
-                            ();
-                        }
+                        | None => (),
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
                             rollout.state = RolloutState::Problem;
