@@ -82,15 +82,15 @@ set to the correct value (though sometimes the defaults are OK):
 
 ## To-do
 
-### Necessary for production
+* Create k8s app to dispatch the container into preproduction.
 
-* Actually build production container, which requires making the static
-  files built by NPM available to the Rust server so the Rust server
-  can serve them to the browser client.
-  * These must be built with a static set of versions for npm and npx
-    in a separate container designed to build the static files.
+### After going on preproduction
+
 * Solve all Cargo warnings and remove all `unwrap()`s in favor of proper
   error handling.
+* Resolve all `cargo clippy` / `cargo build` nags.
+* Add CI pipeline that does `cargo clippy` and other similar things.
+* Dispatch container into production.
 
 ### Wishlist
 
@@ -99,8 +99,8 @@ set to the correct value (though sometimes the defaults are OK):
   * This will require important changes to the data structures used to hold the rollout state.
 * Parallelize API requests when it makes sense.
 * Favicon.ico!
-* Send change updates to all connected browsers via WebSocket or somesuch instead of making each client XHR repeatedly.
-* Make backend improve errors by returning JSON   structured errors so the frontend can show reasonable things.
+* Send change updates to all connected browsers via WebSocket or SSE instead of making each client XHR repeatedly.
+* Make backend improve errors by returning JSON structured errors so the frontend can show reasonable things.
 
 ## Things this project uses:
 
