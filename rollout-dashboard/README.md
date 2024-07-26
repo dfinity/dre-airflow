@@ -82,28 +82,9 @@ set to the correct value (though sometimes the defaults are OK):
 
 ## To-do
 
-* Create k8s app to dispatch the container into preproduction.
+Moved to https://dfinity.atlassian.net/browse/DRE-218 .
 
-### After going on preproduction
-
-* Solve all Cargo warnings and remove all `unwrap()`s in favor of proper
-  error handling.
-* Resolve all `cargo clippy` / `cargo build` nags.
-* Add CI pipeline that does `cargo clippy` and other similar things.
-* Dispatch container into production.
-* Remove branch name `rollout-dashboard` from CI file rollout-dashboard.yaml
-
-### Wishlist
-
-* Optimize HTTP requests to happen only when the Airflow API says there has been an update.
-  * Further optimize by only querying for data that is known to have changed and no more.
-  * This will require important changes to the data structures used to hold the rollout state.
-* Parallelize API requests when it makes sense.
-* Favicon.ico!
-* Send change updates to all connected browsers via WebSocket or SSE instead of making each client XHR repeatedly.
-* Make backend improve errors by returning JSON structured errors so the frontend can show reasonable things.
-
-## Things this project uses:
+## Things this project uses
 
 This project uses
 
