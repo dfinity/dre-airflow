@@ -91,6 +91,7 @@ set to the correct value (though sometimes the defaults are OK):
 * Resolve all `cargo clippy` / `cargo build` nags.
 * Add CI pipeline that does `cargo clippy` and other similar things.
 * Dispatch container into production.
+* Remove branch name `rollout-dashboard` from CI file rollout-dashboard.yaml
 
 ### Wishlist
 
