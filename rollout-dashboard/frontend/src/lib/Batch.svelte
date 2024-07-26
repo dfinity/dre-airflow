@@ -1,7 +1,7 @@
 <script>
     import Time from "svelte-time";
-	export let batch;
     export let batch_num;
+	export let batch;
     var subnet_rollout_states = {
         pending: {icon: "🕐", name: "Pending"},
         waiting: {icon: "⌛", name: "Waiting"},
@@ -25,7 +25,11 @@
         list-style-type: none;
         dborder: 1px solid green;
 	}
-    li {
+    li.batch {
+        background-color: #e4e4e4;
+        padding: 0.6em;
+    }
+    li.subnet {
         padding-left: 0;
         margin-left: 0;
         dborder: 1px solid orange;
@@ -44,9 +48,10 @@
     }
 </style>
 
+<li class="rounded-lg border batch batch-{batch_num}">
 {#each batch.subnets as subnet}
 <ul>
-    <li>
+    <li class="subnet">
         <div class="subnet_state_icon tooltip">{subnet_rollout_states[subnet.state].icon}<span class="subnet_state tooltiptext">{subnet_rollout_states[subnet.state].name}</span></div>
         <span class="subnet_id">{subnet.subnet_id.substring(0, 5)}</span>
         <span class="git_revision">{subnet.git_revision.substring(0, 8)}</span>
@@ -54,3 +59,4 @@
 </ul>
 {/each}
 <div class="start_time text-gray-500"><Time live relative timestamp="{batch.start_time}"  format="dddd @ h:mm A · MMMM D, YYYY" /></div>
+</li>

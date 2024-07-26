@@ -23,10 +23,6 @@
         padding: 0;
         list-style-type: none;
 	}
-    li {
-        background-color: #e4e4e4;
-        padding: 0.6em;
-    }
     .rollout {
         border-left: 10px solid #999;
         padding-left: 0.6em;
@@ -75,9 +71,7 @@
     {#if rollout.batches && Object.keys(rollout.batches).length  > 0}
     <ul>
         {#each Object.entries(rollout.batches) as [batch_num, batch]}
-        <li class="rounded-lg border">
         <Batch batch_num={batch_num} batch={batch}/>
-        </li>
         {/each}
     </ul>
     {:else}
