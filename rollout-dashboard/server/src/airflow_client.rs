@@ -4,7 +4,7 @@
 
 use async_recursion::async_recursion;
 use chrono::{DateTime, TimeDelta, Utc};
-use log::{debug, info, trace, warn};
+use log::{debug, trace, warn};
 use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
@@ -428,7 +428,7 @@ impl AirflowClient {
 
         let c = self.client.clone();
 
-        info!(target: "http_client", "GET {}", url);
+        debug!(target: "http_client", "GET {}", url);
         let res = match c
             .get(url)
             .header(ACCEPT, "application/json")
@@ -438,7 +438,7 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                info!(target: "http_client", "HTTP status {}", status);
+                debug!(target: "http_client", "HTTP status {}", status);
                 match status {
                     reqwest::StatusCode::OK => match resp.json().await {
                         Ok(json) => Ok(json),

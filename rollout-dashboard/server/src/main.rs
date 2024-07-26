@@ -6,7 +6,7 @@
 use axum::http::StatusCode;
 use axum::Json;
 use axum::{routing::get, Router};
-use log::error;
+use log::{error, info};
 use reqwest::Url;
 use std::env;
 use std::error::Error;
@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use tokio::{select, spawn};
+use tower_http::services::ServeDir;
 
 mod airflow_client;
 mod frontend_api;
@@ -43,32 +44,35 @@ impl Server {
     async fn fetch_rollout_data(&self) -> Result<Vec<Rollout>, (StatusCode, String)> {
         match self.rollout_api.get_rollout_data().await {
             Ok(rollouts) => Ok(rollouts),
-            Err(e) => match e {
-                RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
-                    Err((c, "Internal server error".to_string()))
-                }
-                RolloutDataGatherError::AirflowError(AirflowError::ReqwestError(err)) => {
-                    let mut explanation = format!("Cannot contact Airflow: {}", err);
-                    let mut err = err.source();
-                    loop {
-                        match err {
-                            None => break,
-                            Some(e) => {
-                                explanation = format!("{} -> {}", explanation.as_str(), e);
-                                err = e.source();
+            Err(e) => {
+                let res = match e {
+                    RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
+                        (c, "Internal server error".to_string())
+                    }
+                    RolloutDataGatherError::AirflowError(AirflowError::ReqwestError(err)) => {
+                        let mut explanation = format!("Cannot contact Airflow: {}", err);
+                        let mut err = err.source();
+                        loop {
+                            match err {
+                                None => break,
+                                Some(e) => {
+                                    explanation = format!("{} -> {}", explanation.as_str(), e);
+                                    err = e.source();
+                                }
                             }
                         }
+                        (StatusCode::BAD_GATEWAY, explanation)
                     }
-                    Err((StatusCode::BAD_GATEWAY, explanation))
-                }
-                RolloutDataGatherError::AirflowError(AirflowError::Other(msg)) => {
-                    Err((StatusCode::INTERNAL_SERVER_ERROR, msg))
-                }
-                RolloutDataGatherError::RolloutPlanParseError(parse_error) => Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("{}", parse_error),
-                )),
-            },
+                    RolloutDataGatherError::AirflowError(AirflowError::Other(msg)) => {
+                        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                    }
+                    RolloutDataGatherError::RolloutPlanParseError(parse_error) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("{}", parse_error),
+                    ),
+                };
+                Err(res)
+            }
         }
     }
 
@@ -76,11 +80,30 @@ impl Server {
         &self,
         mut cancel: oneshot::Receiver<u64>,
     ) -> Result<(), std::io::Error> {
+        let mut errored = false;
         loop {
             let data = select! {
-                d = self.fetch_rollout_data() => d,
-                __ = &mut cancel => break,
+               d = self.fetch_rollout_data() => {
+                   match &d {
+                       Ok(_) => {
+                           if errored {
+                               info!(target: "http_client", "Successfully processed rollout data again after temporary error");
+                               errored = false
+                           }
+                       }
+                       Err(res) => {
+                           error!(
+                               target: "http_client", "After processing fetch_rollout_data: {}",
+                               res.1
+                           );
+                           errored = true
+                       }
+                   };
+                   d
+               },
+               __ = &mut cancel => break,
             };
+
             let mut container = self.last_rollout_data.lock().await;
             *container = data;
             drop(container);
@@ -110,22 +133,25 @@ async fn main() -> ExitCode {
     let airflow_url_str =
         env::var("AIRFLOW_URL").unwrap_or("http://admin:password@localhost:8080/".to_string());
     let airflow_url = Url::parse(&airflow_url_str).unwrap();
+    let frontend_static_dir = env::var("FRONTEND_STATIC_DIR").unwrap_or(".".to_string());
+    let addr: SocketAddr = backend_host.parse().unwrap();
 
     let server = Arc::new(Server::new(Arc::new(RolloutApi::new(AirflowClient::new(
         airflow_url,
     )))));
-    let server_clone_for_update = server.clone();
+    let server_background_update = server.clone();
 
     let (sender, receiver): (oneshot::Sender<u64>, oneshot::Receiver<u64>) = oneshot::channel();
 
     let rollouts_handler = move || async move { server.get_rollout_data().await };
-    let app = Router::new().route("/api/v1/rollouts", get(rollouts_handler));
-    let addr: SocketAddr = backend_host.parse().unwrap();
+    let mut tree = Router::new();
+    tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
+    tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
-    let serve_fut = axum_server::bind(addr).serve(app.into_make_service());
+    let serve_fut = axum_server::bind(addr).serve(tree.into_make_service());
 
     let background_poll =
-        spawn(async move { server_clone_for_update.update_rollout_data(receiver).await });
+        spawn(async move { server_background_update.update_rollout_data(receiver).await });
 
     let exit_code = match serve_fut.await {
         Ok(()) => ExitCode::SUCCESS,
