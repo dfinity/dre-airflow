@@ -18,5 +18,5 @@ COPY --from=rust /usr/local/cargo/bin/rollout-dashboard /rollout-dashboard
 COPY --from=node /dist /static
 
 EXPOSE 4174
-ENV FRONTEND_STATIC_DIR=dist
+ENV FRONTEND_STATIC_DIR=static
 CMD ["./rollout-dashboard"]
