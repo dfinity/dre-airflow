@@ -49,6 +49,10 @@
         font-weight: bold;
         text-align: left;
     }
+    .rollout .name .simulated {
+        color: #9f8317;
+        font-style: italic;
+    }
     .rollout .times {
         order: 2;
     }
@@ -61,7 +65,7 @@
 
 <section class="rollout">
     <div class="general_info">
-        <div class="name">{rollout.name}</div>
+        <div class="name">{rollout.name} {#if rollout.conf.simulate}<i class="simulated">(simulated)</i>{/if}</div>
         <div class="state_icon tooltip">{rollout_states[rollout.state].icon}<span class="state tooltiptext">{rollout_states[rollout.state].name}</span></div>
         <div class="times text-gray-500">Started <Time live relative timestamp="{rollout.dispatch_time}"  format="dddd @ h:mm A · MMMM D, YYYY" />{#if rollout.last_scheduling_decision}, updated <Time live relative timestamp="{rollout.last_scheduling_decision}"  format="dddd @ h:mm A · MMMM D, YYYY" />{/if}</div>
     </div>

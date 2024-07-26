@@ -81,6 +81,7 @@ pub struct Rollout {
     pub dispatch_time: DateTime<Utc>,
     pub last_scheduling_decision: Option<DateTime<Utc>>,
     pub batches: HashMap<usize, Batch>,
+    pub conf: HashMap<String, serde_json::Value>,
 }
 
 impl Rollout {
@@ -89,6 +90,7 @@ impl Rollout {
         note: Option<String>,
         dispatch_time: DateTime<Utc>,
         last_scheduling_decision: Option<DateTime<Utc>>,
+        conf: HashMap<String, serde_json::Value>,
     ) -> Self {
         Self {
             name,
@@ -97,6 +99,7 @@ impl Rollout {
             dispatch_time,
             last_scheduling_decision,
             batches: HashMap::new(),
+            conf,
         }
     }
 }
@@ -112,8 +115,7 @@ impl TaskInstanceTopologicalSorter {
 
         for task in r.tasks.into_iter() {
             let taskid = task.task_id.clone();
-            let downstream_taskids: Vec<String> =
-                task.downstream_task_ids.to_vec();
+            let downstream_taskids: Vec<String> = task.downstream_task_ids.to_vec();
             all_nodes.insert(taskid.clone(), Arc::new(task));
             for subtask in downstream_taskids.iter() {
                 ts.add_dependency(taskid.clone(), subtask);
@@ -145,9 +147,7 @@ impl TaskInstanceTopologicalSorter {
         for task_instance in r.task_instances.into_iter() {
             let taskid = task_instance.task_id.clone();
             let mapindex = task_instance.map_index;
-            let tasklist = all_task_instances
-                .entry(taskid.clone())
-                .or_default();
+            let tasklist = all_task_instances.entry(taskid.clone()).or_default();
             let rctaskinstance = Rc::new(task_instance);
             match tasklist.binary_search_by(|probe| {
                 let probe_idx = match probe.map_index {
@@ -336,6 +336,7 @@ impl RolloutApi {
                 dag_run.note.clone(),
                 dag_run.logical_date,
                 dag_run.last_scheduling_decision,
+                dag_run.conf.clone(),
             );
 
             for task_instance in sorted_task_instances {
