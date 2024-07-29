@@ -12,6 +12,7 @@ axum-server = "0.6.0"
 chrono = { version = "0.4.38", features = ["serde"] }
 env_logger = "0.11.3"
 futures = "0.3.30"
+lazy_static = "1.5.0"
 log = "0.4.22"
 regex = "1.10.5"
 reqwest = { version = "0.12.5", features = ["json", "cookies"] }

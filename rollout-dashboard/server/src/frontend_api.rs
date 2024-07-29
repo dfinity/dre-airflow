@@ -1,9 +1,6 @@
-// FIXME remove all use of unwrap().
-// FIXME tolerate other types of error not just AirflowError.
-// FIXME make AirflowError more explanatory, not just ::Other()
-
 use crate::python;
 use chrono::{DateTime, Utc};
+use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -19,6 +16,12 @@ use crate::airflow_client::{
     AirflowClient, AirflowError, DagRunState, TaskInstanceState, TaskInstancesResponse,
     TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
+
+lazy_static! {
+    // unwrap() is legitimate here because we know these cannot fail to compile.
+    static ref SubnetGitRevisionRe: Regex = Regex::new("dfinity.ic_types.SubnetRolloutInstance.*@version=0[(]start_at=.*,subnet_id=([0-9-a-z-]+),git_revision=([0-9a-f]+)[)]").unwrap();
+    static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
+}
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -105,12 +108,23 @@ impl Rollout {
     }
 }
 
+#[derive(Debug)]
+pub struct CyclicDependencyError {
+    message: String,
+}
+
+impl Display for CyclicDependencyError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 struct TaskInstanceTopologicalSorter {
     sorted_tasks: Vec<Arc<TasksResponseItem>>,
 }
 
 impl TaskInstanceTopologicalSorter {
-    fn new(r: TasksResponse) -> Self {
+    fn new(r: TasksResponse) -> Result<Self, CyclicDependencyError> {
         let mut all_nodes: HashMap<String, Arc<TasksResponseItem>> = HashMap::new();
         let mut ts = TopologicalSort::<String>::new();
 
@@ -127,18 +141,26 @@ impl TaskInstanceTopologicalSorter {
 
         loop {
             let round = ts.pop_all();
-            if round.is_empty() {
-                if !ts.is_empty() {
-                    panic!("cyclic dependencies: {:?}", ts);
+            match round.is_empty() {
+                true => {
+                    if !ts.is_empty() {
+                        return Err(CyclicDependencyError {
+                            message: format!("cyclic dependencies: {:?}", ts),
+                        });
+                    }
+                    break;
                 }
-                break;
-            }
-            for taskid in round.iter() {
-                sorted_tasks.push(all_nodes.get(taskid).unwrap().clone());
+                false => {
+                    for taskid in round.iter() {
+                        if let Some(all_nodes) = all_nodes.get(taskid) {
+                            sorted_tasks.push(all_nodes.clone())
+                        }
+                    }
+                }
             }
         }
 
-        Self { sorted_tasks }
+        Ok(Self { sorted_tasks })
     }
 
     fn sort_instances(&self, r: TaskInstancesResponse) -> Vec<TaskInstancesResponseItem> {
@@ -187,8 +209,6 @@ impl TaskInstanceTopologicalSorter {
 
         sorted_task_instances
     }
-
-    // FIXME: implement actual sort function for TaskInstances.
 }
 
 #[derive(Serialize, Debug)]
@@ -227,8 +247,6 @@ impl Display for RolloutPlanParseError {
 
 impl RolloutPlan {
     fn from_python_string(value: String) -> Result<Self, RolloutPlanParseError> {
-        let subnet_git_revision_re =
-            Regex::new("dfinity.ic_types.SubnetRolloutInstance.*@version=0[(]start_at=.*,subnet_id=([0-9-a-z-]+),git_revision=([0-9a-f]+)[)]").unwrap();
         let mut res = RolloutPlan {
             batches: HashMap::new(),
         };
@@ -257,7 +275,7 @@ impl RolloutPlan {
 
             let mut final_subnets: Vec<Subnet> = vec![];
             for subnet in subnets.iter() {
-                final_subnets.push(match subnet_git_revision_re.captures(subnet) {
+                final_subnets.push(match SubnetGitRevisionRe.captures(subnet) {
                     Some(capped) => Subnet {
                         subnet_id: capped[1].to_string(),
                         git_revision: capped[2].to_string(),
@@ -281,6 +299,7 @@ impl RolloutPlan {
 #[derive(Debug)]
 pub enum RolloutDataGatherError {
     AirflowError(AirflowError),
+    CyclicDependency(CyclicDependencyError),
     RolloutPlanParseError(RolloutPlanParseError),
 }
 
@@ -293,6 +312,12 @@ impl From<AirflowError> for RolloutDataGatherError {
 impl From<RolloutPlanParseError> for RolloutDataGatherError {
     fn from(err: RolloutPlanParseError) -> Self {
         Self::RolloutPlanParseError(err)
+    }
+}
+
+impl From<CyclicDependencyError> for RolloutDataGatherError {
+    fn from(err: CyclicDependencyError) -> Self {
+        Self::CyclicDependency(err)
     }
 }
 
@@ -309,15 +334,13 @@ impl RolloutApi {
     }
 }
 
-// FIXME handle unwraps everywhere else!
 impl RolloutApi {
     pub async fn get_rollout_data(&self) -> Result<Vec<Rollout>, RolloutDataGatherError> {
         let dag_id = "rollout_ic_os_to_mainnet_subnets";
         let dag_runs = self.airflow_api.dag_runs(dag_id, 20, 0).await?;
         let tasks = self.airflow_api.tasks(dag_id).await?;
-        let sorter = TaskInstanceTopologicalSorter::new(tasks);
+        let sorter = TaskInstanceTopologicalSorter::new(tasks)?;
 
-        let batch_identification_re = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
         let mut res: Vec<Rollout> = vec![];
 
         for dag_run in dag_runs.dag_runs.iter() {
@@ -403,18 +426,19 @@ impl RolloutApi {
                         | Some(TaskInstanceState::Scheduled)
                         | Some(TaskInstanceState::Success) => rollout.state = RolloutState::Waiting,
                     }
-                } else if let Some(capped) =
-                    batch_identification_re.captures(task_instance.task_id.as_str())
+                } else if let Some(captured) =
+                    BatchIdentificationRe.captures(task_instance.task_id.as_str())
                 {
                     let (batch, task_name) = (
+                        // We get away with unwrap() here because we know we captured an integer.
                         match rollout
                             .batches
-                            .get_mut(&usize::from_str(&capped[1]).unwrap())
+                            .get_mut(&usize::from_str(&captured[1]).unwrap())
                         {
                             Some(batch) => batch,
                             None => continue,
                         },
-                        &capped[2],
+                        &captured[2],
                     );
 
                     match task_instance.state {
@@ -473,8 +497,8 @@ impl RolloutApi {
                                 },
                                 task_instance.map_index,
                             );
-                            match &task_instance.state {
-                                Some(TaskInstanceState::Success) => match task_name {
+                            if let Some(TaskInstanceState::Success) = &task_instance.state {
+                                match task_name {
                                     "wait_until_start_time" => match batch.actual_start_time {
                                         None => batch.actual_start_time = task_instance.end_date,
                                         Some(start_time) => match task_instance.end_date {
@@ -491,8 +515,7 @@ impl RolloutApi {
                                         batch.end_time = task_instance.end_date;
                                     }
                                     _ => (),
-                                },
-                                _ => (),
+                                }
                             };
                             rollout.state = RolloutState::UpgradingSubnets;
                         }

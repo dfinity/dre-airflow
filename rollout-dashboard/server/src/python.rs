@@ -41,11 +41,29 @@ impl Display for ErrorCode {
 #[derive(Debug)]
 pub struct ErrorImpl {
     pub code: ErrorCode,
+    pub message: Option<String>,
+}
+
+impl From<ErrorCode> for ErrorImpl {
+    fn from(e: ErrorCode) -> Self {
+        Self {
+            code: e,
+            message: None,
+        }
+    }
 }
 
 impl Display for ErrorImpl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error {}", self.code)
+        write!(
+            f,
+            "Error {}{}",
+            self.code,
+            match &self.message {
+                Some(s) => ": ".to_owned() + s.as_str(),
+                None => "".to_string(),
+            }
+        )
     }
 }
 
@@ -56,6 +74,7 @@ impl de::Error for ErrorImpl {
     {
         ErrorImpl {
             code: ErrorCode::Custom,
+            message: Some(format!("{}", msg)),
         }
     }
 }
@@ -104,9 +123,7 @@ where
     if deserializer.input.is_empty() {
         Ok(t)
     } else {
-        Err(ErrorImpl {
-            code: ErrorCode::TrailingCharacters,
-        })
+        Err(ErrorCode::TrailingCharacters.into())
     }
 }
 
@@ -116,9 +133,7 @@ where
 impl<'de> Deserializer<'de> {
     // Look at the first character in the input without consuming it.
     fn peek_char(&mut self) -> Result<char> {
-        self.input.chars().next().ok_or(ErrorImpl {
-            code: ErrorCode::Eof,
-        })
+        self.input.chars().next().ok_or(ErrorCode::Eof.into())
     }
 
     // Consume the first character in the input.
@@ -138,9 +153,7 @@ impl<'de> Deserializer<'de> {
             self.input = &self.input["false".len()..];
             Ok(false)
         } else {
-            Err(ErrorImpl {
-                code: ErrorCode::ExpectedBoolean,
-            })
+            Err(ErrorCode::ExpectedBoolean.into())
         }
     }
 
@@ -156,9 +169,7 @@ impl<'de> Deserializer<'de> {
         let mut int = match self.next_char()? {
             ch @ '0'..='9' => T::from(ch as u8 - b'0'),
             _ => {
-                return Err(ErrorImpl {
-                    code: ErrorCode::ExpectedInteger,
-                });
+                return Err(ErrorCode::ExpectedInteger.into());
             }
         };
         loop {
@@ -196,9 +207,7 @@ impl<'de> Deserializer<'de> {
             if ch == ' ' {
                 return self.parse_string();
             }
-            return Err(ErrorImpl {
-                code: ErrorCode::ExpectedString,
-            });
+            return Err(ErrorCode::ExpectedString.into());
         }
         match self.input.find('\'') {
             Some(len) => {
@@ -206,9 +215,7 @@ impl<'de> Deserializer<'de> {
                 self.input = &self.input[len + 1..];
                 Ok(s)
             }
-            None => Err(ErrorImpl {
-                code: ErrorCode::Eof,
-            }),
+            None => Err(ErrorCode::Eof.into()),
         }
     }
 }
@@ -231,9 +238,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             '-' => self.deserialize_i64(visitor),
             '[' => self.deserialize_seq(visitor),
             '{' => self.deserialize_map(visitor),
-            _ => Err(ErrorImpl {
-                code: ErrorCode::Syntax,
-            }),
+            _ => Err(ErrorCode::Syntax.into()),
         }
     }
 
@@ -403,9 +408,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             self.input = &self.input["null".len()..];
             visitor.visit_unit()
         } else {
-            Err(ErrorImpl {
-                code: ErrorCode::ExpectedNull,
-            })
+            Err(ErrorCode::ExpectedNull.into())
         }
     }
 
@@ -443,16 +446,12 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             if self.next_char()? == ']' {
                 Ok(value)
             } else {
-                Err(ErrorImpl {
-                    code: ErrorCode::ExpectedArrayEnd,
-                })
+                Err(ErrorCode::ExpectedArrayEnd.into())
             }
         } else if ch == ' ' {
             self.deserialize_seq(visitor)
         } else {
-            Err(ErrorImpl {
-                code: ErrorCode::ExpectedArray,
-            })
+            Err(ErrorCode::ExpectedArray.into())
         }
     }
 
@@ -498,16 +497,12 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             if self.next_char()? == '}' {
                 Ok(value)
             } else {
-                Err(ErrorImpl {
-                    code: ErrorCode::ExpectedMapEnd,
-                })
+                Err(ErrorCode::ExpectedMapEnd.into())
             }
         } else if ch == ' ' {
             self.deserialize_map(visitor)
         } else {
-            Err(ErrorImpl {
-                code: ErrorCode::ExpectedMap,
-            })
+            Err(ErrorCode::ExpectedMap.into())
         }
     }
 
@@ -548,14 +543,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             if self.next_char()? == '}' {
                 Ok(value)
             } else {
-                Err(ErrorImpl {
-                    code: ErrorCode::ExpectedMapEnd,
-                })
+                Err(ErrorCode::ExpectedMapEnd.into())
             }
         } else {
-            Err(ErrorImpl {
-                code: ErrorCode::ExpectedEnum,
-            })
+            Err(ErrorCode::ExpectedEnum.into())
         }
     }
 
@@ -622,9 +613,7 @@ impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
             if ch == ' ' {
                 return self.next_element_seed(seed);
             } else if ch != ',' {
-                return Err(Self::Error {
-                    code: ErrorCode::ExpectedArrayComma,
-                });
+                return Err(ErrorCode::ExpectedArrayComma.into());
             }
         }
         self.first = false;
@@ -652,9 +641,7 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
             if ch == ' ' {
                 return self.next_element_seed(seed);
             } else if ch != ',' {
-                return Err(Self::Error {
-                    code: ErrorCode::ExpectedMapComma,
-                });
+                return Err(ErrorCode::ExpectedMapComma.into());
             }
         }
         self.first = false;
@@ -670,9 +657,7 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
         // of `next_key_seed` or at the beginning of `next_value_seed`. In this
         // case the code is a bit simpler having it here.
         if self.de.next_char()? != ':' {
-            return Err(Self::Error {
-                code: ErrorCode::ExpectedMapColon,
-            });
+            return Err(ErrorCode::ExpectedMapColon.into());
         }
         // Deserialize a map value.
         seed.deserialize(&mut *self.de)
@@ -710,9 +695,7 @@ impl<'de, 'a> EnumAccess<'de> for Enum<'a, 'de> {
         if self.de.next_char()? == ':' {
             Ok((val, self))
         } else {
-            Err(Self::Error {
-                code: ErrorCode::ExpectedMapColon,
-            })
+            Err(ErrorCode::ExpectedMapColon.into())
         }
     }
 }
@@ -725,9 +708,7 @@ impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
     // If the `Visitor` expected this variant to be a unit variant, the input
     // should have been the plain string case handled in `deserialize_enum`.
     fn unit_variant(self) -> Result<()> {
-        Err(ErrorImpl {
-            code: ErrorCode::ExpectedString,
-        })
+        Err(ErrorCode::ExpectedString.into())
     }
 
     // Newtype variants are represented in JSON as `{ NAME: VALUE }` so
