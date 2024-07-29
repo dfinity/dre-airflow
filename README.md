@@ -594,3 +594,19 @@ a task node in the DAG.  Think of an operator as a template for a task.
 
 * [Operators in Airflow](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/operators.html).
 * [Built-in operator index](https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/operators/index.html).
+
+## Troubleshooting
+
+### Airflow refuses to start with *database is locked*
+
+If you see on screen this, when running `bin/airflow standalone`:
+
+```
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked
+[SQL: SELECT name FROM sqlite_master WHERE type='table' ORDER BY name]
+(Background on this error at: https://sqlalche.me/e/14/e3q8)
+```
+
+then your Airflow database is locked.  After ensuring all of your
+Airflow processes have been killed, run `bin/airflow unlockdb`
+to recreate the database using existing data.
