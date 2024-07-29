@@ -105,7 +105,7 @@ pub struct XComEntryResponse {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskInstanceState {
     Success,
