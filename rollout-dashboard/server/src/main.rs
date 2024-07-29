@@ -1,8 +1,3 @@
-// FIXME remove all use of unwrap().
-// FIXME tolerate other types of error not just AirflowError.
-// FIXME make AirflowError more explanatory, not just ::Other()
-
-// use axum::debug_handler;
 use axum::http::StatusCode;
 use axum::Json;
 use axum::{routing::get, Router};
@@ -74,6 +69,10 @@ impl Server {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("{}", parse_error),
                     ),
+                    RolloutDataGatherError::CyclicDependency(dep) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("A cyclic dependency was found in the task graph: {:?}", dep),
+                    ),
                 };
                 Err(res)
             }
@@ -142,9 +141,9 @@ async fn main() -> ExitCode {
     let frontend_static_dir = env::var("FRONTEND_STATIC_DIR").unwrap_or(".".to_string());
     let addr: SocketAddr = backend_host.parse().unwrap();
 
-    let server = Arc::new(Server::new(Arc::new(RolloutApi::new(AirflowClient::new(
-        airflow_url,
-    )))));
+    let server = Arc::new(Server::new(Arc::new(RolloutApi::new(
+        AirflowClient::new(airflow_url).unwrap(),
+    ))));
     let server_background_update = server.clone();
 
     let (stop_loop_tx, mut stop_loop_rx) = watch::channel(());
