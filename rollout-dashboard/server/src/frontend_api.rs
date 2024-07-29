@@ -43,7 +43,9 @@ pub struct Subnet {
 
 #[derive(Serialize, Debug, Clone)]
 pub struct Batch {
-    pub start_time: DateTime<Utc>,
+    pub planned_start_time: DateTime<Utc>,
+    pub actual_start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
     pub subnets: Vec<Subnet>,
 }
 
@@ -265,7 +267,9 @@ impl RolloutPlan {
                 });
             }
             let batch = Batch {
-                start_time,
+                planned_start_time: start_time,
+                actual_start_time: None,
+                end_time: None,
                 subnets: final_subnets,
             };
             res.batches.insert(batch_number, batch);
@@ -469,6 +473,27 @@ impl RolloutApi {
                                 },
                                 task_instance.map_index,
                             );
+                            match &task_instance.state {
+                                Some(TaskInstanceState::Success) => match task_name {
+                                    "wait_until_start_time" => match batch.actual_start_time {
+                                        None => batch.actual_start_time = task_instance.end_date,
+                                        Some(start_time) => match task_instance.end_date {
+                                            None => (),
+                                            Some(end_date) => {
+                                                if start_time > end_date {
+                                                    batch.actual_start_time =
+                                                        task_instance.end_date;
+                                                }
+                                            }
+                                        },
+                                    },
+                                    "join" => {
+                                        batch.end_time = task_instance.end_date;
+                                    }
+                                    _ => (),
+                                },
+                                _ => (),
+                            };
                             rollout.state = RolloutState::UpgradingSubnets;
                         }
                         None => (),

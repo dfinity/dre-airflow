@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - main
-      - rollout-dashboard
     paths:
       - rollout-dashboard/**
 
