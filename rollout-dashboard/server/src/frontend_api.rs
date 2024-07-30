@@ -617,66 +617,59 @@ impl RolloutApi {
                             );
                             rollout.state = RolloutState::Failed
                         }
-                        Some(TaskInstanceState::Success)
-                        | Some(TaskInstanceState::UpForReschedule)
+                        Some(TaskInstanceState::Success) => {
+                            batch.set_min_subnet_state(
+                                match task_name {
+                                    "wait_until_no_alerts" => SubnetRolloutState::Complete,
+                                    "join" => SubnetRolloutState::Complete,
+                                    &_ => SubnetRolloutState::Unknown,
+                                },
+                                task_instance.map_index,
+                            );
+                            if task_name == "wait_until_start_time" {
+                                match batch.actual_start_time {
+                                    None => batch.actual_start_time = task_instance.end_date,
+                                    Some(start_time) => match task_instance.end_date {
+                                        None => (),
+                                        Some(end_date) => {
+                                            if start_time > end_date {
+                                                batch.actual_start_time = task_instance.end_date;
+                                            }
+                                        }
+                                    },
+                                }
+                            };
+                            if task_name == "join" {
+                                batch.end_time = task_instance.end_date;
+                            };
+                        }
+
+                        Some(TaskInstanceState::UpForReschedule)
                         | Some(TaskInstanceState::Running)
                         | Some(TaskInstanceState::Deferred)
                         | Some(TaskInstanceState::Queued)
                         | Some(TaskInstanceState::Scheduled)
                         | None => {
-                            if let Some(TaskInstanceState::Success) = &task_instance.state {
+                            batch.set_min_subnet_state(
                                 match task_name {
-                                    "wait_until_start_time" => match batch.actual_start_time {
-                                        None => batch.actual_start_time = task_instance.end_date,
-                                        Some(start_time) => match task_instance.end_date {
-                                            None => (),
-                                            Some(end_date) => {
-                                                if start_time > end_date {
-                                                    batch.actual_start_time =
-                                                        task_instance.end_date;
-                                                }
-                                            }
-                                        },
-                                    },
-                                    "join" => {
-                                        batch.end_time = task_instance.end_date;
-                                        batch.set_specific_subnet_state(
-                                            SubnetRolloutState::Complete,
-                                            task_instance.map_index,
-                                        )
+                                    "collect_batch_subnets" => SubnetRolloutState::Pending,
+                                    "wait_until_start_time" => SubnetRolloutState::Waiting,
+                                    "create_proposal_if_none_exists" | "request_proposal_vote" => {
+                                        SubnetRolloutState::Proposing
                                     }
-                                    _ => (),
-                                }
-                            } else {
-                                batch.set_min_subnet_state(
-                                    match task_name {
-                                        "collect_batch_subnets" => SubnetRolloutState::Pending,
-                                        "wait_until_start_time" => SubnetRolloutState::Waiting,
-                                        "create_proposal_if_none_exists"
-                                        | "request_proposal_vote" => SubnetRolloutState::Proposing,
-                                        "wait_until_proposal_is_accepted" => {
-                                            SubnetRolloutState::WaitingForElection
-                                        }
-                                        "wait_for_replica_revision" => {
-                                            SubnetRolloutState::WaitingForAdoption
-                                        }
-                                        "wait_until_no_alerts" => {
-                                            SubnetRolloutState::WaitingForAlertsGone
-                                        }
-                                        "join" => match task_instance.state {
-                                            Some(TaskInstanceState::Success) => {
-                                                SubnetRolloutState::Complete
-                                            }
-                                            _ => SubnetRolloutState::WaitingForAlertsGone,
-                                        },
-                                        // Maybe here we just want to log error and continue for robustness?
-                                        &_ => {
-                                            panic!("impossible task name {}", task_instance.task_id)
-                                        }
-                                    },
-                                    task_instance.map_index,
-                                )
-                            };
+                                    "wait_until_proposal_is_accepted" => {
+                                        SubnetRolloutState::WaitingForElection
+                                    }
+                                    "wait_for_replica_revision" => {
+                                        SubnetRolloutState::WaitingForAdoption
+                                    }
+                                    "wait_until_no_alerts" => {
+                                        SubnetRolloutState::WaitingForAlertsGone
+                                    }
+                                    _ => SubnetRolloutState::Unknown,
+                                },
+                                task_instance.map_index,
+                            );
                             rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
                         }
                     }
