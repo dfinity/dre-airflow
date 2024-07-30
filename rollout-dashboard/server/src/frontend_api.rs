@@ -1,8 +1,10 @@
 use crate::python;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
+use log::{debug, error};
 use regex::Regex;
 use serde::Serialize;
+use std::cmp::min;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::num::ParseIntError;
@@ -10,10 +12,11 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
+use tokio::sync::Mutex;
 use topological_sort::TopologicalSort;
 
 use crate::airflow_client::{
-    AirflowClient, AirflowError, DagRunState, TaskInstanceState, TaskInstancesResponse,
+    AirflowClient, AirflowError, DagRunState, TaskInstanceRequestFilters, TaskInstanceState,
     TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
 
@@ -23,7 +26,7 @@ lazy_static! {
     static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum SubnetRolloutState {
     Pending,
@@ -35,6 +38,7 @@ pub enum SubnetRolloutState {
     Complete,
     Skipped,
     Error,
+    Unknown,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -53,7 +57,19 @@ pub struct Batch {
 }
 
 impl Batch {
-    fn set_subnet_state(&mut self, state: SubnetRolloutState, index: Option<usize>) {
+    fn set_min_subnet_state(&mut self, state: SubnetRolloutState, index: Option<usize>) {
+        match index {
+            None => {
+                for subnet in self.subnets.iter_mut() {
+                    subnet.state = min(subnet.state.clone(), state.clone())
+                }
+            }
+            Some(index) => {
+                self.subnets[index].state = min(self.subnets[index].state.clone(), state)
+            }
+        }
+    }
+    fn set_specific_subnet_state(&mut self, state: SubnetRolloutState, index: Option<usize>) {
         match index {
             None => {
                 for subnet in self.subnets.iter_mut() {
@@ -65,20 +81,21 @@ impl Batch {
     }
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum RolloutState {
+    Failed,
+    Problem,
     Preparing,
     Waiting,
     UpgradingSubnets,
     UpgradingUnassignedNodes,
     Complete,
-    Problem,
-    Failed,
 }
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Rollout {
+    /// name is unique, enforced by Airflow.
     pub name: String,
     pub note: Option<String>,
     pub state: RolloutState,
@@ -99,7 +116,7 @@ impl Rollout {
         Self {
             name,
             note,
-            state: RolloutState::Preparing,
+            state: RolloutState::Complete,
             dispatch_time,
             last_scheduling_decision,
             batches: HashMap::new(),
@@ -163,11 +180,14 @@ impl TaskInstanceTopologicalSorter {
         Ok(Self { sorted_tasks })
     }
 
-    fn sort_instances(&self, r: TaskInstancesResponse) -> Vec<TaskInstancesResponseItem> {
+    fn sort_instances<I>(&self, r: I) -> Vec<TaskInstancesResponseItem>
+    where
+        I: Iterator<Item = TaskInstancesResponseItem>,
+    {
         let mut all_task_instances: HashMap<String, Vec<Rc<TaskInstancesResponseItem>>> =
             HashMap::new();
 
-        for task_instance in r.task_instances.into_iter() {
+        for task_instance in r.into_iter() {
             let taskid = task_instance.task_id.clone();
             let mapindex = task_instance.map_index;
             let tasklist = all_task_instances.entry(taskid.clone()).or_default();
@@ -279,7 +299,7 @@ impl RolloutPlan {
                     Some(capped) => Subnet {
                         subnet_id: capped[1].to_string(),
                         git_revision: capped[2].to_string(),
-                        state: SubnetRolloutState::Pending,
+                        state: SubnetRolloutState::Unknown,
                     },
                     None => return Err(RolloutPlanParseError::InvalidSubnet(subnet.clone())),
                 });
@@ -321,34 +341,150 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
     }
 }
 
+enum ScheduleCache {
+    Empty,
+    Invalid,
+    Valid(String),
+}
+struct RolloutDataCache {
+    task_instances: HashMap<String, TaskInstancesResponseItem>,
+    schedule: ScheduleCache,
+}
+
+struct RolloutApiCache {
+    last_update_time: Option<DateTime<Utc>>,
+    /// Map from DAG run ID to task instance ID (with / without index)
+    /// to task instance.
+    by_dag_run: HashMap<String, RolloutDataCache>,
+}
+
 #[derive(Clone)]
 pub struct RolloutApi {
     airflow_api: Arc<AirflowClient>,
+    cache: Arc<Mutex<RolloutApiCache>>,
 }
 
 impl RolloutApi {
     pub fn new(client: AirflowClient) -> Self {
         Self {
             airflow_api: Arc::new(client),
+            cache: Arc::new(Mutex::new(RolloutApiCache {
+                last_update_time: None,
+                by_dag_run: HashMap::new(),
+            })),
         }
     }
 }
 
 impl RolloutApi {
-    pub async fn get_rollout_data(&self) -> Result<Vec<Rollout>, RolloutDataGatherError> {
+    /// Retrieve all rollout data, using a cache to avoid
+    /// re-fetching task instances not updated since last time.
+    pub async fn get_rollout_data(
+        &self,
+        max_rollouts: usize,
+    ) -> Result<Vec<Rollout>, RolloutDataGatherError> {
+        let mut cache = self.cache.lock().await;
+        let now = Utc::now();
+        let last_update_time = cache.last_update_time;
+
         let dag_id = "rollout_ic_os_to_mainnet_subnets";
-        let dag_runs = self.airflow_api.dag_runs(dag_id, 20, 0).await?;
+        let dag_runs = self
+            .airflow_api
+            .dag_runs(dag_id, max_rollouts, 0, None, None)
+            .await?;
         let tasks = self.airflow_api.tasks(dag_id).await?;
+        // Note: perhaps if the number of tasks, or the names of tasks
+        // have changed, we would want to reset the task instance cache
+        // and re-request everything again.
         let sorter = TaskInstanceTopologicalSorter::new(tasks)?;
 
         let mut res: Vec<Rollout> = vec![];
+        let mut any_rollout_updated = false;
 
         for dag_run in dag_runs.dag_runs.iter() {
-            let task_instances = self
+            let cache_entry = cache
+                .by_dag_run
+                .entry(dag_run.dag_run_id.clone())
+                .or_insert(RolloutDataCache {
+                    task_instances: HashMap::new(),
+                    schedule: ScheduleCache::Empty,
+                });
+            let updated_task_instances = self
                 .airflow_api
-                .task_instances(dag_id, dag_run.dag_run_id.as_str(), 500, 0)
-                .await?;
-            let sorted_task_instances = sorter.sort_instances(task_instances);
+                .task_instances(
+                    dag_id,
+                    dag_run.dag_run_id.as_str(),
+                    500,
+                    0,
+                    TaskInstanceRequestFilters::default().updated_on_or_after(last_update_time),
+                )
+                .await?
+                .task_instances;
+
+            // Tasks that are ended are not marked as updated in Airflow.
+            let ended_task_instances = if last_update_time.is_some() {
+                self.airflow_api
+                    .task_instances(
+                        dag_id,
+                        dag_run.dag_run_id.as_str(),
+                        500,
+                        0,
+                        TaskInstanceRequestFilters::default().ended_on_or_after(last_update_time),
+                    )
+                    .await?
+                    .task_instances
+            } else {
+                vec![]
+            };
+
+            if !updated_task_instances.is_empty() || !ended_task_instances.is_empty() {
+                any_rollout_updated = true;
+            }
+
+            // Let's update the cache to incorporate the most up-to-date task instances.
+            for task_instance in updated_task_instances
+                .into_iter()
+                .chain(ended_task_instances.into_iter())
+            {
+                let task_instance_id = task_instance.task_id.clone();
+                if task_instance_id == "schedule" {
+                    cache_entry.schedule = ScheduleCache::Invalid;
+                }
+                match task_instance.map_index {
+                    None => {
+                        cache_entry
+                            .task_instances
+                            .insert(format!("{} None", task_instance_id), task_instance);
+                    }
+                    Some(idx) => {
+                        if cache_entry
+                            .task_instances
+                            .contains_key(&format!("{} None", task_instance_id))
+                        {
+                            debug!(
+                                target: "frontend_api", "Formerly unmapped task {} is now mapped to index {}",
+                                task_instance_id, idx
+                            );
+                        }
+                        // Once a task has been mapped, clearing the task will not cause it
+                        // to become unmapped anymore.  This is behavior that the API has
+                        // presented to me through observation.
+                        //
+                        // The number of map indexes for a task cannot be reduced once a
+                        // flow has started executing.
+                        cache_entry
+                            .task_instances
+                            .insert(format!("{} {}", task_instance_id, idx), task_instance);
+                        // Thus, we must remove any cached entry that has map index None.
+                        cache_entry
+                            .task_instances
+                            .remove(&format!("{} None", task_instance_id));
+                    }
+                }
+            }
+
+            let sorted_task_instances =
+                sorter.sort_instances(cache_entry.task_instances.clone().into_values());
 
             let mut rollout = Rollout::new(
                 dag_run.dag_run_id.to_string(),
@@ -358,59 +494,11 @@ impl RolloutApi {
                 dag_run.conf.clone(),
             );
 
+            // Now update rollout and batch state based on the obtained data.
             for task_instance in sorted_task_instances {
                 if task_instance.task_id == "schedule" {
                     match task_instance.state {
-                        Some(TaskInstanceState::Skipped)
-                        | Some(TaskInstanceState::Removed)
-                        | None => (),
-                        Some(TaskInstanceState::UpForRetry)
-                        | Some(TaskInstanceState::Restarting) => {
-                            rollout.state = RolloutState::Problem;
-                        }
-                        Some(TaskInstanceState::Failed)
-                        | Some(TaskInstanceState::UpstreamFailed) => {
-                            rollout.state = RolloutState::Failed;
-                        }
-                        Some(TaskInstanceState::UpForReschedule)
-                        | Some(TaskInstanceState::Running)
-                        | Some(TaskInstanceState::Deferred)
-                        | Some(TaskInstanceState::Queued)
-                        | Some(TaskInstanceState::Scheduled) => {
-                            rollout.state = RolloutState::Preparing
-                        }
-                        Some(TaskInstanceState::Success) => {
-                            let schedule_xcom = match self
-                                .airflow_api
-                                .xcom_entry(
-                                    dag_id,
-                                    dag_run.dag_run_id.as_str(),
-                                    task_instance.task_id.as_str(),
-                                    task_instance.map_index,
-                                    "return_value",
-                                )
-                                .await
-                            {
-                                Ok(schedule) => schedule,
-                                Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND)) => {
-                                    rollout.state = RolloutState::Preparing;
-                                    continue;
-                                }
-                                Err(e) => return Err(RolloutDataGatherError::AirflowError(e)),
-                            };
-                            let schedule =
-                                RolloutPlan::from_python_string(schedule_xcom.value.clone())?;
-                            rollout.batches = schedule.batches;
-                            rollout.state = RolloutState::Waiting;
-                        }
-                    }
-                } else if task_instance.task_id == "wait_for_other_rollouts"
-                    || task_instance.task_id == "wait_for_revision_to_be_elected"
-                {
-                    match task_instance.state {
-                        Some(TaskInstanceState::Skipped)
-                        | Some(TaskInstanceState::Removed)
-                        | None => (),
+                        Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
                             rollout.state = RolloutState::Problem;
@@ -424,7 +512,72 @@ impl RolloutApi {
                         | Some(TaskInstanceState::Deferred)
                         | Some(TaskInstanceState::Queued)
                         | Some(TaskInstanceState::Scheduled)
-                        | Some(TaskInstanceState::Success) => rollout.state = RolloutState::Waiting,
+                        | None => rollout.state = min(rollout.state, RolloutState::Preparing),
+                        Some(TaskInstanceState::Success) => {
+                            let schedule_string = match &cache_entry.schedule {
+                                ScheduleCache::Valid(s) => s,
+                                ScheduleCache::Invalid => {
+                                    let value = self
+                                        .airflow_api
+                                        .xcom_entry(
+                                            dag_id,
+                                            dag_run.dag_run_id.as_str(),
+                                            task_instance.task_id.as_str(),
+                                            task_instance.map_index,
+                                            "return_value",
+                                        )
+                                        .await;
+                                    let schedule = match value {
+                                        Ok(schedule) => {
+                                            cache_entry.schedule =
+                                                ScheduleCache::Valid(schedule.value.clone());
+                                            schedule.value
+                                        }
+                                        Err(AirflowError::StatusCode(
+                                            reqwest::StatusCode::NOT_FOUND,
+                                        )) => {
+                                            // There is no schedule to be found.
+                                            cache_entry.schedule = ScheduleCache::Empty;
+                                            continue;
+                                        }
+                                        Err(e) => {
+                                            return Err(RolloutDataGatherError::AirflowError(e));
+                                        }
+                                    };
+                                    &schedule.clone()
+                                }
+                                ScheduleCache::Empty => {
+                                    // There was no schedule to be found last time
+                                    // it was queried.
+                                    continue;
+                                }
+                            };
+                            let schedule =
+                                RolloutPlan::from_python_string(schedule_string.clone())?;
+                            rollout.batches = schedule.batches;
+                        }
+                    }
+                } else if task_instance.task_id == "wait_for_other_rollouts"
+                    || task_instance.task_id == "wait_for_revision_to_be_elected"
+                    || task_instance.task_id == "revisions"
+                {
+                    match task_instance.state {
+                        Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
+                        Some(TaskInstanceState::UpForRetry)
+                        | Some(TaskInstanceState::Restarting) => {
+                            rollout.state = RolloutState::Problem;
+                        }
+                        Some(TaskInstanceState::Failed)
+                        | Some(TaskInstanceState::UpstreamFailed) => {
+                            rollout.state = RolloutState::Failed;
+                        }
+                        Some(TaskInstanceState::UpForReschedule)
+                        | Some(TaskInstanceState::Running)
+                        | Some(TaskInstanceState::Deferred)
+                        | Some(TaskInstanceState::Queued)
+                        | Some(TaskInstanceState::Scheduled)
+                        | None => rollout.state = min(rollout.state, RolloutState::Waiting),
+                        Some(TaskInstanceState::Success) => {}
                     }
                 } else if let Some(captured) =
                     BatchIdentificationRe.captures(task_instance.task_id.as_str())
@@ -443,60 +596,34 @@ impl RolloutApi {
 
                     match task_instance.state {
                         Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => {
-                            batch.set_subnet_state(
+                            batch.set_specific_subnet_state(
                                 SubnetRolloutState::Skipped,
                                 task_instance.map_index,
                             );
                         }
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
-                            batch.set_subnet_state(
+                            batch.set_specific_subnet_state(
                                 SubnetRolloutState::Error,
                                 task_instance.map_index,
                             );
-                            rollout.state = RolloutState::Problem;
+                            rollout.state = RolloutState::Problem
                         }
                         Some(TaskInstanceState::Failed)
                         | Some(TaskInstanceState::UpstreamFailed) => {
-                            batch.set_subnet_state(
+                            batch.set_specific_subnet_state(
                                 SubnetRolloutState::Error,
                                 task_instance.map_index,
                             );
-                            rollout.state = RolloutState::Failed;
+                            rollout.state = RolloutState::Failed
                         }
                         Some(TaskInstanceState::Success)
                         | Some(TaskInstanceState::UpForReschedule)
                         | Some(TaskInstanceState::Running)
                         | Some(TaskInstanceState::Deferred)
                         | Some(TaskInstanceState::Queued)
-                        | Some(TaskInstanceState::Scheduled) => {
-                            batch.set_subnet_state(
-                                match task_name {
-                                    "collect_batch_subnets" => SubnetRolloutState::Pending,
-                                    "wait_until_start_time" => SubnetRolloutState::Waiting,
-                                    "create_proposal_if_none_exists" | "request_proposal_vote" => {
-                                        SubnetRolloutState::Proposing
-                                    }
-                                    "wait_until_proposal_is_accepted" => {
-                                        SubnetRolloutState::WaitingForElection
-                                    }
-                                    "wait_for_replica_revision" => {
-                                        SubnetRolloutState::WaitingForAdoption
-                                    }
-                                    "wait_until_no_alerts" => {
-                                        SubnetRolloutState::WaitingForAlertsGone
-                                    }
-                                    "join" => match task_instance.state {
-                                        Some(TaskInstanceState::Success) => {
-                                            SubnetRolloutState::Complete
-                                        }
-                                        _ => SubnetRolloutState::WaitingForAlertsGone,
-                                    },
-                                    // Maybe here we just want to log error and continue for robustness?
-                                    &_ => panic!("impossible task name {}", task_instance.task_id),
-                                },
-                                task_instance.map_index,
-                            );
+                        | Some(TaskInstanceState::Scheduled)
+                        | None => {
                             if let Some(TaskInstanceState::Success) = &task_instance.state {
                                 match task_name {
                                     "wait_until_start_time" => match batch.actual_start_time {
@@ -513,35 +640,78 @@ impl RolloutApi {
                                     },
                                     "join" => {
                                         batch.end_time = task_instance.end_date;
+                                        batch.set_specific_subnet_state(
+                                            SubnetRolloutState::Complete,
+                                            task_instance.map_index,
+                                        )
                                     }
                                     _ => (),
                                 }
+                            } else {
+                                batch.set_min_subnet_state(
+                                    match task_name {
+                                        "collect_batch_subnets" => SubnetRolloutState::Pending,
+                                        "wait_until_start_time" => SubnetRolloutState::Waiting,
+                                        "create_proposal_if_none_exists"
+                                        | "request_proposal_vote" => SubnetRolloutState::Proposing,
+                                        "wait_until_proposal_is_accepted" => {
+                                            SubnetRolloutState::WaitingForElection
+                                        }
+                                        "wait_for_replica_revision" => {
+                                            SubnetRolloutState::WaitingForAdoption
+                                        }
+                                        "wait_until_no_alerts" => {
+                                            SubnetRolloutState::WaitingForAlertsGone
+                                        }
+                                        "join" => match task_instance.state {
+                                            Some(TaskInstanceState::Success) => {
+                                                SubnetRolloutState::Complete
+                                            }
+                                            _ => SubnetRolloutState::WaitingForAlertsGone,
+                                        },
+                                        // Maybe here we just want to log error and continue for robustness?
+                                        &_ => {
+                                            panic!("impossible task name {}", task_instance.task_id)
+                                        }
+                                    },
+                                    task_instance.map_index,
+                                )
                             };
-                            rollout.state = RolloutState::UpgradingSubnets;
+                            rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
                         }
-                        None => (),
                     }
                 } else if task_instance.task_id == "upgrade_unassigned_nodes" {
                     match task_instance.state {
-                        Some(TaskInstanceState::Skipped)
-                        | Some(TaskInstanceState::Removed)
-                        | None => (),
+                        Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
-                            rollout.state = RolloutState::Problem;
+                            rollout.state = RolloutState::Problem
                         }
                         Some(TaskInstanceState::Failed)
                         | Some(TaskInstanceState::UpstreamFailed) => {
-                            rollout.state = RolloutState::Failed;
+                            rollout.state = RolloutState::Failed
                         }
                         Some(TaskInstanceState::UpForReschedule)
                         | Some(TaskInstanceState::Running)
                         | Some(TaskInstanceState::Deferred)
                         | Some(TaskInstanceState::Queued)
                         | Some(TaskInstanceState::Scheduled)
-                        | Some(TaskInstanceState::Success) => {
-                            rollout.state = RolloutState::UpgradingUnassignedNodes
+                        | Some(TaskInstanceState::Success)
+                        | None => {
+                            rollout.state =
+                                min(rollout.state, RolloutState::UpgradingUnassignedNodes)
                         }
+                    }
+                } else {
+                    error!(target: "frontend_api", "Unknown task {}", task_instance.task_id)
+                }
+            }
+
+            for (num, batch) in rollout.batches.iter() {
+                // This indicates a task pertaining to a batch was never processed.
+                for subnet in batch.subnets.iter() {
+                    if subnet.state == SubnetRolloutState::Unknown {
+                        error!(target:"frontend_api", "Subnet {} of batch {} was never processed by any task", subnet.subnet_id, num);
                     }
                 }
             }
@@ -557,6 +727,9 @@ impl RolloutApi {
             res.push(rollout);
         }
 
+        if any_rollout_updated {
+            cache.last_update_time = Some(now);
+        }
         Ok(res)
     }
 }
