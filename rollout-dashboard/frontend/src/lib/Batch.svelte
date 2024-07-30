@@ -21,6 +21,7 @@
         complete: { icon: "✅", name: "Complete" },
         skipped: { icon: "⏩", name: "Skipped" },
         error: { icon: "❌", name: "Error" },
+        unknown: { icon: "❓", name: "Unknown (check backend logs)" },
     };
 </script>
 

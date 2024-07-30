@@ -1,15 +1,17 @@
 use axum::http::StatusCode;
 use axum::Json;
 use axum::{routing::get, Router};
+use chrono::{DateTime, Utc};
 use log::{error, info};
 use reqwest::Url;
+use serde_json::from_str;
+use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::vec::Vec;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::watch;
 use tokio::sync::Mutex;
@@ -26,7 +28,10 @@ use crate::frontend_api::{Rollout, RolloutApi, RolloutDataGatherError};
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 
-type CurrentRolloutStatus = Result<Vec<Rollout>, (StatusCode, String)>;
+/// Contains either a list of rollouts ordered from newest to oldest,
+/// dated from the last time it was successfully updated, or an HTTP
+/// status code corresponding to -- and with -- a message for the last error.
+type CurrentRolloutStatus = Result<VecDeque<Rollout>, (StatusCode, String)>;
 
 struct Server {
     rollout_api: Arc<RolloutApi>,
@@ -40,9 +45,12 @@ impl Server {
             last_rollout_data: Arc::new(Mutex::new(Err((StatusCode::NO_CONTENT, "".to_string())))),
         }
     }
-    async fn fetch_rollout_data(&self) -> Result<Vec<Rollout>, (StatusCode, String)> {
-        match self.rollout_api.get_rollout_data().await {
-            Ok(rollouts) => Ok(rollouts),
+    async fn fetch_rollout_data(
+        &self,
+        max_rollouts: usize,
+    ) -> Result<VecDeque<Rollout>, (StatusCode, String)> {
+        match self.rollout_api.get_rollout_data(max_rollouts).await {
+            Ok(rollouts) => Ok(rollouts.into()),
             Err(e) => {
                 let res = match e {
                     RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
@@ -79,7 +87,7 @@ impl Server {
         }
     }
 
-    async fn update_rollout_data<F>(&self, cancel: F)
+    async fn update_rollout_data<F>(&self, max_rollouts: usize, refresh_interval: u64, cancel: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -87,26 +95,31 @@ impl Server {
         tokio::pin!(cancel);
 
         loop {
+            let loop_start_time: DateTime<Utc> = Utc::now();
+
             let data = select! {
-               d = self.fetch_rollout_data() => {
-                   match &d {
-                       Ok(_) => {
-                           if errored {
-                               info!(target: "http_client", "Successfully processed rollout data again after temporary error");
-                               errored = false
-                           }
-                       }
-                       Err(res) => {
-                           error!(
-                               target: "http_client", "After processing fetch_rollout_data: {}",
-                               res.1
-                           );
-                           errored = true
-                       }
-                   };
-                   d
-               },
-               _ignored = &mut cancel => break,
+                d = self.fetch_rollout_data(max_rollouts) => {
+                    match d {
+                        Ok(new_rollouts) => {
+                            if errored {
+                                info!(target: "update_loop", "Successfully processed rollout data again after temporary error");
+                                errored = false
+                            };
+                            let loop_delta_time = Utc::now() - loop_start_time;
+                            info!(target: "update_loop", "After {}, obtained {} rollouts from Airflow", loop_delta_time, new_rollouts.len());
+                            Ok(new_rollouts)
+                        }
+                        Err(res) => {
+                            error!(
+                                target: "update_loop", "After processing fetch_rollout_data: {}",
+                                res.1
+                            );
+                            errored = true;
+                            Err(res)
+                        }
+                    }
+                },
+                _ignored = &mut cancel => break,
             };
 
             let mut container = self.last_rollout_data.lock().await;
@@ -114,14 +127,14 @@ impl Server {
             drop(container);
 
             select! {
-                _ignored1 = sleep(Duration::from_secs(BACKEND_REFRESH_UPDATE_INTERVAL)) => (),
+                _ignored1 = sleep(Duration::from_secs(refresh_interval)) => (),
                 _ignored2 = &mut cancel => break,
             }
         }
     }
 
     // #[debug_handler]
-    async fn get_rollout_data(&self) -> Result<Json<Vec<Rollout>>, (StatusCode, String)> {
+    async fn get_rollout_data(&self) -> Result<Json<VecDeque<Rollout>>, (StatusCode, String)> {
         let m = self.last_rollout_data.lock().await.clone();
         match m {
             Ok(rollouts) => Ok(Json(rollouts)),
@@ -134,6 +147,16 @@ impl Server {
 async fn main() -> ExitCode {
     env_logger::init();
 
+    let max_rollouts = from_str::<usize>(
+        env::var("MAX_ROLLOUTS")
+            .unwrap_or("10".to_string())
+            .as_str(),
+    )
+    .unwrap();
+    let refresh_interval = from_str::<u64>(
+        &env::var("REFRESH_INTERVAL").unwrap_or(format!("{}", BACKEND_REFRESH_UPDATE_INTERVAL)),
+    )
+    .unwrap();
     let backend_host = env::var("BACKEND_HOST").unwrap_or("127.0.0.1:4174".to_string());
     let airflow_url_str =
         env::var("AIRFLOW_URL").unwrap_or("http://admin:password@localhost:8080/".to_string());
@@ -174,7 +197,7 @@ async fn main() -> ExitCode {
 
     let background_loop_fut = spawn(async move {
         server_background_update
-            .update_rollout_data(async move {
+            .update_rollout_data(max_rollouts, refresh_interval, async move {
                 let _ = stop_loop_rx.changed().await;
             })
             .await
