@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   test-backend:
-    name: Run tests for the backend
+    name: Test backend
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +31,7 @@ jobs:
           command: test
   test-frontend:
     if: github.event_name == 'pull_request'
-    name: Run tests for the frontend
+    name: Test frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
