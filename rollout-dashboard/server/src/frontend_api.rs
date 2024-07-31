@@ -775,20 +775,6 @@ impl RolloutApi {
                 }
             }
 
-            /*
-            // This is not an error condition anymore.
-            if (false) {
-                for (num, batch) in rollout.batches.iter() {
-                    // This indicates a task pertaining to a batch was never processed.
-                    for subnet in batch.subnets.iter() {
-                        if subnet.state == SubnetRolloutState::Unknown {
-                            error!(target:"frontend_api", "Subnet {} of batch {} in rollout {} was never processed by any task", subnet.subnet_id, num, rollout.name);
-                        }
-                    }
-                }
-            }
-            */
-
             if let Some(state) = Some(&dag_run.state) {
                 match state {
                     DagRunState::Success => rollout.state = RolloutState::Complete,
