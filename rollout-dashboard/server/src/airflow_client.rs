@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{f64, fmt};
 use std::{vec, vec::Vec};
+use strum::Display;
 use urlencoding::decode;
 
 /// Default maximum batch size for paged requests in Airflow.
@@ -151,7 +152,7 @@ pub struct XComEntryResponse {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskInstanceState {
     Success,

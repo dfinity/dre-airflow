@@ -1,7 +1,7 @@
 use crate::python;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
-use log::{debug, error};
+use log::{debug, error, trace};
 use regex::Regex;
 use serde::Serialize;
 use std::cmp::min;
@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
+use strum::Display;
 use tokio::sync::Mutex;
 use topological_sort::TopologicalSort;
 
@@ -26,7 +27,7 @@ lazy_static! {
     static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum SubnetRolloutState {
     Pending,
@@ -36,8 +37,9 @@ pub enum SubnetRolloutState {
     WaitingForAdoption,
     WaitingForAlertsGone,
     Complete,
-    Skipped,
     Error,
+    PredecessorFailed,
+    Skipped,
     Unknown,
 }
 
@@ -46,6 +48,7 @@ pub struct Subnet {
     pub subnet_id: String,
     pub git_revision: String,
     pub state: SubnetRolloutState,
+    pub comment: String,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -56,28 +59,81 @@ pub struct Batch {
     pub subnets: Vec<Subnet>,
 }
 
+fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
+where
+    N: Display,
+{
+    match opt {
+        None => fallback.to_string(),
+        Some(v) => format!("{}{}", prefix, v),
+    }
+}
+
+fn make_state_comment(task_instance: &TaskInstancesResponseItem) -> String {
+    format!(
+        "Task {}{} {}",
+        task_instance.task_id,
+        format_some(task_instance.map_index, ".", ""),
+        format_some(
+            task_instance.state.clone(),
+            " in state ",
+            " has no known state"
+        ),
+    )
+}
+
 impl Batch {
-    fn set_min_subnet_state(&mut self, state: SubnetRolloutState, index: Option<usize>) {
-        match index {
+    fn set_min_subnet_state(
+        &mut self,
+        state: SubnetRolloutState,
+        task_instance: &TaskInstancesResponseItem,
+    ) -> SubnetRolloutState {
+        match task_instance.map_index {
             None => {
                 for subnet in self.subnets.iter_mut() {
-                    subnet.state = min(subnet.state.clone(), state.clone())
+                    let new_state = state.clone();
+                    if new_state < subnet.state {
+                        subnet.comment = make_state_comment(task_instance);
+                        trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+                        subnet.state = new_state;
+                    }
                 }
             }
             Some(index) => {
-                self.subnets[index].state = min(self.subnets[index].state.clone(), state)
-            }
-        }
-    }
-    fn set_specific_subnet_state(&mut self, state: SubnetRolloutState, index: Option<usize>) {
-        match index {
-            None => {
-                for subnet in self.subnets.iter_mut() {
-                    subnet.state = state.clone()
+                let new_state = state.clone();
+                if new_state < self.subnets[index].state {
+                    self.subnets[index].comment = make_state_comment(task_instance);
+                    trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, self.subnets[index].state, new_state, self.subnets[index].comment);
+                    self.subnets[index].state = new_state;
                 }
             }
-            Some(index) => self.subnets[index].state = state,
         }
+        state
+    }
+    fn set_specific_subnet_state(
+        &mut self,
+        state: SubnetRolloutState,
+        task_instance: &TaskInstancesResponseItem,
+    ) -> SubnetRolloutState {
+        match task_instance.map_index {
+            None => {
+                for subnet in self.subnets.iter_mut() {
+                    if state != subnet.state {
+                        subnet.comment = make_state_comment(task_instance);
+                        trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, state, subnet.comment);
+                        subnet.state = state.clone();
+                    }
+                }
+            }
+            Some(index) => {
+                if state != self.subnets[index].state {
+                    self.subnets[index].comment = make_state_comment(task_instance);
+                    trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, self.subnets[index].state, state, self.subnets[index].comment);
+                    self.subnets[index].state = state.clone();
+                }
+            }
+        }
+        state
     }
 }
 
@@ -300,6 +356,7 @@ impl RolloutPlan {
                         subnet_id: capped[1].to_string(),
                         git_revision: capped[2].to_string(),
                         state: SubnetRolloutState::Unknown,
+                        comment: "".to_string(),
                     },
                     None => return Err(RolloutPlanParseError::InvalidSubnet(subnet.clone())),
                 });
@@ -595,37 +652,48 @@ impl RolloutApi {
                     );
 
                     match task_instance.state {
-                        Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => {
+                        Some(TaskInstanceState::Skipped) => {
                             batch.set_specific_subnet_state(
                                 SubnetRolloutState::Skipped,
-                                task_instance.map_index,
+                                &task_instance,
                             );
                         }
                         Some(TaskInstanceState::UpForRetry)
                         | Some(TaskInstanceState::Restarting) => {
                             batch.set_specific_subnet_state(
                                 SubnetRolloutState::Error,
-                                task_instance.map_index,
+                                &task_instance,
                             );
                             rollout.state = RolloutState::Problem
                         }
-                        Some(TaskInstanceState::Failed)
-                        | Some(TaskInstanceState::UpstreamFailed) => {
+                        Some(TaskInstanceState::Failed) => {
                             batch.set_specific_subnet_state(
                                 SubnetRolloutState::Error,
-                                task_instance.map_index,
+                                &task_instance,
+                            );
+                            rollout.state = RolloutState::Failed
+                        }
+                        Some(TaskInstanceState::UpstreamFailed) => {
+                            batch.set_min_subnet_state(
+                                SubnetRolloutState::PredecessorFailed,
+                                &task_instance,
+                            );
+                            rollout.state = RolloutState::Failed
+                        }
+                        Some(TaskInstanceState::Removed) => {
+                            batch.set_specific_subnet_state(
+                                SubnetRolloutState::Unknown,
+                                &task_instance,
                             );
                             rollout.state = RolloutState::Failed
                         }
                         Some(TaskInstanceState::Success) => {
-                            batch.set_min_subnet_state(
-                                match task_name {
-                                    "wait_until_no_alerts" => SubnetRolloutState::Complete,
-                                    "join" => SubnetRolloutState::Complete,
-                                    &_ => SubnetRolloutState::Unknown,
-                                },
-                                task_instance.map_index,
-                            );
+                            if task_name == "wait_until_no_alerts" || task_name == "join" {
+                                batch.set_min_subnet_state(
+                                    SubnetRolloutState::Complete,
+                                    &task_instance,
+                                );
+                            }
                             if task_name == "wait_until_start_time" {
                                 match batch.actual_start_time {
                                     None => batch.actual_start_time = task_instance.end_date,
@@ -643,13 +711,19 @@ impl RolloutApi {
                                 batch.end_time = task_instance.end_date;
                             };
                         }
-
+                        None => {
+                            if task_name == "collect_batch_subnets" {
+                                batch.set_min_subnet_state(
+                                    SubnetRolloutState::Pending,
+                                    &task_instance,
+                                );
+                            }
+                        }
                         Some(TaskInstanceState::UpForReschedule)
                         | Some(TaskInstanceState::Running)
                         | Some(TaskInstanceState::Deferred)
                         | Some(TaskInstanceState::Queued)
-                        | Some(TaskInstanceState::Scheduled)
-                        | None => {
+                        | Some(TaskInstanceState::Scheduled) => {
                             batch.set_min_subnet_state(
                                 match task_name {
                                     "collect_batch_subnets" => SubnetRolloutState::Pending,
@@ -666,9 +740,10 @@ impl RolloutApi {
                                     "wait_until_no_alerts" => {
                                         SubnetRolloutState::WaitingForAlertsGone
                                     }
+                                    "join" => SubnetRolloutState::Complete,
                                     _ => SubnetRolloutState::Unknown,
                                 },
-                                task_instance.map_index,
+                                &task_instance,
                             );
                             rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
                         }
@@ -700,14 +775,19 @@ impl RolloutApi {
                 }
             }
 
-            for (num, batch) in rollout.batches.iter() {
-                // This indicates a task pertaining to a batch was never processed.
-                for subnet in batch.subnets.iter() {
-                    if subnet.state == SubnetRolloutState::Unknown {
-                        error!(target:"frontend_api", "Subnet {} of batch {} was never processed by any task", subnet.subnet_id, num);
+            /*
+            // This is not an error condition anymore.
+            if (false) {
+                for (num, batch) in rollout.batches.iter() {
+                    // This indicates a task pertaining to a batch was never processed.
+                    for subnet in batch.subnets.iter() {
+                        if subnet.state == SubnetRolloutState::Unknown {
+                            error!(target:"frontend_api", "Subnet {} of batch {} in rollout {} was never processed by any task", subnet.subnet_id, num, rollout.name);
+                        }
                     }
                 }
             }
+            */
 
             if let Some(state) = Some(&dag_run.state) {
                 match state {
