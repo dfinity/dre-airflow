@@ -30,6 +30,8 @@ lazy_static! {
 #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum SubnetRolloutState {
+    Error,
+    PredecessorFailed,
     Pending,
     Waiting,
     Proposing,
@@ -37,8 +39,6 @@ pub enum SubnetRolloutState {
     WaitingForAdoption,
     WaitingForAlertsGone,
     Complete,
-    Error,
-    PredecessorFailed,
     Skipped,
     Unknown,
 }
@@ -76,8 +76,8 @@ fn make_state_comment(task_instance: &TaskInstancesResponseItem) -> String {
         format_some(task_instance.map_index, ".", ""),
         format_some(
             task_instance.state.clone(),
-            " in state ",
-            " has no known state"
+            "in state ",
+            "has no known state"
         ),
     )
 }
@@ -651,102 +651,109 @@ impl RolloutApi {
                         &captured[2],
                     );
 
-                    match task_instance.state {
-                        Some(TaskInstanceState::Skipped) => {
-                            batch.set_specific_subnet_state(
-                                SubnetRolloutState::Skipped,
-                                &task_instance,
-                            );
-                        }
-                        Some(TaskInstanceState::UpForRetry)
-                        | Some(TaskInstanceState::Restarting) => {
-                            batch.set_specific_subnet_state(
-                                SubnetRolloutState::Error,
-                                &task_instance,
-                            );
-                            rollout.state = RolloutState::Problem
-                        }
-                        Some(TaskInstanceState::Failed) => {
-                            batch.set_specific_subnet_state(
-                                SubnetRolloutState::Error,
-                                &task_instance,
-                            );
-                            rollout.state = RolloutState::Failed
-                        }
-                        Some(TaskInstanceState::UpstreamFailed) => {
-                            batch.set_min_subnet_state(
-                                SubnetRolloutState::PredecessorFailed,
-                                &task_instance,
-                            );
-                            rollout.state = RolloutState::Failed
-                        }
-                        Some(TaskInstanceState::Removed) => {
-                            batch.set_specific_subnet_state(
-                                SubnetRolloutState::Unknown,
-                                &task_instance,
-                            );
-                            rollout.state = RolloutState::Failed
-                        }
-                        Some(TaskInstanceState::Success) => {
-                            if task_name == "wait_until_no_alerts" || task_name == "join" {
-                                batch.set_min_subnet_state(
-                                    SubnetRolloutState::Complete,
-                                    &task_instance,
-                                );
-                            }
-                            if task_name == "wait_until_start_time" {
-                                match batch.actual_start_time {
-                                    None => batch.actual_start_time = task_instance.end_date,
-                                    Some(start_time) => match task_instance.end_date {
-                                        None => (),
-                                        Some(end_date) => {
-                                            if start_time > end_date {
-                                                batch.actual_start_time = task_instance.end_date;
-                                            }
-                                        }
-                                    },
-                                }
-                            };
-                            if task_name == "join" {
-                                batch.end_time = task_instance.end_date;
-                            };
-                        }
+                    macro_rules! trans_min {
+                        ($input:expr) => {
+                            batch.set_min_subnet_state($input, &task_instance);
+                        };
+                    }
+                    macro_rules! trans_exact {
+                        ($input:expr) => {
+                            batch.set_specific_subnet_state($input, &task_instance);
+                        };
+                    }
+
+                    match &task_instance.state {
                         None => {
                             if task_name == "collect_batch_subnets" {
-                                batch.set_min_subnet_state(
-                                    SubnetRolloutState::Pending,
-                                    &task_instance,
-                                );
+                                trans_exact!(SubnetRolloutState::Pending);
                             }
                         }
-                        Some(TaskInstanceState::UpForReschedule)
-                        | Some(TaskInstanceState::Running)
-                        | Some(TaskInstanceState::Deferred)
-                        | Some(TaskInstanceState::Queued)
-                        | Some(TaskInstanceState::Scheduled) => {
-                            batch.set_min_subnet_state(
+                        Some(state) => match state {
+                            TaskInstanceState::Skipped => {
+                                trans_exact!(SubnetRolloutState::Skipped);
+                            }
+                            TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
+                                trans_exact!(SubnetRolloutState::Error);
+                                rollout.state = RolloutState::Problem
+                            }
+                            TaskInstanceState::Failed => {
+                                trans_exact!(SubnetRolloutState::Error);
+                                rollout.state = RolloutState::Failed
+                            }
+                            TaskInstanceState::UpstreamFailed => {
+                                trans_min!(SubnetRolloutState::PredecessorFailed);
+                                rollout.state = RolloutState::Failed
+                            }
+                            TaskInstanceState::Removed => {
+                                trans_exact!(SubnetRolloutState::Unknown);
+                                rollout.state = RolloutState::Failed
+                            }
+                            TaskInstanceState::UpForReschedule
+                            | TaskInstanceState::Running
+                            | TaskInstanceState::Deferred
+                            | TaskInstanceState::Queued
+                            | TaskInstanceState::Scheduled => {
                                 match task_name {
-                                    "collect_batch_subnets" => SubnetRolloutState::Pending,
-                                    "wait_until_start_time" => SubnetRolloutState::Waiting,
-                                    "create_proposal_if_none_exists" | "request_proposal_vote" => {
-                                        SubnetRolloutState::Proposing
+                                    "collect_batch_subnets" => {
+                                        trans_min!(SubnetRolloutState::Pending);
+                                    }
+
+                                    "wait_until_start_time" => {
+                                        trans_min!(SubnetRolloutState::Waiting);
+                                    }
+                                    "create_proposal_if_none_exists" => {
+                                        trans_min!(SubnetRolloutState::Proposing);
                                     }
                                     "wait_until_proposal_is_accepted" => {
-                                        SubnetRolloutState::WaitingForElection
+                                        trans_min!(SubnetRolloutState::WaitingForElection);
                                     }
                                     "wait_for_replica_revision" => {
-                                        SubnetRolloutState::WaitingForAdoption
+                                        trans_min!(SubnetRolloutState::WaitingForAdoption);
                                     }
                                     "wait_until_no_alerts" => {
-                                        SubnetRolloutState::WaitingForAlertsGone
+                                        trans_min!(SubnetRolloutState::WaitingForAlertsGone);
                                     }
-                                    "join" => SubnetRolloutState::Complete,
-                                    _ => SubnetRolloutState::Unknown,
-                                },
-                                &task_instance,
-                            );
-                            rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
-                        }
+                                    "join" => {
+                                        trans_min!(SubnetRolloutState::Complete);
+                                    }
+                                    &_ => (),
+                                }
+                                rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
+                            }
+                            TaskInstanceState::Success => match task_name {
+                                "wait_until_start_time" => {
+                                    batch.actual_start_time = match task_instance.end_date {
+                                        None => batch.actual_start_time,
+                                        Some(end_date) => {
+                                            if batch.actual_start_time.is_none() {
+                                                Some(end_date)
+                                            } else {
+                                                let stime = batch.actual_start_time.unwrap();
+                                                Some(min(stime, end_date))
+                                            }
+                                        }
+                                    };
+                                    trans_exact!(SubnetRolloutState::Proposing);
+                                }
+                                "create_proposal_if_none_exists" => {
+                                    trans_exact!(SubnetRolloutState::WaitingForElection);
+                                }
+                                "wait_until_proposal_is_accepted" => {
+                                    trans_exact!(SubnetRolloutState::WaitingForAdoption);
+                                }
+                                "wait_for_replica_revision" => {
+                                    trans_exact!(SubnetRolloutState::WaitingForAlertsGone);
+                                }
+                                "wait_until_no_alerts" => {
+                                    trans_exact!(SubnetRolloutState::Complete);
+                                }
+                                "join" => {
+                                    trans_exact!(SubnetRolloutState::Complete);
+                                    batch.end_time = task_instance.end_date;
+                                }
+                                &_ => (),
+                            },
+                        },
                     }
                 } else if task_instance.task_id == "upgrade_unassigned_nodes" {
                     match task_instance.state {
