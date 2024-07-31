@@ -21,7 +21,8 @@
         complete: { icon: "✅", name: "Complete" },
         skipped: { icon: "⏩", name: "Skipped" },
         error: { icon: "❌", name: "Error" },
-        unknown: { icon: "❓", name: "Unknown (check backend logs)" },
+        predecessor_failed: { icon: "❌", name: "Predecessor failed" },
+        unknown: { icon: "❓", name: "Does not appear in Airflow" },
     };
 </script>
 
@@ -32,7 +33,9 @@
                 <div class="subnet_state_icon tooltip">
                     {subnet_rollout_states[subnet.state].icon}<span
                         class="subnet_state tooltiptext"
-                        >{subnet_rollout_states[subnet.state].name}</span
+                        >{subnet_rollout_states[subnet.state]
+                            .name}{#if subnet.comment}<br
+                            />{subnet.comment}{/if}</span
                     >
                 </div>
                 <span class="subnet_id">{subnet.subnet_id.substring(0, 5)}</span
