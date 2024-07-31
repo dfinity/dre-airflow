@@ -1,4 +1,4 @@
-name: Containers
+name: Airflow containers
 on:
   push:
     branches:
@@ -13,6 +13,8 @@ concurrency:
 
 jobs:
   airflow-content-syncer:
+    name: Publish Airflow content syncer container
+    if: github.event_name == 'push' and github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # This image is based on ubuntu:20.04
     steps:
@@ -45,6 +47,7 @@ jobs:
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: airflow-content-syncer
   airflow-customized:
+    name: Publish customized Airflow container
     runs-on: ubuntu-latest
     # This image is based on ubuntu:20.04
     steps:
