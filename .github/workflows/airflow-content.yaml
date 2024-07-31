@@ -1,15 +1,10 @@
-name: Main
+name: Airflow content QA
 on:
-  push:
-    branches:
-      - "main"
-    paths-ignore:
-      - airflow-content-syncer/**
-      - airflow-customized/**
   pull_request:
     paths-ignore:
       - airflow-content-syncer/**
       - airflow-customized/**
+      - rollout-dashboard/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,13 +12,9 @@ concurrency:
 
 jobs:
   CI:
+    name: Run tests on Airflow content
     runs-on: ubuntu-latest
-    # This image is based on ubuntu:20.04
     steps:
       - uses: actions/checkout@v4
-
-      ########################################
-      # Test
-      ########################################
       - name: "Test"
         uses: ./.github/workflows/test

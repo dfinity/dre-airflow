@@ -5,17 +5,51 @@ on:
       - main
     paths:
       - rollout-dashboard/**
+      - .github/**
+  pull_request:
+    paths:
+      - rollout-dashboard/**
+      - .github/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-rollout-dashboard-container:
+  test-backend:
+    name: Run tests for the backend
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - run: mv -f rollout-dashboard/server/* rollout-dashboard/server/.[a-z]* .
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+  test-frontend:
+    if: github.event_name == 'pull_request'
+    name: Run tests for the frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+      - run: mv -f rollout-dashboard/frontend/* rollout-dashboard/frontend/.[a-z]* .
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test
+  build-rollout-dashboard-container:
+    name: Publish rollout dashboard container
+    if: github.event_name == 'pull_request'
+    needs: [test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: docker/metadata-action@v5
         id: metadata
         with:
@@ -26,13 +60,41 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
             type=sha,format=long
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      - uses: int128/kaniko-action@v1
+        name: Create rollout-dashboard container
+        with:
+          push: false
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache: false
+          cache-repository: ghcr.io/${{ github.repository }}/cache
+          context: rollout-dashboard
+  publish-rollout-dashboard-container:
+    name: Publish rollout dashboard container
+    if: github.event_name == 'push' and github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}/rollout-dashboard
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha,format=long
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: int128/kaniko-action@v1
         name: Create rollout-dashboard container
         with:
