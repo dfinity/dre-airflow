@@ -693,34 +693,35 @@ impl RolloutApi {
                             | TaskInstanceState::Deferred
                             | TaskInstanceState::Queued
                             | TaskInstanceState::Scheduled => {
-                                if task_name == "collect_batch_subnets" {
-                                    trans_min!(SubnetRolloutState::Pending);
-                                };
-                                if task_name == "wait_until_start_time" {
-                                    trans_min!(SubnetRolloutState::Waiting);
-                                };
-                                if task_name == "wait_until_start_time" {
-                                    trans_min!(SubnetRolloutState::Waiting);
-                                };
-                                if task_name == "create_proposal_if_none_exists" {
-                                    trans_min!(SubnetRolloutState::Proposing);
-                                };
-                                if task_name == "wait_until_proposal_is_accepted" {
-                                    trans_min!(SubnetRolloutState::WaitingForElection);
-                                };
-                                if task_name == "wait_for_replica_revision" {
-                                    trans_min!(SubnetRolloutState::WaitingForAdoption);
-                                };
-                                if task_name == "wait_until_no_alerts" {
-                                    trans_min!(SubnetRolloutState::WaitingForAlertsGone);
-                                };
-                                if task_name == "join" {
-                                    trans_min!(SubnetRolloutState::Complete);
-                                };
+                                match task_name {
+                                    "collect_batch_subnets" => {
+                                        trans_min!(SubnetRolloutState::Pending);
+                                    }
+
+                                    "wait_until_start_time" => {
+                                        trans_min!(SubnetRolloutState::Waiting);
+                                    }
+                                    "create_proposal_if_none_exists" => {
+                                        trans_min!(SubnetRolloutState::Proposing);
+                                    }
+                                    "wait_until_proposal_is_accepted" => {
+                                        trans_min!(SubnetRolloutState::WaitingForElection);
+                                    }
+                                    "wait_for_replica_revision" => {
+                                        trans_min!(SubnetRolloutState::WaitingForAdoption);
+                                    }
+                                    "wait_until_no_alerts" => {
+                                        trans_min!(SubnetRolloutState::WaitingForAlertsGone);
+                                    }
+                                    "join" => {
+                                        trans_min!(SubnetRolloutState::Complete);
+                                    }
+                                    &_ => (),
+                                }
                                 rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
                             }
-                            TaskInstanceState::Success => {
-                                if task_name == "wait_until_start_time" {
+                            TaskInstanceState::Success => match task_name {
+                                "wait_until_start_time" => {
                                     batch.actual_start_time = match task_instance.end_date {
                                         None => batch.actual_start_time,
                                         Some(end_date) => {
@@ -733,24 +734,25 @@ impl RolloutApi {
                                         }
                                     };
                                     trans_exact!(SubnetRolloutState::Proposing);
-                                };
-                                if task_name == "create_proposal_if_none_exists" {
+                                }
+                                "create_proposal_if_none_exists" => {
                                     trans_exact!(SubnetRolloutState::WaitingForElection);
                                 }
-                                if task_name == "wait_until_proposal_is_accepted" {
+                                "wait_until_proposal_is_accepted" => {
                                     trans_exact!(SubnetRolloutState::WaitingForAdoption);
                                 }
-                                if task_name == "wait_for_replica_revision" {
+                                "wait_for_replica_revision" => {
                                     trans_exact!(SubnetRolloutState::WaitingForAlertsGone);
                                 }
-                                if task_name == "wait_until_no_alerts" {
+                                "wait_until_no_alerts" => {
                                     trans_exact!(SubnetRolloutState::Complete);
                                 }
-                                if task_name == "join" {
+                                "join" => {
                                     trans_exact!(SubnetRolloutState::Complete);
                                     batch.end_time = task_instance.end_date;
-                                };
-                            }
+                                }
+                                &_ => (),
+                            },
                         },
                     }
                 } else if task_instance.task_id == "upgrade_unassigned_nodes" {
