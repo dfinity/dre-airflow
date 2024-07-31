@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { derived, writable } from 'svelte/store'
 
 export function createUrlStore(ssrUrl) {

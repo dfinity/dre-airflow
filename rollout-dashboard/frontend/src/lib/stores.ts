@@ -1,10 +1,11 @@
 import { get, writable } from 'svelte/store'
+import { type Rollout } from './types'
 
 const BACKEND_TIMEOUT = 15000
 
-type RolloutResult = {
+export type RolloutResult = {
     error: string | Object | null;
-    rollouts: Array<Object>;
+    rollouts: Rollout[];
 }
 
 export const rollout_query = (() => {
