@@ -44,7 +44,7 @@ jobs:
       - run: npm run build
       - run: npm run check
   build-rollout-dashboard-container:
-    name: Publish rollout dashboard container
+    name: Build rollout dashboard container
     if: github.event_name == 'pull_request'
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest

@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build-airflow-content-syncer:
-    name: Publish Airflow content syncer container
+    name: Build Airflow content syncer container
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # This image is based on ubuntu:20.04
@@ -53,7 +53,7 @@ jobs:
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: airflow-content-syncer
   build-airflow-customized:
-    name: Publish customized Airflow container
+    name: Build customized Airflow container
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # This image is based on ubuntu:20.04
