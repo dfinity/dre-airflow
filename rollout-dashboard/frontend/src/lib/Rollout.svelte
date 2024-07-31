@@ -1,5 +1,6 @@
 <script lang="ts">
     import Time from "svelte-time";
+    import SvelteMarkdown from "svelte-markdown";
     import { type Rollout, rolloutStateIcon, rolloutStateName } from "./types";
     import Batch from "./Batch.svelte";
     export let rollout: Rollout;
@@ -31,7 +32,9 @@
         </div>
     </div>
     {#if rollout.note}
-        <p class="note">{rollout.note}</p>
+        <div class="note space-y-4">
+            <SvelteMarkdown source={rollout.note} />
+        </div>
     {/if}
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
         <ul>
@@ -102,10 +105,5 @@
     }
     .rollout .times {
         order: 2;
-    }
-    p.note {
-        color: #444;
-        font-style: italic;
-        white-space: pre-wrap;
     }
 </style>

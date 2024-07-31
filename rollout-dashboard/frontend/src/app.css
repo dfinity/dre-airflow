@@ -64,3 +64,14 @@ time {
   border-bottom: 1px dotted #000;
   cursor: help;
 }
+
+div.note {
+  color: #444;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+div.note a {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
