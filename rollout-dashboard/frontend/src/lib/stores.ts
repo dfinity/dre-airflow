@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store'
+import { get, writable, type Writable } from 'svelte/store'
 import { type Rollout } from './types'
 
 const BACKEND_TIMEOUT = 15000
@@ -8,58 +8,54 @@ export type RolloutResult = {
     rollouts: Rollout[];
 }
 
-export const rollout_query = (() => {
-    const store = writable<RolloutResult>({ rollouts: [], error: "loading" })
 
-    let updater = async () => {
-        const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v1";
-        const url = API_URL + "/rollouts"
-        try {
-            const res = await fetch(url, { signal: AbortSignal.timeout(BACKEND_TIMEOUT) });
-            if (res.ok) {
-                if (res.status == 204) {
-                    console.log('Data is not yet available.  Retrying soon.')
-                    store.set({ rollouts: [], error: "loading" })
-                } else {
-                    let json = await res.json()
-                    store.set({
-                        rollouts: json,
-                        error: null
-                    })
-                }
-                setTimeout(updater, 5000)
+const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v1";
+const url = API_URL + "/rollouts/sse"
+var evtSource: EventSource;
+
+const rollout_store = writable<RolloutResult>({ rollouts: [], error: "loading" })
+
+function resetupEventSource() {
+    evtSource = new EventSource(url);
+    evtSource.onmessage = async function (event) {
+        var current_rollout_result = JSON.parse(event.data);
+        if (current_rollout_result.error !== null) {
+            let status = current_rollout_result.error[0];
+            if (status == 204) {
+                rollout_store.set({ rollouts: [], error: "loading" })
             } else {
-                // Sometimes the API will fail!
-                // FIXME: we should handle this with an error shown to the user.
-                let responseText = await res.text()
-                let errorText = res.status + " " + res.statusText
+                let responseText = current_rollout_result.error[1];
+                let errorText = status + " " + responseText;
                 if (responseText) {
                     responseText = responseText.split("\n")[0]
                     errorText = errorText + ": " + responseText
-                } else if (res.status == 500) {
-                    // An HTTP 500 error without status text from fetch() indicates
-                    // that the fetch() call could not contact the backend server,
-                    // rather than an HTTP error proper coming from the backend.
-                    errorText = "not possible to contact rollout backend (network issues / backend down)"
                 }
                 console.log('Request for rollout data failed: ' + errorText)
-                store.set({
-                    rollouts: get(store).rollouts,
+                rollout_store.set({
+                    rollouts: get(rollout_store).rollouts,
                     error: errorText
                 })
-                setTimeout(updater, 15000)
             }
-        } catch (e) {
-            let errorText = "the request to the backend has timed out (network issues / backend under high load)"
-            console.log('Request for rollout data failed: ' + errorText)
-            store.set({
-                rollouts: get(store).rollouts,
-                error: errorText
+        } else {
+            rollout_store.set({
+                rollouts: current_rollout_result.rollouts,
+                error: null
             })
-            setTimeout(updater, 15000)
         }
     }
-    setTimeout(updater, 1)
+    evtSource.onerror = function (e) {
+        console.log("Disconnected from event source.  Reconnecting in 5 seconds.")
+        evtSource.close();
+        var errorText = 'Rollout dashboard is down — reconnecting in 5 seconds'
+        rollout_store.set({
+            rollouts: get(rollout_store).rollouts,
+            error: errorText
+        })
+        setTimeout(resetupEventSource, 5000)
+    }
+}
 
-    return store
+export const rollout_query = ((): Writable<RolloutResult> => {
+    resetupEventSource()
+    return rollout_store
 });
