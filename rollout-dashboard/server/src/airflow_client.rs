@@ -537,7 +537,7 @@ impl Display for AirflowClientCreationError {
 }
 
 pub struct AirflowClient {
-    url: reqwest::Url,
+    pub url: reqwest::Url,
     username: String,
     password: String,
     client: Arc<reqwest::Client>,

@@ -153,6 +153,7 @@ pub enum RolloutState {
 pub struct Rollout {
     /// name is unique, enforced by Airflow.
     pub name: String,
+    pub url: String,
     pub note: Option<String>,
     pub state: RolloutState,
     pub dispatch_time: DateTime<Utc>,
@@ -164,6 +165,7 @@ pub struct Rollout {
 impl Rollout {
     fn new(
         name: String,
+        url: String,
         note: Option<String>,
         dispatch_time: DateTime<Utc>,
         last_scheduling_decision: Option<DateTime<Utc>>,
@@ -171,6 +173,7 @@ impl Rollout {
     ) -> Self {
         Self {
             name,
+            url,
             note,
             state: RolloutState::Complete,
             dispatch_time,
@@ -543,8 +546,18 @@ impl RolloutApi {
             let sorted_task_instances =
                 sorter.sort_instances(cache_entry.task_instances.clone().into_values());
 
+            let mut url = self
+                .airflow_api
+                .as_ref()
+                .url
+                .join("/dags/rollout_ic_os_to_mainnet_subnets/grid")
+                .unwrap();
+            url.query_pairs_mut()
+                .append_pair("dag_run_id", &dag_run.dag_run_id);
+
             let mut rollout = Rollout::new(
                 dag_run.dag_run_id.to_string(),
+                url.to_string(),
                 dag_run.note.clone(),
                 dag_run.logical_date,
                 dag_run.last_scheduling_decision,
