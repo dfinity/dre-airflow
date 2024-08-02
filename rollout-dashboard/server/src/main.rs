@@ -1,19 +1,26 @@
+use async_stream::try_stream;
 use axum::http::StatusCode;
+use axum::response::sse::Event;
+use axum::response::Sse;
 use axum::Json;
 use axum::{routing::get, Router};
 use chrono::{DateTime, Utc};
-use log::{error, info};
+use futures::stream::Stream;
+use log::{debug, error, info};
 use reqwest::Url;
+use serde::Serialize;
 use serde_json::from_str;
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::env;
 use std::error::Error;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::watch;
+use tokio::sync::watch::{self, Sender};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use tokio::{select, spawn};
@@ -36,13 +43,17 @@ type CurrentRolloutStatus = Result<VecDeque<Rollout>, (StatusCode, String)>;
 struct Server {
     rollout_api: Arc<RolloutApi>,
     last_rollout_data: Arc<Mutex<CurrentRolloutStatus>>,
+    stream_tx: Sender<CurrentRolloutStatus>,
 }
 
 impl Server {
     fn new(rollout_api: Arc<RolloutApi>) -> Self {
+        let init = Err((StatusCode::NO_CONTENT, "".to_string()));
+        let (stream_tx, _stream_rx) = watch::channel::<CurrentRolloutStatus>(init.clone());
         Self {
             rollout_api,
-            last_rollout_data: Arc::new(Mutex::new(Err((StatusCode::NO_CONTENT, "".to_string())))),
+            last_rollout_data: Arc::new(Mutex::new(init)),
+            stream_tx,
         }
     }
     async fn fetch_rollout_data(
@@ -122,6 +133,8 @@ impl Server {
                 _ignored = &mut cancel => break,
             };
 
+            let _ = self.stream_tx.send(data.clone());
+
             let mut container = self.last_rollout_data.lock().await;
             *container = data;
             drop(container);
@@ -140,6 +153,49 @@ impl Server {
             Ok(rollouts) => Ok(Json(rollouts)),
             Err(e) => Err(e),
         }
+    }
+    fn produce_rollouts_sse_stream(&self) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+        debug!(target: "sse", "New client connected.");
+
+        struct DisconnectionGuard {}
+
+        impl Drop for DisconnectionGuard {
+            fn drop(&mut self) {
+                debug!(target: "sse", "Client disconnected.");
+            }
+        }
+
+        #[derive(Serialize)]
+        struct SseResponse {
+            rollouts: VecDeque<Rollout>,
+            error: Option<(u16, String)>,
+        }
+
+        let mut stream_rx = self.stream_tx.subscribe();
+        let stream = try_stream! {
+            let guard = DisconnectionGuard{};
+            loop {
+                let current_rollout_status = &stream_rx.borrow_and_update().clone();
+                let mfk = current_rollout_status.clone();
+                let data_to_serialize = match mfk {
+                    Ok(rollouts) => serde_json::to_string(&SseResponse{rollouts, error: None}),
+                    Err(e) => serde_json::to_string(&SseResponse{rollouts: VecDeque::new(), error: Some((e.0.as_u16(), e.1))}),
+                }.unwrap();
+                let event = Event::default().data(data_to_serialize);
+                yield event;
+                if stream_rx.changed().await.is_err() {
+                    debug!(target: "sse", "No more transmissions.  Stopping client SSE streaming.");
+                    break;
+                }
+            }
+            drop(guard);
+        };
+
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keepalive"),
+        )
     }
 }
 
@@ -173,9 +229,15 @@ async fn main() -> ExitCode {
     let (stop_serve_tx, mut stop_serve_rx) = watch::channel(());
     let (finish_loop_tx, mut finish_loop_rx) = watch::channel(());
 
-    let rollouts_handler = move || async move { server.get_rollout_data().await };
+    let server_for_rollouts_handler = server.clone();
+    let server_for_sse_handler = server.clone();
+    let rollouts_handler =
+        move || async move { server_for_rollouts_handler.get_rollout_data().await };
+    let rollouts_sse_handler =
+        move || async move { server_for_sse_handler.produce_rollouts_sse_stream() };
     let mut tree = Router::new();
     tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
+    tree = tree.route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
