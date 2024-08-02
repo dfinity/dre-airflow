@@ -61,6 +61,7 @@ export type RolloutConfiguration = {
 };
 export type Rollout = {
     name: String;
+    url?: string;
     note?: String;
     conf: RolloutConfiguration;
     state: keyof typeof rollout_states;
