@@ -2,6 +2,7 @@
 
 This repository contains:
 
+* [The rollout dashboard](rollout-dashboard/README.md).
 * Airflow content artifacts (DAGs, workflows, sensors and operators).
 * [A content syncer container](./airflow-content-syncer/) to help deliver these extensions.
 * [A customized Airflow container](./airflow-customized/) to enable enhanced Airflow

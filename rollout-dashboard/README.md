@@ -10,6 +10,11 @@ easy-to-use form.  In production, it is composed of two distinct pieces:
    and displays the data returned by the backend.  This collection of
    files is also served by the backend.
 
+To upgrade the dashboard in production,
+[consult the relevant document](https://dfinity-lab.gitlab.io/private/k8s/k8s/#/bases/apps/rollout-dashboard/).
+
+[[TOC]]
+
 ## Setting up a development environment
 
 Make sure you have set up Airflow on the root of this repository with
