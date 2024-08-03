@@ -5,6 +5,44 @@
     import { type Batch, batchStateName, batchStateIcon } from "./types";
     export let batch_num: String;
     export let batch: Batch;
+
+    function selectTextOnFocus(node: HTMLDivElement) {
+        const handleFocus = (event: Event) => {
+            function selectText(element: HTMLDivElement) {
+                if (window.getSelection != null) {
+                    var range = document.createRange();
+                    range.selectNode(element);
+                    var selection = window.getSelection();
+                    if (selection != null) {
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                }
+            }
+            node && selectText(node);
+        };
+        const handleDeFocus = (event: Event) => {
+            function clearSelection() {
+                if (window.getSelection != null) {
+                    var selection = window.getSelection();
+                    if (selection !== null) {
+                        selection.removeAllRanges();
+                    }
+                }
+            }
+            node && clearSelection();
+        };
+
+        node.addEventListener("focus", handleFocus);
+        node.addEventListener("focusout", handleDeFocus);
+
+        return {
+            destroy() {
+                node.removeEventListener("focus", handleFocus);
+                node.removeEventListener("focusout", handleDeFocus);
+            },
+        };
+    }
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">
@@ -18,9 +56,15 @@
                             />{subnet.comment}{/if}</span
                     >
                 </div>
-                <span
+                <div
                     class="subnet_id"
-                    use:copy={subnet.subnet_id}
+                    role="button"
+                    tabindex="0"
+                    use:copy={{
+                        text: subnet.subnet_id,
+                        events: ["click"],
+                    }}
+                    use:selectTextOnFocus
                     on:svelte-copy={(event) =>
                         toast.push("Copied subnet ID to clipboard")}
                 >
@@ -34,11 +78,14 @@
                         <path
                             d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
                         />
-                    </svg>{subnet.subnet_id.substring(0, 5)}
-                </span>
-                <span
+                    </svg>{subnet.subnet_id}
+                </div>
+                <div
                     class="git_revision"
+                    role="button"
+                    tabindex="0"
                     use:copy={subnet.git_revision}
+                    use:selectTextOnFocus
                     on:svelte-copy={(event) =>
                         toast.push("Copied git revision to clipboard")}
                 >
@@ -52,8 +99,8 @@
                         <path
                             d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
                         />
-                    </svg>{subnet.git_revision}</span
-                >
+                    </svg>{subnet.git_revision}
+                </div>
             </li>
         </ul>
     {/each}
@@ -112,6 +159,10 @@
     }
     .subnet_id {
         display: block;
+        max-width: 3em;
+        overflow-x: hidden;
+        text-wrap: nowrap;
+        text-overflow: hidden;
         font-family: monospace;
         font-size: 120%;
     }
