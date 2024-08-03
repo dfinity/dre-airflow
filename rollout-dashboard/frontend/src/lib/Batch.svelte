@@ -18,9 +18,7 @@
                 </div>
                 <span class="subnet_id">{subnet.subnet_id.substring(0, 5)}</span
                 >
-                <span class="git_revision"
-                    >{subnet.git_revision.substring(0, 8)}</span
-                >
+                <span class="git_revision">{subnet.git_revision}</span>
             </li>
         </ul>
     {/each}
@@ -69,17 +67,27 @@
         list-style-type: none;
     }
     li.subnet {
+        display: grid;
+        width: 100%;
+        justify-items: stretch;
         padding-left: 0;
         margin-left: 0;
+        grid-template-columns: min-content 1fr min-content;
+        column-gap: 0.6em;
     }
     .subnet_id {
-        width: 4rem;
+        max-width: 4rem;
         display: inline-block;
         font-family: monospace;
         font-size: 120%;
     }
     .git_revision {
         color: #999;
+        max-width: 5em;
+        text-overflow: ellipsis;
+        overflow-x: hidden;
+        font-family: monospace;
+        font-size: 120%;
     }
     .start_time {
         text-align: right;
