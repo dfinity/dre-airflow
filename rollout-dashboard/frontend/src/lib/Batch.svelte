@@ -1,6 +1,7 @@
 <script lang="ts">
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
+    import { toast } from "@zerodevx/svelte-toast";
     import { type Batch, batchStateName, batchStateIcon } from "./types";
     export let batch_num: String;
     export let batch: Batch;
@@ -17,11 +18,41 @@
                             />{subnet.comment}{/if}</span
                     >
                 </div>
-                <span class="subnet_id" use:copy={subnet.subnet_id}
-                    >{subnet.subnet_id.substring(0, 5)}</span
+                <span
+                    class="subnet_id"
+                    use:copy={subnet.subnet_id}
+                    on:svelte-copy={(event) =>
+                        toast.push("Copied subnet ID to clipboard")}
                 >
-                <span class="git_revision" use:copy={subnet.git_revision}
-                    >{subnet.git_revision}</span
+                    <svg
+                        class="w-3 h-3 me-1.5"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="currentColor"
+                        viewBox="0 0 18 20"
+                    >
+                        <path
+                            d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
+                        />
+                    </svg>{subnet.subnet_id.substring(0, 5)}
+                </span>
+                <span
+                    class="git_revision"
+                    use:copy={subnet.git_revision}
+                    on:svelte-copy={(event) =>
+                        toast.push("Copied git revision to clipboard")}
+                >
+                    <svg
+                        class="w-3 h-3 me-1.5"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="currentColor"
+                        viewBox="0 0 18 20"
+                    >
+                        <path
+                            d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
+                        />
+                    </svg>{subnet.git_revision}</span
                 >
             </li>
         </ul>
@@ -80,18 +111,39 @@
         column-gap: 0.6em;
     }
     .subnet_id {
-        max-width: 4rem;
-        display: inline-block;
+        display: block;
         font-family: monospace;
         font-size: 120%;
     }
     .git_revision {
+        display: block;
         color: #999;
         max-width: 5em;
         text-overflow: ellipsis;
         overflow-x: hidden;
         font-family: monospace;
         font-size: 120%;
+        text-align: right;
+    }
+    .subnet_id,
+    .git_revision {
+        cursor: copy;
+    }
+    .subnet_id svg,
+    .git_revision svg {
+        display: none;
+    }
+    .subnet_id:hover svg {
+        display: block;
+        position: absolute;
+        margin-left: 3.5em;
+        margin-top: 0.35em;
+    }
+    .git_revision:hover svg {
+        display: block;
+        position: absolute;
+        margin-left: -1em;
+        margin-top: 0.35em;
     }
     .start_time {
         text-align: right;

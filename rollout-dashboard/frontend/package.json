@@ -12,6 +12,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.1.1",
     "@tsconfig/svelte": "^5.0.4",
+    "@zerodevx/svelte-toast": "^0.9.5",
     "autoprefixer": "^10.4.19",
     "flowbite": "^2.4.1",
     "flowbite-svelte": "^0.46.15",
