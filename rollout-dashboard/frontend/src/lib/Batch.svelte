@@ -1,5 +1,6 @@
 <script lang="ts">
     import Time from "svelte-time";
+    import { copy } from "svelte-copy";
     import { type Batch, batchStateName, batchStateIcon } from "./types";
     export let batch_num: String;
     export let batch: Batch;
@@ -16,9 +17,12 @@
                             />{subnet.comment}{/if}</span
                     >
                 </div>
-                <span class="subnet_id">{subnet.subnet_id.substring(0, 5)}</span
+                <span class="subnet_id" use:copy={subnet.subnet_id}
+                    >{subnet.subnet_id.substring(0, 5)}</span
                 >
-                <span class="git_revision">{subnet.git_revision}</span>
+                <span class="git_revision" use:copy={subnet.git_revision}
+                    >{subnet.git_revision}</span
+                >
             </li>
         </ul>
     {/each}

@@ -27,8 +27,8 @@ export function batchStateName(state: keyof typeof subnet_rollout_states): Strin
     return subnet_rollout_states[state].name;
 }
 export type Subnet = {
-    subnet_id: String;
-    git_revision: String;
+    subnet_id: string;
+    git_revision: string;
     state: keyof typeof subnet_rollout_states;
     comment: String;
 };
