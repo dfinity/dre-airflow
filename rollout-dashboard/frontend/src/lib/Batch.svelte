@@ -58,7 +58,7 @@
                 </div>
                 <div
                     class="subnet_id"
-                    role="button"
+                    role="textbox"
                     tabindex="0"
                     use:copy={{
                         text: subnet.subnet_id,
@@ -82,7 +82,7 @@
                 </div>
                 <div
                     class="git_revision"
-                    role="button"
+                    role="textbox"
                     tabindex="0"
                     use:copy={subnet.git_revision}
                     use:selectTextOnFocus
