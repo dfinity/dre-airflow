@@ -5,6 +5,7 @@
   import Rollout from "./lib/Rollout.svelte";
   import { writable } from "svelte/store";
   import { ButtonGroup, Button } from "flowbite-svelte";
+  import { SvelteToast } from "@zerodevx/svelte-toast";
 
   let my_rollout_query = writable({
     rollouts: [],
@@ -14,6 +15,8 @@
     my_rollout_query = rollout_query();
   });
 </script>
+
+<SvelteToast />
 
 <nav>
   <ButtonGroup class="*:!ring-primary-700">

@@ -1,8 +1,48 @@
 <script lang="ts">
     import Time from "svelte-time";
+    import { copy } from "svelte-copy";
+    import { toast } from "@zerodevx/svelte-toast";
     import { type Batch, batchStateName, batchStateIcon } from "./types";
     export let batch_num: String;
     export let batch: Batch;
+
+    function selectTextOnFocus(node: HTMLDivElement) {
+        const handleFocus = (event: Event) => {
+            function selectText(element: HTMLDivElement) {
+                if (window.getSelection != null) {
+                    var range = document.createRange();
+                    range.selectNode(element);
+                    var selection = window.getSelection();
+                    if (selection != null) {
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                }
+            }
+            node && selectText(node);
+        };
+        const handleDeFocus = (event: Event) => {
+            function clearSelection() {
+                if (window.getSelection != null) {
+                    var selection = window.getSelection();
+                    if (selection !== null) {
+                        selection.removeAllRanges();
+                    }
+                }
+            }
+            node && clearSelection();
+        };
+
+        node.addEventListener("focus", handleFocus);
+        node.addEventListener("focusout", handleDeFocus);
+
+        return {
+            destroy() {
+                node.removeEventListener("focus", handleFocus);
+                node.removeEventListener("focusout", handleDeFocus);
+            },
+        };
+    }
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">
@@ -16,11 +56,51 @@
                             />{subnet.comment}{/if}</span
                     >
                 </div>
-                <span class="subnet_id">{subnet.subnet_id.substring(0, 5)}</span
+                <div
+                    class="subnet_id"
+                    role="link"
+                    tabindex="0"
+                    use:copy={{
+                        text: subnet.subnet_id,
+                        events: ["click"],
+                    }}
+                    use:selectTextOnFocus
+                    on:svelte-copy={(event) =>
+                        toast.push("Copied subnet ID to clipboard")}
                 >
-                <span class="git_revision"
-                    >{subnet.git_revision.substring(0, 8)}</span
+                    <svg
+                        class="w-3 h-3 me-1.5"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="currentColor"
+                        viewBox="0 0 18 20"
+                    >
+                        <path
+                            d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
+                        />
+                    </svg>{subnet.subnet_id}
+                </div>
+                <div
+                    class="git_revision"
+                    role="link"
+                    tabindex="0"
+                    use:copy={subnet.git_revision}
+                    use:selectTextOnFocus
+                    on:svelte-copy={(event) =>
+                        toast.push("Copied git revision to clipboard")}
                 >
+                    <svg
+                        class="w-3 h-3 me-1.5"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="currentColor"
+                        viewBox="0 0 18 20"
+                    >
+                        <path
+                            d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
+                        />
+                    </svg>{subnet.git_revision}
+                </div>
             </li>
         </ul>
     {/each}
@@ -55,6 +135,11 @@
 </li>
 
 <style>
+    li.batch {
+        background-color: #e4e4e4;
+        padding: 0.6em;
+        flex-grow: 1;
+    }
     ul {
         display: flex;
         flex-direction: row;
@@ -63,22 +148,53 @@
         padding: 0;
         list-style-type: none;
     }
-    li.batch {
-        background-color: #e4e4e4;
-        padding: 0.6em;
-    }
     li.subnet {
+        display: grid;
+        width: 100%;
+        justify-items: stretch;
         padding-left: 0;
         margin-left: 0;
+        grid-template-columns: min-content 1fr min-content;
+        column-gap: 0.6em;
     }
     .subnet_id {
-        width: 4rem;
-        display: inline-block;
+        display: block;
+        max-width: 3em;
+        overflow-x: hidden;
+        text-wrap: nowrap;
+        text-overflow: hidden;
         font-family: monospace;
         font-size: 120%;
     }
     .git_revision {
+        display: block;
         color: #999;
+        max-width: 5em;
+        text-overflow: ellipsis;
+        overflow-x: hidden;
+        font-family: monospace;
+        font-size: 120%;
+        text-align: right;
+    }
+    .subnet_id,
+    .git_revision {
+        cursor: copy;
+    }
+    .subnet_id svg,
+    .git_revision svg {
+        display: none;
+    }
+    .subnet_id:hover svg {
+        display: block;
+        position: absolute;
+        margin-left: 3.5em;
+        margin-top: 0.35em;
+    }
+    .git_revision:hover svg {
+        display: block;
+        position: absolute;
+        margin-left: -1em;
+        margin-top: 0.35em;
     }
     .start_time {
         text-align: right;
