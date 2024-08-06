@@ -31,6 +31,7 @@ export type Subnet = {
     git_revision: string;
     state: keyof typeof subnet_rollout_states;
     comment: String;
+    display_url: string;
 };
 export type Batch = {
     subnets: Subnet[];
@@ -61,7 +62,7 @@ export type RolloutConfiguration = {
 };
 export type Rollout = {
     name: String;
-    url?: string;
+    display_url: string;
     note?: String;
     conf: RolloutConfiguration;
     state: keyof typeof rollout_states;
