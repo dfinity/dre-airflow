@@ -49,13 +49,22 @@
     {#each batch.subnets as subnet}
         <ul>
             <li class="subnet">
-                <div class="subnet_state_icon tooltip">
-                    {batchStateIcon(subnet.state)}<span
-                        class="subnet_state tooltiptext"
-                        >{batchStateName(subnet.state)}{#if subnet.comment}<br
-                            />{subnet.comment}{/if}</span
-                    >
-                </div>
+                <a
+                    rel="external"
+                    href={subnet.display_url || ""}
+                    target="_blank"
+                    data-sveltekit-preload-data="off"
+                >
+                    <div class="subnet_state_icon tooltip">
+                        {batchStateIcon(subnet.state)}<span
+                            class="subnet_state tooltiptext"
+                            >{batchStateName(
+                                subnet.state,
+                            )}{#if subnet.comment}<br
+                                />{subnet.comment}{/if}</span
+                        >
+                    </div></a
+                >
                 <div
                     class="subnet_id"
                     role="link"

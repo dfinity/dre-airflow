@@ -21,6 +21,8 @@ use urlencoding::decode;
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
+/// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
+const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 /// Default timeout per request to Airflow.
 const PER_REQUEST_TIMEOUT: u64 = 15;
 
@@ -408,6 +410,7 @@ async fn _paged_get<'a, T: Deserialize<'a> + Pageable + Default, G, Fut>(
     url: String,
     order_by: Option<String>,
     paging_parameters: Option<PagingParameters>,
+    max_batch_size: usize,
     mut getter: G,
 ) -> Result<T, AirflowError>
 where
@@ -421,7 +424,7 @@ where
     };
     loop {
         let batch_limit = match &paging_parameters {
-            Some(p) => min(p.limit, MAX_BATCH_SIZE),
+            Some(p) => min(p.limit, max_batch_size),
             None => 0,
         };
         // Let's handle our parameters.
@@ -717,6 +720,7 @@ impl AirflowClient {
             url,
             Some("-execution_date".into()),
             Some(PagingParameters { limit, offset }),
+            MAX_BATCH_SIZE,
             |x| self._get_logged_in(x),
         )
         .await
@@ -735,18 +739,26 @@ impl AirflowClient {
         let mut url = format!("dags/{}/dagRuns/{}/taskInstances", dag_id, dag_run_id);
         url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
         url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
-        _paged_get(url, None, Some(PagingParameters { limit, offset }), |x| {
-            self._get_logged_in(x)
-        })
+        _paged_get(
+            url,
+            None,
+            Some(PagingParameters { limit, offset }),
+            MAX_TASK_INSTANCE_BATCH_SIZE,
+            |x| self._get_logged_in(x),
+        )
         .await
     }
 
     /// Return TaskInstances for a DAG run.
     /// Mapped tasks are not returned here.
     pub async fn tasks(&self, dag_id: &str) -> Result<TasksResponse, AirflowError> {
-        _paged_get(format!("dags/{}/tasks", dag_id), None, None, |x| {
-            self._get_logged_in(x)
-        })
+        _paged_get(
+            format!("dags/{}/tasks", dag_id),
+            None,
+            None,
+            MAX_BATCH_SIZE,
+            |x| self._get_logged_in(x),
+        )
         .await
     }
 
@@ -768,6 +780,7 @@ impl AirflowClient {
             ),
             None,
             Some(PagingParameters { limit, offset }),
+            MAX_BATCH_SIZE,
             |x| self._get_logged_in(x),
         )
         .await
@@ -952,6 +965,7 @@ mod tests {
                 limit: 1,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -969,6 +983,7 @@ mod tests {
                 limit: 1,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -983,6 +998,7 @@ mod tests {
                 limit: 2,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -996,6 +1012,7 @@ mod tests {
                 limit: 2,
                 offset: 3,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -1009,6 +1026,7 @@ mod tests {
                 limit: 2,
                 offset: 998,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -1022,6 +1040,7 @@ mod tests {
                 limit: 12,
                 offset: 998,
             }),
+            MAX_BATCH_SIZE,
             getter,
         )
         .await
@@ -1043,6 +1062,7 @@ mod tests {
                 limit: 1,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             c,
         )
         .await
@@ -1063,6 +1083,7 @@ mod tests {
                 limit: 4,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             c,
         )
         .await
@@ -1081,6 +1102,7 @@ mod tests {
                 limit: 20,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             c,
         )
         .await
@@ -1108,6 +1130,7 @@ mod tests {
                 limit: 1000,
                 offset: 0,
             }),
+            MAX_BATCH_SIZE,
             c,
         )
         .await

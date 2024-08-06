@@ -48,7 +48,10 @@ pub struct Subnet {
     pub subnet_id: String,
     pub git_revision: String,
     pub state: SubnetRolloutState,
+    /// Shows a comment for the subnet if available, else empty string.
     pub comment: String,
+    /// Shows a display URL if available, else empty string.
+    pub display_url: String,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -69,68 +72,67 @@ where
     }
 }
 
-fn make_state_comment(task_instance: &TaskInstancesResponseItem) -> String {
-    format!(
-        "Task {}{} {}",
-        task_instance.task_id,
-        format_some(task_instance.map_index, ".", ""),
-        format_some(
-            task_instance.state.clone(),
-            "in state ",
-            "has no known state"
-        ),
-    )
-}
-
 impl Batch {
     fn set_min_subnet_state(
         &mut self,
         state: SubnetRolloutState,
         task_instance: &TaskInstancesResponseItem,
+        base_url: &reqwest::Url,
     ) -> SubnetRolloutState {
-        match task_instance.map_index {
-            None => {
-                for subnet in self.subnets.iter_mut() {
-                    let new_state = state.clone();
-                    if new_state < subnet.state {
-                        subnet.comment = make_state_comment(task_instance);
-                        trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
-                        subnet.state = new_state;
-                    }
-                }
-            }
-            Some(index) => {
-                let new_state = state.clone();
-                if new_state < self.subnets[index].state {
-                    self.subnets[index].comment = make_state_comment(task_instance);
-                    trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, self.subnets[index].state, new_state, self.subnets[index].comment);
-                    self.subnets[index].state = new_state;
-                }
-            }
-        }
-        state
+        self.set_subnet_state(state, task_instance, base_url, true)
     }
     fn set_specific_subnet_state(
         &mut self,
         state: SubnetRolloutState,
         task_instance: &TaskInstancesResponseItem,
+        base_url: &reqwest::Url,
     ) -> SubnetRolloutState {
-        match task_instance.map_index {
-            None => {
-                for subnet in self.subnets.iter_mut() {
-                    if state != subnet.state {
-                        subnet.comment = make_state_comment(task_instance);
-                        trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, state, subnet.comment);
-                        subnet.state = state.clone();
-                    }
-                }
-            }
-            Some(index) => {
-                if state != self.subnets[index].state {
-                    self.subnets[index].comment = make_state_comment(task_instance);
-                    trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, self.subnets[index].state, state, self.subnets[index].comment);
-                    self.subnets[index].state = state.clone();
-                }
+        self.set_subnet_state(state, task_instance, base_url, false)
+    }
+    fn set_subnet_state(
+        &mut self,
+        state: SubnetRolloutState,
+        task_instance: &TaskInstancesResponseItem,
+        base_url: &reqwest::Url,
+        only_decrease: bool,
+    ) -> SubnetRolloutState {
+        for subnet in match task_instance.map_index {
+            None => self.subnets.iter_mut(),
+            Some(index) => self.subnets[index..=index].iter_mut(),
+        } {
+            let new_state = state.clone();
+            if (only_decrease && new_state < subnet.state)
+                || (!only_decrease && new_state != subnet.state)
+            {
+                subnet.comment = format!(
+                    "Task {}{} {}",
+                    task_instance.task_id,
+                    format_some(task_instance.map_index, ".", ""),
+                    format_some(
+                        task_instance.state.clone(),
+                        "in state ",
+                        "has no known state"
+                    ),
+                );
+                subnet.display_url = {
+                    let mut url = base_url
+                        .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
+                        .unwrap();
+                    url.query_pairs_mut()
+                        .append_pair("dag_run_id", &task_instance.dag_run_id);
+                    url.query_pairs_mut()
+                        .append_pair("task_id", &task_instance.task_id);
+                    url.query_pairs_mut().append_pair("tab", "logs");
+                    if let Some(idx) = task_instance.map_index {
+                        url.query_pairs_mut()
+                            .append_pair("map_index", format!("{}", idx).as_str());
+                    };
+                    url.to_string()
+                };
+                trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+                subnet.state = new_state;
+            } else {
+                trace!(target: "subnet_state", "{} {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
             }
         }
         state
@@ -153,7 +155,8 @@ pub enum RolloutState {
 pub struct Rollout {
     /// name is unique, enforced by Airflow.
     pub name: String,
-    pub url: String,
+    /// Links to the rollout in Airflow.
+    pub display_url: String,
     pub note: Option<String>,
     pub state: RolloutState,
     pub dispatch_time: DateTime<Utc>,
@@ -165,7 +168,7 @@ pub struct Rollout {
 impl Rollout {
     fn new(
         name: String,
-        url: String,
+        display_url: String,
         note: Option<String>,
         dispatch_time: DateTime<Utc>,
         last_scheduling_decision: Option<DateTime<Utc>>,
@@ -173,7 +176,7 @@ impl Rollout {
     ) -> Self {
         Self {
             name,
-            url,
+            display_url,
             note,
             state: RolloutState::Complete,
             dispatch_time,
@@ -360,6 +363,7 @@ impl RolloutPlan {
                         git_revision: capped[2].to_string(),
                         state: SubnetRolloutState::Unknown,
                         comment: "".to_string(),
+                        display_url: "".to_string(),
                     },
                     None => return Err(RolloutPlanParseError::InvalidSubnet(subnet.clone())),
                 });
@@ -546,18 +550,20 @@ impl RolloutApi {
             let sorted_task_instances =
                 sorter.sort_instances(cache_entry.task_instances.clone().into_values());
 
-            let mut url = self
-                .airflow_api
-                .as_ref()
-                .url
-                .join("/dags/rollout_ic_os_to_mainnet_subnets/grid")
-                .unwrap();
-            url.query_pairs_mut()
-                .append_pair("dag_run_id", &dag_run.dag_run_id);
-
             let mut rollout = Rollout::new(
                 dag_run.dag_run_id.to_string(),
-                url.to_string(),
+                {
+                    let mut display_url = self
+                        .airflow_api
+                        .as_ref()
+                        .url
+                        .join(format!("/dags/{}/grid", dag_run.dag_id).as_str())
+                        .unwrap();
+                    display_url
+                        .query_pairs_mut()
+                        .append_pair("dag_run_id", dag_run.dag_run_id.as_str());
+                    display_url.to_string()
+                },
                 dag_run.note.clone(),
                 dag_run.logical_date,
                 dag_run.last_scheduling_decision,
@@ -652,6 +658,7 @@ impl RolloutApi {
                 } else if let Some(captured) =
                     BatchIdentificationRe.captures(task_instance.task_id.as_str())
                 {
+                    trace!(target: "subnet_state", "processing {} {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                     let (batch, task_name) = (
                         // We get away with unwrap() here because we know we captured an integer.
                         match rollout
@@ -659,19 +666,30 @@ impl RolloutApi {
                             .get_mut(&usize::from_str(&captured[1]).unwrap())
                         {
                             Some(batch) => batch,
-                            None => continue,
+                            None => {
+                                trace!(target: "subnet_state", "no corresponding batch, continuing");
+                                continue;
+                            }
                         },
                         &captured[2],
                     );
 
                     macro_rules! trans_min {
                         ($input:expr) => {
-                            batch.set_min_subnet_state($input, &task_instance);
+                            batch.set_min_subnet_state(
+                                $input,
+                                &task_instance,
+                                &self.airflow_api.as_ref().url,
+                            );
                         };
                     }
                     macro_rules! trans_exact {
                         ($input:expr) => {
-                            batch.set_specific_subnet_state($input, &task_instance);
+                            batch.set_specific_subnet_state(
+                                $input,
+                                &task_instance,
+                                &self.airflow_api.as_ref().url,
+                            );
                         };
                     }
 
@@ -764,7 +782,9 @@ impl RolloutApi {
                                     trans_exact!(SubnetRolloutState::Complete);
                                     batch.end_time = task_instance.end_date;
                                 }
-                                &_ => (),
+                                &_ => {
+                                    trace!(target: "subnet_state", "{} {} {:?} ignoring task in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                }
                             },
                         },
                     }
