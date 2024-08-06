@@ -34,32 +34,6 @@ nav {
   row-gap: 2rem;
 }
 
-.tooltip {
-  position: relative;
-  display: inline-block;
-  cursor: pointer;
-}
-
-.tooltip .tooltiptext {
-  display: none;
-  visibility: hidden;
-  min-width: 250px;
-  background-color: black;
-  color: #fff;
-  text-align: center;
-  border-radius: 6px;
-  padding: 5px 0;
-
-  /* Position the tooltip */
-  position: absolute;
-  z-index: 1;
-}
-
-.tooltip:hover .tooltiptext {
-  display: inline-block;
-  visibility: visible;
-}
-
 time {
   border-bottom: 1px dotted #000;
   cursor: help;

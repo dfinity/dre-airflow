@@ -32,7 +32,7 @@
             {#if rollout.conf.simulate}<i class="simulated">(simulated)</i>{/if}
         </div>
         <div class="state_icon tooltip">
-            {rolloutStateIcon(rollout.state)}<span class="state tooltiptext"
+            {rolloutStateIcon(rollout.state)}<span class="state"
                 >{rolloutStateName(rollout.state)}</span
             >
         </div>

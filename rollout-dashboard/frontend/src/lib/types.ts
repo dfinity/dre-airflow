@@ -26,6 +26,13 @@ export function batchStateIcon(state: keyof typeof subnet_rollout_states): Strin
 export function batchStateName(state: keyof typeof subnet_rollout_states): String {
     return subnet_rollout_states[state].name;
 }
+export function batchStateComment(subnet: Subnet): string {
+    let s = subnet_rollout_states[subnet.state].name;
+    if (subnet.comment) {
+        s = s + ": " + subnet.comment
+    }
+    return s
+}
 export type Subnet = {
     subnet_id: string;
     git_revision: string;
