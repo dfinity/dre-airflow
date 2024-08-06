@@ -139,7 +139,6 @@ impl Server {
             };
 
             if changed {
-                println!("changed");
                 let _ = self.stream_tx.send(data.clone());
 
                 let mut container = self.last_rollout_data.lock().await;
