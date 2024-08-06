@@ -59,9 +59,9 @@ impl Server {
     async fn fetch_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<VecDeque<Rollout>, (StatusCode, String)> {
+    ) -> Result<(VecDeque<Rollout>, bool), (StatusCode, String)> {
         match self.rollout_api.get_rollout_data(max_rollouts).await {
-            Ok(rollouts) => Ok(rollouts.into()),
+            Ok((rollouts, updated)) => Ok((rollouts.into(), updated)),
             Err(e) => {
                 let res = match e {
                     RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
@@ -108,16 +108,21 @@ impl Server {
         loop {
             let loop_start_time: DateTime<Utc> = Utc::now();
 
+            let mut changed = true;
             let data = select! {
                 d = self.fetch_rollout_data(max_rollouts) => {
                     match d {
-                        Ok(new_rollouts) => {
+                        Ok((new_rollouts, updated)) => {
+                            let loop_delta_time = Utc::now() - loop_start_time;
+                            info!(target: "update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
+                            changed = updated;
                             if errored {
                                 info!(target: "update_loop", "Successfully processed rollout data again after temporary error");
-                                errored = false
-                            };
-                            let loop_delta_time = Utc::now() - loop_start_time;
-                            info!(target: "update_loop", "After {}, obtained {} rollouts from Airflow", loop_delta_time, new_rollouts.len());
+                                // Clear error flag.
+                                errored = false;
+                                // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
+                                changed = true;
+                            }
                             Ok(new_rollouts)
                         }
                         Err(res) => {
@@ -133,11 +138,14 @@ impl Server {
                 _ignored = &mut cancel => break,
             };
 
-            let _ = self.stream_tx.send(data.clone());
+            if changed {
+                println!("changed");
+                let _ = self.stream_tx.send(data.clone());
 
-            let mut container = self.last_rollout_data.lock().await;
-            *container = data;
-            drop(container);
+                let mut container = self.last_rollout_data.lock().await;
+                *container = data;
+                drop(container);
+            }
 
             select! {
                 _ignored1 = sleep(Duration::from_secs(refresh_interval)) => (),

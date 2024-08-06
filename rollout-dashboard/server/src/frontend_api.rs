@@ -444,10 +444,14 @@ impl RolloutApi {
 impl RolloutApi {
     /// Retrieve all rollout data, using a cache to avoid
     /// re-fetching task instances not updated since last time.
+    ///
+    /// Returns a tuple of the the rollout data and a flag
+    /// indicating if the rollout data was updated since
+    /// the last time.
     pub async fn get_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<Vec<Rollout>, RolloutDataGatherError> {
+    ) -> Result<(Vec<Rollout>, bool), RolloutDataGatherError> {
         let mut cache = self.cache.lock().await;
         let now = Utc::now();
         let last_update_time = cache.last_update_time;
@@ -835,6 +839,6 @@ impl RolloutApi {
         if any_rollout_updated {
             cache.last_update_time = Some(now);
         }
-        Ok(res)
+        Ok((res, any_rollout_updated))
     }
 }
