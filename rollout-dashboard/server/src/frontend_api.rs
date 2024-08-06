@@ -871,6 +871,8 @@ impl RolloutApi {
         }
 
         if meaningful_updates_to_any_rollout {
+            // Preserve the value for next loop so that we have a baseline
+            // of date/time to query data incrementally.
             cache.last_update_time = Some(now);
         }
         Ok((res, meaningful_updates_to_any_rollout))
