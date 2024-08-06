@@ -2,7 +2,7 @@
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
-    import { type Batch, batchStateName, batchStateIcon } from "./types";
+    import { type Batch, batchStateComment, batchStateIcon } from "./types";
     export let batch_num: String;
     export let batch: Batch;
 
@@ -54,15 +54,10 @@
                     href={subnet.display_url || ""}
                     target="_blank"
                     data-sveltekit-preload-data="off"
+                    title={batchStateComment(subnet)}
                 >
-                    <div class="subnet_state_icon tooltip">
-                        {batchStateIcon(subnet.state)}<span
-                            class="subnet_state tooltiptext"
-                            >{batchStateName(
-                                subnet.state,
-                            )}{#if subnet.comment}<br
-                                />{subnet.comment}{/if}</span
-                        >
+                    <div class="subnet_state_icon">
+                        {batchStateIcon(subnet.state)}
                     </div></a
                 >
                 <div
