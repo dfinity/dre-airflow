@@ -536,12 +536,12 @@ impl RolloutApi {
             // note that this has been updated.
             if cache_entry.note != dag_run.note {
                 meaningful_updates_to_any_rollout = true;
-                cache_entry.note = dag_run.note.clone();
+                cache_entry.note.clone_from(&dag_run.note);
             }
             // Same for the dispatch time.
             if cache_entry.dispatch_time != dag_run.logical_date {
                 meaningful_updates_to_any_rollout = true;
-                cache_entry.dispatch_time = dag_run.logical_date.clone();
+                cache_entry.dispatch_time = dag_run.logical_date;
             }
 
             let mut rollout = Rollout::new(
