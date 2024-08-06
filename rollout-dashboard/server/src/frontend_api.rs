@@ -1,5 +1,6 @@
 use crate::python;
 use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use log::{debug, error, trace};
 use regex::Regex;
@@ -161,7 +162,7 @@ pub struct Rollout {
     pub state: RolloutState,
     pub dispatch_time: DateTime<Utc>,
     pub last_scheduling_decision: Option<DateTime<Utc>>,
-    pub batches: HashMap<usize, Batch>,
+    pub batches: IndexMap<usize, Batch>,
     pub conf: HashMap<String, serde_json::Value>,
 }
 
@@ -181,7 +182,7 @@ impl Rollout {
             state: RolloutState::Complete,
             dispatch_time,
             last_scheduling_decision,
-            batches: HashMap::new(),
+            batches: IndexMap::new(),
             conf,
         }
     }
@@ -295,10 +296,10 @@ impl TaskInstanceTopologicalSorter {
 
 #[derive(Serialize, Debug)]
 struct RolloutPlan {
-    batches: HashMap<usize, Batch>,
+    batches: IndexMap<usize, Batch>,
 }
 
-type PythonFormattedRolloutPlan = HashMap<String, (String, Vec<String>)>;
+type PythonFormattedRolloutPlan = IndexMap<String, (String, Vec<String>)>;
 
 #[derive(Debug)]
 pub enum RolloutPlanParseError {
@@ -330,7 +331,7 @@ impl Display for RolloutPlanParseError {
 impl RolloutPlan {
     fn from_python_string(value: String) -> Result<Self, RolloutPlanParseError> {
         let mut res = RolloutPlan {
-            batches: HashMap::new(),
+            batches: IndexMap::new(),
         };
         let python_string_plan: PythonFormattedRolloutPlan = match python::from_str(value.as_str())
         {
@@ -500,6 +501,11 @@ impl RolloutApi {
             } else {
                 vec![]
             };
+
+            debug!(
+                target: "frontend_api", "Updated tasks {} Ended tasks {}",
+                updated_task_instances.len(), ended_task_instances.len(),
+            );
 
             if !updated_task_instances.is_empty() || !ended_task_instances.is_empty() {
                 any_rollout_updated = true;
