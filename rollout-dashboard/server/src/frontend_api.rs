@@ -339,7 +339,6 @@ impl RolloutPlan {
             Err(e) => return Err(RolloutPlanParseError::UndecipherablePython(e)),
         };
         for (batch_number_str, (start_time_str, subnets)) in python_string_plan.iter() {
-            println!("batch number {}", batch_number_str);
             let batch_number: usize = usize::from_str(batch_number_str)
                 .map_err(RolloutPlanParseError::BadBatchNumber)?
                 + 1;
@@ -502,6 +501,11 @@ impl RolloutApi {
             } else {
                 vec![]
             };
+
+            debug!(
+                target: "frontend_api", "Updated tasks {} Ended tasks {}",
+                updated_task_instances.len(), ended_task_instances.len(),
+            );
 
             if !updated_task_instances.is_empty() || !ended_task_instances.is_empty() {
                 any_rollout_updated = true;
