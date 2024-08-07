@@ -105,16 +105,6 @@ impl Batch {
             if (only_decrease && new_state < subnet.state)
                 || (!only_decrease && new_state != subnet.state)
             {
-                subnet.comment = format!(
-                    "Task {}{} {}",
-                    task_instance.task_id,
-                    format_some(task_instance.map_index, ".", ""),
-                    format_some(
-                        task_instance.state.clone(),
-                        "in state ",
-                        "has no known state"
-                    ),
-                );
                 subnet.display_url = {
                     let mut url = base_url
                         .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
@@ -131,10 +121,22 @@ impl Batch {
                     url.to_string()
                 };
                 trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
-                subnet.state = new_state;
+                subnet.state = new_state.clone();
             } else {
                 trace!(target: "subnet_state", "{} {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
             }
+            if new_state == subnet.state {
+                subnet.comment = format!(
+                    "Task {}{} {}",
+                    task_instance.task_id,
+                    format_some(task_instance.map_index, ".", ""),
+                    format_some(
+                        task_instance.state.clone(),
+                        "in state ",
+                        "has no known state"
+                    ),
+                )
+            };
         }
         state
     }
