@@ -2,7 +2,7 @@ use crate::python;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use log::{debug, error, trace};
+use log::{debug, trace, warn};
 use regex::Regex;
 use serde::Serialize;
 use std::cmp::min;
@@ -758,6 +758,8 @@ impl RolloutApi {
                         };
                     }
 
+                    // FIXME: perhaps we want to destructure both the task name
+                    // and the task state here.
                     match &task_instance.state {
                         None => {
                             if task_name == "collect_batch_subnets" {
@@ -798,6 +800,9 @@ impl RolloutApi {
                                     "create_proposal_if_none_exists" => {
                                         trans_min!(SubnetRolloutState::Proposing);
                                     }
+                                    "request_proposal_vote" => {
+                                        // We ignore this one for the purposes of rollout state setup.
+                                    }
                                     "wait_until_proposal_is_accepted" => {
                                         trans_min!(SubnetRolloutState::WaitingForElection);
                                     }
@@ -810,7 +815,9 @@ impl RolloutApi {
                                     "join" => {
                                         trans_min!(SubnetRolloutState::Complete);
                                     }
-                                    &_ => (),
+                                    &_ => {
+                                        warn!(target: "subnet_state", "{} do not know how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                    }
                                 }
                                 rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
                             }
@@ -843,6 +850,9 @@ impl RolloutApi {
                                 // it will require extra tests to ensure that invariants have
                                 // been preserved between this code (which works well) and
                                 // the future rewrite.
+                                "collect_batch_subnets" => {
+                                    trans_min!(SubnetRolloutState::Waiting);
+                                }
                                 "wait_until_start_time" => {
                                     batch.actual_start_time = match task_instance.end_date {
                                         None => batch.actual_start_time,
@@ -860,6 +870,9 @@ impl RolloutApi {
                                 "create_proposal_if_none_exists" => {
                                     trans_exact!(SubnetRolloutState::WaitingForElection);
                                 }
+                                "request_proposal_vote" => {
+                                    // We ignore this one for the purposes of rollout state setup.
+                                }
                                 "wait_until_proposal_is_accepted" => {
                                     trans_exact!(SubnetRolloutState::WaitingForAdoption);
                                 }
@@ -874,7 +887,7 @@ impl RolloutApi {
                                     batch.end_time = task_instance.end_date;
                                 }
                                 &_ => {
-                                    trace!(target: "subnet_state", "{} {} {:?} ignoring task in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                    warn!(target: "subnet_state", "{} do not know how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             },
                         },
@@ -902,7 +915,7 @@ impl RolloutApi {
                         }
                     }
                 } else {
-                    error!(target: "frontend_api", "Unknown task {}", task_instance.task_id)
+                    warn!(target: "frontend_api", "{} unknown task {}", task_instance.dag_run_id, task_instance.task_id)
                 }
             }
 
