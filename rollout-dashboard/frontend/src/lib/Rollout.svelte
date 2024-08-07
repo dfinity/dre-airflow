@@ -8,13 +8,18 @@
 
 <section class="rollout">
     <div class="general_info">
-        <div class="name">
-            <a
-                rel="external"
-                href={rollout.display_url}
-                target="_blank"
-                data-sveltekit-preload-data="off"
-                >{rollout.name}
+        <a
+            rel="external"
+            href={rollout.display_url}
+            target="_blank"
+            title={rolloutStateName(rollout.state)}
+            data-sveltekit-preload-data="off"
+        >
+            <span class="state_icon">
+                {rolloutStateIcon(rollout.state)}
+            </span>
+            <span class="name">
+                {rollout.name}
                 <svg
                     style="display: inline-block"
                     xmlns="http://www.w3.org/2000/svg"
@@ -27,15 +32,11 @@
                         d="M12 13a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v3.5a.5.5 0 0 0 1 0V3h9v9H8.5a.5.5 0 0 0 0 1zM9 6.5v3a.5.5 0 0 1-1 0V7.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 7H5.5a.5.5 0 0 1 0-1h3a.498.498 0 0 1 .5.497"
                         clip-rule="evenodd"
                     /></svg
-                ></a
-            >
-            {#if rollout.conf.simulate}<i class="simulated">(simulated)</i>{/if}
-        </div>
-        <div class="state_icon tooltip">
-            {rolloutStateIcon(rollout.state)}<span class="state"
-                >{rolloutStateName(rollout.state)}</span
-            >
-        </div>
+                >
+                {#if rollout.conf.simulate}<i class="simulated">(simulated)</i
+                    >{/if}
+            </span>
+        </a>
         <div class="times text-gray-500">
             Started <Time
                 live
@@ -108,13 +109,11 @@
         gap: 0.3em;
         flex-direction: row;
     }
-    .rollout .state_icon {
+    .rollout a {
         order: 0;
-        flex-grow: 0;
+        flex-grow: 1;
     }
     .rollout .name {
-        order: 1;
-        flex-grow: 1;
         font-weight: bold;
         text-align: left;
     }
@@ -123,6 +122,6 @@
         font-style: italic;
     }
     .rollout .times {
-        order: 2;
+        order: 1;
     }
 </style>

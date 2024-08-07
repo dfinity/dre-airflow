@@ -106,21 +106,6 @@ impl Batch {
             if (only_decrease && new_state < subnet.state)
                 || (!only_decrease && new_state != subnet.state)
             {
-                subnet.display_url = {
-                    let mut url = base_url
-                        .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
-                        .unwrap();
-                    url.query_pairs_mut()
-                        .append_pair("dag_run_id", &task_instance.dag_run_id);
-                    url.query_pairs_mut()
-                        .append_pair("task_id", &task_instance.task_id);
-                    url.query_pairs_mut().append_pair("tab", "logs");
-                    if let Some(idx) = task_instance.map_index {
-                        url.query_pairs_mut()
-                            .append_pair("map_index", format!("{}", idx).as_str());
-                    };
-                    url.to_string()
-                };
                 trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
                 subnet.state = new_state.clone();
             } else {
@@ -136,7 +121,22 @@ impl Batch {
                         "in state ",
                         "has no known state"
                     ),
-                )
+                );
+                subnet.display_url = {
+                    let mut url = base_url
+                        .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
+                        .unwrap();
+                    url.query_pairs_mut()
+                        .append_pair("dag_run_id", &task_instance.dag_run_id);
+                    url.query_pairs_mut()
+                        .append_pair("task_id", &task_instance.task_id);
+                    url.query_pairs_mut().append_pair("tab", "logs");
+                    if let Some(idx) = task_instance.map_index {
+                        url.query_pairs_mut()
+                            .append_pair("map_index", format!("{}", idx).as_str());
+                    };
+                    url.to_string()
+                };
             };
         }
         state
