@@ -179,9 +179,26 @@ impl Server {
         }
 
         let mut stream_rx = self.stream_tx.subscribe();
+        let last_rollout_data = self.last_rollout_data.clone();
         let stream = try_stream! {
+            // Set up something that will be dropped (thus log) when SSE is disconnected.
             let guard = DisconnectionGuard{};
+
+            // Send first message from existing data.
+            let mfk = last_rollout_data.lock().await.clone();
+            let data_to_serialize = match &mfk {
+                Ok(rollouts) => serde_json::to_string(&SseResponse{rollouts: rollouts.clone(), error: None}),
+                Err(e) => serde_json::to_string(&SseResponse{rollouts: VecDeque::new(), error: Some((e.0.as_u16(), e.1.clone()))}),
+            }.unwrap();
+            drop(mfk);
+            let event = Event::default().data(data_to_serialize);
+            yield event;
+
             loop {
+                if stream_rx.changed().await.is_err() {
+                    debug!(target: "sse", "No more transmissions.  Stopping client SSE streaming.");
+                    break;
+                }
                 let current_rollout_status = &stream_rx.borrow_and_update().clone();
                 let mfk = current_rollout_status.clone();
                 let data_to_serialize = match mfk {
@@ -190,10 +207,6 @@ impl Server {
                 }.unwrap();
                 let event = Event::default().data(data_to_serialize);
                 yield event;
-                if stream_rx.changed().await.is_err() {
-                    debug!(target: "sse", "No more transmissions.  Stopping client SSE streaming.");
-                    break;
-                }
             }
             drop(guard);
         };
