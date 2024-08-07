@@ -30,6 +30,8 @@ lazy_static! {
 
 #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
 #[serde(rename_all = "snake_case")]
+/// Represents the rollout state of a subnet.
+/// Ordering matters here.
 pub enum SubnetRolloutState {
     Error,
     PredecessorFailed,
@@ -40,7 +42,6 @@ pub enum SubnetRolloutState {
     WaitingForAdoption,
     WaitingForAlertsGone,
     Complete,
-    Skipped,
     Unknown,
 }
 
@@ -144,6 +145,7 @@ impl Batch {
 
 #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 #[serde(rename_all = "snake_case")]
+/// Represents the rollout state.  Ordering matters here.
 pub enum RolloutState {
     Failed,
     Problem,
@@ -763,24 +765,23 @@ impl RolloutApi {
                             }
                         }
                         Some(state) => match state {
-                            TaskInstanceState::Skipped => {
-                                trans_exact!(SubnetRolloutState::Skipped);
-                            }
+                            // https://stackoverflow.com/questions/53654302/tasks-are-moved-to-removed-state-in-airflow-when-they-are-queued-and-not-restore
+                            // If a task is removed, we cannot decide rollout state based on it.
+                            // https://stackoverflow.com/questions/77426996/skipping-a-task-in-airflow
+                            // If a task is skipped, the next task (in state Running / Deferred)
+                            // will pick up the slack for changing subnet state.
+                            TaskInstanceState::Removed | TaskInstanceState::Skipped => (),
                             TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
-                                trans_exact!(SubnetRolloutState::Error);
-                                rollout.state = RolloutState::Problem
+                                trans_min!(SubnetRolloutState::Error);
+                                rollout.state = min(rollout.state, RolloutState::Problem)
                             }
                             TaskInstanceState::Failed => {
-                                trans_exact!(SubnetRolloutState::Error);
-                                rollout.state = RolloutState::Failed
+                                trans_min!(SubnetRolloutState::Error);
+                                rollout.state = min(rollout.state, RolloutState::Failed)
                             }
                             TaskInstanceState::UpstreamFailed => {
                                 trans_min!(SubnetRolloutState::PredecessorFailed);
-                                rollout.state = RolloutState::Failed
-                            }
-                            TaskInstanceState::Removed => {
-                                trans_exact!(SubnetRolloutState::Unknown);
-                                rollout.state = RolloutState::Failed
+                                rollout.state = min(rollout.state, RolloutState::Failed)
                             }
                             TaskInstanceState::UpForReschedule
                             | TaskInstanceState::Running
@@ -791,7 +792,6 @@ impl RolloutApi {
                                     "collect_batch_subnets" => {
                                         trans_min!(SubnetRolloutState::Pending);
                                     }
-
                                     "wait_until_start_time" => {
                                         trans_min!(SubnetRolloutState::Waiting);
                                     }
