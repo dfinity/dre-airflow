@@ -53,6 +53,7 @@
                     rel="external"
                     href={subnet.display_url || ""}
                     target="_blank"
+                    class="subnet_state"
                     data-sveltekit-preload-data="off"
                     title={batchStateComment(subnet)}
                 >
@@ -161,8 +162,11 @@
         grid-template-columns: min-content 1fr min-content;
         column-gap: 0.6em;
     }
+    .subnet_state {
+        margin-top: -3px;
+    }
     .subnet_id {
-        display: block;
+        align-self: center;
         max-width: 3em;
         overflow-x: hidden;
         text-wrap: nowrap;
@@ -171,7 +175,7 @@
         font-size: 120%;
     }
     .git_revision {
-        display: block;
+        align-self: center;
         color: #999;
         max-width: 5em;
         text-overflow: ellipsis;
