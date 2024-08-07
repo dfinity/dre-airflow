@@ -61,7 +61,7 @@ const rollout_states = {
 export function rolloutStateIcon(state: keyof typeof rollout_states): String {
     return rollout_states[state].icon;
 }
-export function rolloutStateName(state: keyof typeof rollout_states): String {
+export function rolloutStateName(state: keyof typeof rollout_states): string {
     return rollout_states[state].name;
 }
 export type RolloutConfiguration = {
