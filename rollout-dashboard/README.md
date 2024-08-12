@@ -1,5 +1,7 @@
 # Rollout dashboard
 
+* [Live dashboard here](https://rollout-dashboard.ch1-rel1.dfinity.network/)
+
 This application collects information from Airflow to display in a nice
 easy-to-use form.  In production, it is composed of two distinct pieces:
 
