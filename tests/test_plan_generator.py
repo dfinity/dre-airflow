@@ -3,7 +3,14 @@ import unittest
 from datetime import timezone as tz
 
 import yaml
-from dfinity.ic_os_rollout import RolloutPlan, rollout_planner, week_planner
+from dfinity.ic_os_rollout import (
+    RolloutPlan,
+    RolloutPlanWithRevision,
+    assign_default_revision,
+    check_plan,
+    rollout_planner,
+    week_planner,
+)
 
 _MONDAY = datetime.datetime(2023, 6, 12, 0, 0, 0)
 
@@ -369,3 +376,76 @@ Monday:
             ValueError,
             lambda: rollout_planner(rollout_plan, self.fake_get_subnet_list, _MONDAY),
         )
+
+
+class TestPlanChecker(unittest.TestCase):
+
+    def _formulate_plan(self, plan_draft: str) -> RolloutPlanWithRevision:
+        plan = yaml.safe_load(plan_draft)
+
+        def lister() -> list[str]:
+            return [
+                "uzr34-akd3s-xrdag-3ql62-ocgoh-ld2ao-tamcv-54e7j-krwgb-2gm4z-oqe",
+                "pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae",
+            ]
+
+        return assign_default_revision(
+            rollout_planner(
+                plan,
+                lister,
+                _MONDAY,
+            ),
+            "0123456789012345678901234567890123456789",
+        )
+
+    def test_uzr34_pzp6e_timedelta_in_spec(self) -> None:
+        plan_draft = self._formulate_plan(
+            """
+Monday:
+  9:00:
+  - subnet: uzr34
+    git_revision: 0123456789012345678901234567890123456789
+Tuesday:
+  9:00:
+  - subnet: pzp6e
+    git_revision: 0123456789012345678901234567890123456789
+"""
+        )
+        check_plan(plan_draft)
+
+    def test_uzr34_pzp6e_timedelta_too_short(self) -> None:
+        plan_draft = self._formulate_plan(
+            """
+Monday:
+  9:00:
+  - subnet: uzr34
+    git_revision: 0123456789012345678901234567890123456789
+Tuesday:
+  8:00:
+  - subnet: pzp6e
+    git_revision: 0123456789012345678901234567890123456789
+"""
+        )
+        self.assertRaises(ValueError, lambda: check_plan(plan_draft))
+
+    def test_uzr34_but_not_pzp6e(self) -> None:
+        plan_draft = self._formulate_plan(
+            """
+Monday:
+  9:00:
+  - subnet: uzr34
+    git_revision: 0123456789012345678901234567890123456789
+"""
+        )
+        check_plan(plan_draft)
+
+    def test_pzp6e_but_not_uzr34(self) -> None:
+        plan_draft = self._formulate_plan(
+            """
+Monday:
+  9:00:
+  - subnet: uzr34
+    git_revision: 0123456789012345678901234567890123456789
+"""
+        )
+        check_plan(plan_draft)

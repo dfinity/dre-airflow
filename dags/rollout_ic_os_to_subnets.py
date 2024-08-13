@@ -114,6 +114,12 @@ for network_name, network in IC_NETWORKS.items():
                         }}"""
                     % batch,
                 ).expand(_ignored=proceed)
+                >> ic_os_sensor.WaitForPreconditions.partial(
+                    task_id="wait_for_preconditions",
+                    git_revision="{{ params.git_revision }}",
+                    retries=retries,
+                    network=network,
+                ).expand(subnet_id=proceed)
                 >> ic_os_rollout.CreateProposalIdempotently.partial(
                     task_id="create_proposal_if_none_exists",
                     git_revision="{{ params.git_revision }}",

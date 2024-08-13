@@ -597,6 +597,54 @@ class WaitForOtherDAGs(BaseSensorOperator):
         self.log.info("No other DAGs are running.  Proceeding.")
 
 
+class WaitForPreconditions(ICRolloutSensorBaseOperator):
+    """Performs a variety of checks.
+
+    Current checks:
+
+    * https://dfinity.atlassian.net/browse/REL-2675 delays updates of the
+      signing subnet and its backup within less than 1 day of each other.
+    """
+
+    def execute(self, context: Context, event: Any = None) -> None:
+        subnet_id, _ = subnet_id_and_git_revision_from_args(
+            self.subnet_id, self.git_revision
+        )
+
+        antipodes = {
+            "uzr34-akd3s-xrdag-3ql62-ocgoh-ld2ao-tamcv-54e7j-krwgb-2gm4z-oqe": "pzp6e"
+            "-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae",
+            "pzp6e-ekpqk-3c5x7-2h6so-njoeq-mt45d-h3h6c-q3mxf-vpeq5-fk5o7-yae": "uzr34"
+            "-akd3s-xrdag-3ql62-ocgoh-ld2ao-tamcv-54e7j-krwgb-2gm4z-oqe",
+        }
+
+        if subnet_id in antipodes:
+            other = antipodes[subnet_id]
+
+            self.log.info(
+                f"Checking that {other} has not been updated in the"
+                f" last 1 day before {subnet_id}"
+            )
+            query = "sum(changes(ic_replica_info{" + f'ic_subnet="{other}"' + "}[1d]))"
+            self.log.info(f"Querying Prometheus servers: {query}")
+            res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
+            if not res:
+                raise RuntimeError(("Prometheus returned no sum of updates: %r" % res,))
+
+            update_sum = int(res[0]["value"])
+            if update_sum > 0:
+                self.log.info(
+                    f"{other} was updated too recently.  Waiting to protect"
+                    " the integrity of signing key or its backup."
+                )
+                self.defer(
+                    trigger=TimeDeltaTrigger(datetime.timedelta(minutes=3)),
+                    method_name="execute",
+                )
+
+            self.log.info(f"It is now safe to continue with the update of {subnet_id}.")
+
+
 if __name__ == "__main__":
     import sys
 
