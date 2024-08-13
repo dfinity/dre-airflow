@@ -106,10 +106,10 @@ impl Batch {
             if (only_decrease && new_state < subnet.state)
                 || (!only_decrease && new_state != subnet.state)
             {
-                trace!(target: "subnet_state", "{} {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+                trace!(target: "subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
                 subnet.state = new_state.clone();
             } else {
-                trace!(target: "subnet_state", "{} {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
+                trace!(target: "subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
             }
             if new_state == subnet.state {
                 subnet.comment = format!(
@@ -723,7 +723,7 @@ impl RolloutApi {
                     // * update the subnet link to the corresponding Airflow task if the
                     //   state of the task (after update) corresponds to the expected state,
                     // * update rollout state to problem / error depending on the task state.
-                    trace!(target: "subnet_state", "processing {} {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                    trace!(target: "subnet_state", "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                     let (batch, task_name) = (
                         // We get away with unwrap() here because we know we captured an integer.
                         match rollout
@@ -732,7 +732,7 @@ impl RolloutApi {
                         {
                             Some(batch) => batch,
                             None => {
-                                trace!(target: "subnet_state", "no corresponding batch, continuing");
+                                trace!(target: "subnet_state", "{}: no corresponding batch, continuing", task_instance.dag_run_id);
                                 continue;
                             }
                         },
@@ -764,6 +764,8 @@ impl RolloutApi {
                         None => {
                             if task_name == "collect_batch_subnets" {
                                 trans_exact!(SubnetRolloutState::Pending);
+                            } else {
+                                trace!(target: "subnet_state", "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
                             }
                         }
                         Some(state) => match state {
@@ -772,7 +774,9 @@ impl RolloutApi {
                             // https://stackoverflow.com/questions/77426996/skipping-a-task-in-airflow
                             // If a task is skipped, the next task (in state Running / Deferred)
                             // will pick up the slack for changing subnet state.
-                            TaskInstanceState::Removed | TaskInstanceState::Skipped => (),
+                            TaskInstanceState::Removed | TaskInstanceState::Skipped => {
+                                trace!(target: "subnet_state", "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                            }
                             TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
                                 trans_min!(SubnetRolloutState::Error);
                                 rollout.state = min(rollout.state, RolloutState::Problem)
@@ -797,6 +801,9 @@ impl RolloutApi {
                                     "wait_until_start_time" => {
                                         trans_min!(SubnetRolloutState::Waiting);
                                     }
+                                    "wait_for_preconditions" => {
+                                        trans_min!(SubnetRolloutState::Waiting);
+                                    }
                                     "create_proposal_if_none_exists" => {
                                         trans_min!(SubnetRolloutState::Proposing);
                                     }
@@ -816,7 +823,7 @@ impl RolloutApi {
                                         trans_min!(SubnetRolloutState::Complete);
                                     }
                                     &_ => {
-                                        warn!(target: "subnet_state", "{} do not know how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                        warn!(target: "subnet_state", "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                     }
                                 }
                                 rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
@@ -865,6 +872,9 @@ impl RolloutApi {
                                             }
                                         }
                                     };
+                                    trans_exact!(SubnetRolloutState::Waiting);
+                                }
+                                "wait_for_preconditions" => {
                                     trans_exact!(SubnetRolloutState::Proposing);
                                 }
                                 "create_proposal_if_none_exists" => {
@@ -887,7 +897,7 @@ impl RolloutApi {
                                     batch.end_time = task_instance.end_date;
                                 }
                                 &_ => {
-                                    warn!(target: "subnet_state", "{} do not know how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                    warn!(target: "subnet_state", "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             },
                         },
@@ -915,7 +925,7 @@ impl RolloutApi {
                         }
                     }
                 } else {
-                    warn!(target: "frontend_api", "{} unknown task {}", task_instance.dag_run_id, task_instance.task_id)
+                    warn!(target: "frontend_api", "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
                 }
             }
 
