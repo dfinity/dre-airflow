@@ -171,19 +171,11 @@
         font-size: 120%;
         text-align: right;
     }
-    .subnet_id,
     .git_revision {
         cursor: copy;
     }
-    .subnet_id svg,
     .git_revision svg {
         display: none;
-    }
-    .subnet_id:hover svg {
-        display: block;
-        position: absolute;
-        margin-left: 3.5em;
-        margin-top: 0.35em;
     }
     .git_revision:hover svg {
         display: block;
