@@ -1,16 +1,14 @@
-name: Airflow containers
+name: Airflow content syncer container
 on:
   push:
     branches:
       - "main"
     paths:
       - airflow-content-syncer/**
-      - airflow-customized/**
       - .github/**
   pull_request:
     paths:
       - airflow-content-syncer/**
-      - airflow-customized/**
       - .github/**
 
 concurrency:
@@ -49,37 +47,6 @@ jobs:
           cache: false
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: airflow-content-syncer
-  build-airflow-customized:
-    name: Build customized Airflow container
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    # This image is based on ubuntu:20.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository }}/airflow-customized
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=tag
-            type=ref,event=pr
-            type=sha,format=long
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: int128/kaniko-action@v1
-        name: Create airflow-customized container
-        with:
-          push: false
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache: false
-          cache-repository: ghcr.io/${{ github.repository }}/cache
-          context: airflow-customized
   publish-airflow-content-syncer:
     name: Publish Airflow content syncer container
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -111,35 +78,3 @@ jobs:
           cache: false
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: airflow-content-syncer
-  publish-airflow-customized:
-    name: Publish customized Airflow container
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    # This image is based on ubuntu:20.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository }}/airflow-customized
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=tag
-            type=ref,event=pr
-            type=sha,format=long
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: int128/kaniko-action@v1
-        name: Create and publish airflow-customized container
-        with:
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache: false
-          cache-repository: ghcr.io/${{ github.repository }}/cache
-          context: airflow-customized
