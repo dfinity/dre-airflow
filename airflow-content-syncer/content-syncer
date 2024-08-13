@@ -14,6 +14,8 @@ then
     exit 64
 fi
 
+trap 'echo "Content syncer exiting." >&2' EXIT
+
 mkdir -p "$(dirname CONTENT_SYNCER_GIT_REPO_FOLDER)"
 if [ ! -d "$CONTENT_SYNCER_GIT_REPO_FOLDER" ]
 then
@@ -44,6 +46,10 @@ do
         done
         rsync -rlD --checksum --exclude __pycache__ --delete-excluded --delete dags/ "$AIRFLOW_HOME/dags/"
     fi
-    if [ "$1" == "once" ] ; then exit ; fi
+    if [ "$1" == "once" ]
+    then
+        echo "Content syncer about to exit because it was invoked on init mode." >&2
+        exit
+    fi
     sleep "$CONTENT_SYNCER_INTERVAL"
 done
