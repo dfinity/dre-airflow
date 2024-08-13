@@ -328,3 +328,26 @@ def rollout_planner(
             current_batch_index = batch_index + 1
 
     return batches
+
+
+def check_plan(plan: RolloutPlanWithRevision) -> None:
+    # Check that uzr34 predates pzp6e by at least 24 hours.
+    # https://dfinity.atlassian.net/browse/REL-2675 .
+    uzr34_start_time: datetime.datetime | None = None
+    pzp6e_start_time: datetime.datetime | None = None
+    for _, batch in plan.values():
+        for subnet in batch:
+            if subnet.subnet_id.startswith("uzr34"):
+                uzr34_start_time = subnet.start_at
+            if subnet.subnet_id.startswith("pzp6e"):
+                pzp6e_start_time = subnet.start_at
+    if uzr34_start_time and pzp6e_start_time:
+        delta = pzp6e_start_time - uzr34_start_time
+        if delta < datetime.timedelta(days=1):
+            raise ValueError(
+                (
+                    "The update time %s of pzp6e is too "
+                    "close to the update time %s of uzr34 (%s)"
+                )
+                % (pzp6e_start_time, uzr34_start_time, delta)
+            )
