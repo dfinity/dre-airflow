@@ -20,7 +20,9 @@ use crate::airflow_client::{
     AirflowClient, AirflowError, DagRunState, TaskInstanceRequestFilters, TaskInstanceState,
     TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
-use rollout_dashboard::types::{Batch, Rollout, RolloutState, Subnet, SubnetRolloutState};
+use rollout_dashboard::types::{
+    Batch, Rollout, RolloutState, Rollouts, Subnet, SubnetRolloutState,
+};
 
 lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
@@ -360,7 +362,7 @@ impl RolloutApi {
     pub async fn get_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<(Vec<Rollout>, bool), RolloutDataGatherError> {
+    ) -> Result<(Rollouts, bool), RolloutDataGatherError> {
         let mut cache = self.cache.lock().await;
         let now = Utc::now();
         let last_update_time = cache.last_update_time;
@@ -376,7 +378,7 @@ impl RolloutApi {
         // and re-request everything again.
         let sorter = TaskInstanceTopologicalSorter::new(tasks)?;
 
-        let mut res: Vec<Rollout> = vec![];
+        let mut res: Rollouts = vec![];
         // Track if any rollout has had any meaningful changes.
         // Also see function documentation about meaningful changes.
         let mut meaningful_updates_to_any_rollout = false;
