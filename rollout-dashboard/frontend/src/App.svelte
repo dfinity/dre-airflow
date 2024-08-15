@@ -4,8 +4,13 @@
   import { type RolloutResult, rollout_query } from "./lib/stores";
   import Rollout from "./lib/Rollout.svelte";
   import { writable } from "svelte/store";
-  import { ButtonGroup, Button } from "flowbite-svelte";
-  import { Footer, FooterLink, FooterLinkGroup } from "flowbite-svelte";
+  import { ButtonGroup, Button, FooterCopyright } from "flowbite-svelte";
+  import {
+    Footer,
+    FooterLink,
+    FooterLinkGroup,
+    FooterBrand,
+  } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
 
   let my_rollout_query = writable({
@@ -89,7 +94,10 @@
 {/each}
 
 <Footer>
-  <div class="sm:flex sm:items-center sm:justify-center">
+  <div class="sm:flex sm:items-center sm:justify-between">
+    <FooterCopyright>DFINITY Foundation</FooterCopyright>
+    <FooterBrand name="Rollout dashboard" src="favicon-512x512.png"
+    ></FooterBrand>
     <FooterLinkGroup
       ulClass="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
     >
