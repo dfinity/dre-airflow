@@ -95,7 +95,7 @@
     >
       <FooterLink
         href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
-        >Documentation</FooterLink
+        target="_blank">Documentation</FooterLink
       >
     </FooterLinkGroup>
   </div>
