@@ -23,7 +23,11 @@ To upgrade the dashboard in production,
 If you are building a client of this application, consult the programming
 documentation available under folder [`server/`](server/) by running
 the `cargo rustdoc` program within the folder and then launching the Web
-page it generates for you.
+page it generates for you.  Please do not proceed with creating a client
+of this server application until you have read that documentation.
+
+We also have [a document with tips and tricks](./jqtricks.md) to pull out
+certain bits of interesting information from the rollouts API.
 
 [[TOC]]
 
