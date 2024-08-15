@@ -2,11 +2,16 @@
 
 * [Live dashboard here](https://rollout-dashboard.ch1-rel1.dfinity.network/)
 
-This application collects information from Airflow to display in a nice
-easy-to-use form.  In production, it is composed of two distinct pieces:
+This application:
+
+* collects information from Airflow to display in a nice easy-to-use screen,
+* provides a REST endpoint for other programs to retrieve the data it collects,
+* provides a client library for those programs to use the retrieved data.
+
+In production, it is composed of two distinct pieces:
 
 1. A Rust-based backend that periodically collects information to
-   assemble in the right format, and serves it to clients.
+   assemble in the right format, and serves it to clients via REST API.
 2. A collection of compiled TypeScript and CSS files that form the
    Web client, which (when loaded by the browser) polls the backend
    and displays the data returned by the backend.  This collection of
@@ -14,6 +19,11 @@ easy-to-use form.  In production, it is composed of two distinct pieces:
 
 To upgrade the dashboard in production,
 [consult the relevant document](https://dfinity-lab.gitlab.io/private/k8s/k8s/#/bases/apps/rollout-dashboard/).
+
+If you are building a client of this application, consult the programming
+documentation available under folder [`server/`](server/) by running
+the `cargo rustdoc` program within the folder and then launching the Web
+page it generates for you.
 
 [[TOC]]
 

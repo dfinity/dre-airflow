@@ -1,7 +1,15 @@
 [package]
 name = "rollout-dashboard"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+
+[lib]
+name = "rollout_dashboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rollout-dashboard"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

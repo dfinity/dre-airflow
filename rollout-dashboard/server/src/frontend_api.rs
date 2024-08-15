@@ -13,7 +13,6 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
-use strum::Display;
 use tokio::sync::Mutex;
 use topological_sort::TopologicalSort;
 
@@ -21,179 +20,14 @@ use crate::airflow_client::{
     AirflowClient, AirflowError, DagRunState, TaskInstanceRequestFilters, TaskInstanceState,
     TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
+use rollout_dashboard::types::{
+    Batch, Rollout, RolloutState, Rollouts, Subnet, SubnetRolloutState,
+};
 
 lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
     static ref SubnetGitRevisionRe: Regex = Regex::new("dfinity.ic_types.SubnetRolloutInstance.*@version=0[(]start_at=.*,subnet_id=([0-9-a-z-]+),git_revision=([0-9a-f]+)[)]").unwrap();
     static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
-#[serde(rename_all = "snake_case")]
-/// Represents the rollout state of a subnet.
-/// Ordering matters here.
-pub enum SubnetRolloutState {
-    Error,
-    PredecessorFailed,
-    Pending,
-    Waiting,
-    Proposing,
-    WaitingForElection,
-    WaitingForAdoption,
-    WaitingForAlertsGone,
-    Complete,
-    Unknown,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct Subnet {
-    pub subnet_id: String,
-    pub git_revision: String,
-    pub state: SubnetRolloutState,
-    /// Shows a comment for the subnet if available, else empty string.
-    pub comment: String,
-    /// Shows a display URL if available, else empty string.
-    pub display_url: String,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct Batch {
-    pub planned_start_time: DateTime<Utc>,
-    pub actual_start_time: Option<DateTime<Utc>>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub subnets: Vec<Subnet>,
-}
-
-fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
-where
-    N: Display,
-{
-    match opt {
-        None => fallback.to_string(),
-        Some(v) => format!("{}{}", prefix, v),
-    }
-}
-
-impl Batch {
-    fn set_min_subnet_state(
-        &mut self,
-        state: SubnetRolloutState,
-        task_instance: &TaskInstancesResponseItem,
-        base_url: &reqwest::Url,
-    ) -> SubnetRolloutState {
-        self.set_subnet_state(state, task_instance, base_url, true)
-    }
-    fn set_specific_subnet_state(
-        &mut self,
-        state: SubnetRolloutState,
-        task_instance: &TaskInstancesResponseItem,
-        base_url: &reqwest::Url,
-    ) -> SubnetRolloutState {
-        self.set_subnet_state(state, task_instance, base_url, false)
-    }
-    fn set_subnet_state(
-        &mut self,
-        state: SubnetRolloutState,
-        task_instance: &TaskInstancesResponseItem,
-        base_url: &reqwest::Url,
-        only_decrease: bool,
-    ) -> SubnetRolloutState {
-        for subnet in match task_instance.map_index {
-            None => self.subnets.iter_mut(),
-            Some(index) => self.subnets[index..=index].iter_mut(),
-        } {
-            let new_state = state.clone();
-            if (only_decrease && new_state < subnet.state)
-                || (!only_decrease && new_state != subnet.state)
-            {
-                trace!(target: "subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
-                subnet.state = new_state.clone();
-            } else {
-                trace!(target: "subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
-            }
-            if new_state == subnet.state {
-                subnet.comment = format!(
-                    "Task {}{} {}",
-                    task_instance.task_id,
-                    format_some(task_instance.map_index, ".", ""),
-                    format_some(
-                        task_instance.state.clone(),
-                        "in state ",
-                        "has no known state"
-                    ),
-                );
-                subnet.display_url = {
-                    let mut url = base_url
-                        .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
-                        .unwrap();
-                    url.query_pairs_mut()
-                        .append_pair("dag_run_id", &task_instance.dag_run_id);
-                    url.query_pairs_mut()
-                        .append_pair("task_id", &task_instance.task_id);
-                    url.query_pairs_mut().append_pair("tab", "logs");
-                    if let Some(idx) = task_instance.map_index {
-                        url.query_pairs_mut()
-                            .append_pair("map_index", format!("{}", idx).as_str());
-                    };
-                    url.to_string()
-                };
-            };
-        }
-        state
-    }
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
-#[serde(rename_all = "snake_case")]
-/// Represents the rollout state.  Ordering matters here.
-pub enum RolloutState {
-    Failed,
-    Problem,
-    Preparing,
-    Waiting,
-    UpgradingSubnets,
-    UpgradingUnassignedNodes,
-    Complete,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct Rollout {
-    /// name is unique, enforced by Airflow.
-    pub name: String,
-    /// Links to the rollout in Airflow.
-    pub display_url: String,
-    pub note: Option<String>,
-    pub state: RolloutState,
-    pub dispatch_time: DateTime<Utc>,
-    /// Last scheduling decision.
-    /// Due to the way the central rollout cache is updated, clients may not see
-    /// an up-to-date value that corresponds to Airflow's last update time for
-    /// the DAG run.  See documentation in get_rollout_data.
-    pub last_scheduling_decision: Option<DateTime<Utc>>,
-    pub batches: IndexMap<usize, Batch>,
-    pub conf: HashMap<String, serde_json::Value>,
-}
-
-impl Rollout {
-    fn new(
-        name: String,
-        display_url: String,
-        note: Option<String>,
-        dispatch_time: DateTime<Utc>,
-        last_scheduling_decision: Option<DateTime<Utc>>,
-        conf: HashMap<String, serde_json::Value>,
-    ) -> Self {
-        Self {
-            name,
-            display_url,
-            note,
-            state: RolloutState::Complete,
-            dispatch_time,
-            last_scheduling_decision,
-            batches: IndexMap::new(),
-            conf,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -433,6 +267,67 @@ struct RolloutApiCache {
     by_dag_run: HashMap<String, RolloutDataCache>,
 }
 
+fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
+where
+    N: Display,
+{
+    match opt {
+        None => fallback.to_string(),
+        Some(v) => format!("{}{}", prefix, v),
+    }
+}
+
+fn annotate_subnet_state(
+    batch: &mut Batch,
+    state: SubnetRolloutState,
+    task_instance: &TaskInstancesResponseItem,
+    base_url: &reqwest::Url,
+    only_decrease: bool,
+) -> SubnetRolloutState {
+    for subnet in match task_instance.map_index {
+        None => batch.subnets.iter_mut(),
+        Some(index) => batch.subnets[index..=index].iter_mut(),
+    } {
+        let new_state = state.clone();
+        if (only_decrease && new_state < subnet.state)
+            || (!only_decrease && new_state != subnet.state)
+        {
+            trace!(target: "subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+            subnet.state = new_state.clone();
+        } else {
+            trace!(target: "subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
+        }
+        if new_state == subnet.state {
+            subnet.comment = format!(
+                "Task {}{} {}",
+                task_instance.task_id,
+                format_some(task_instance.map_index, ".", ""),
+                format_some(
+                    task_instance.state.clone(),
+                    "in state ",
+                    "has no known state"
+                ),
+            );
+            subnet.display_url = {
+                let mut url = base_url
+                    .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
+                    .unwrap();
+                url.query_pairs_mut()
+                    .append_pair("dag_run_id", &task_instance.dag_run_id);
+                url.query_pairs_mut()
+                    .append_pair("task_id", &task_instance.task_id);
+                url.query_pairs_mut().append_pair("tab", "logs");
+                if let Some(idx) = task_instance.map_index {
+                    url.query_pairs_mut()
+                        .append_pair("map_index", format!("{}", idx).as_str());
+                };
+                url.to_string()
+            };
+        };
+    }
+    state
+}
+
 #[derive(Clone)]
 pub struct RolloutApi {
     airflow_api: Arc<AirflowClient>,
@@ -449,9 +344,7 @@ impl RolloutApi {
             })),
         }
     }
-}
 
-impl RolloutApi {
     /// Retrieve all rollout data, using a cache to avoid
     /// re-fetching task instances not updated since last time.
     ///
@@ -469,7 +362,7 @@ impl RolloutApi {
     pub async fn get_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<(Vec<Rollout>, bool), RolloutDataGatherError> {
+    ) -> Result<(Rollouts, bool), RolloutDataGatherError> {
         let mut cache = self.cache.lock().await;
         let now = Utc::now();
         let last_update_time = cache.last_update_time;
@@ -485,7 +378,7 @@ impl RolloutApi {
         // and re-request everything again.
         let sorter = TaskInstanceTopologicalSorter::new(tasks)?;
 
-        let mut res: Vec<Rollout> = vec![];
+        let mut res: Rollouts = vec![];
         // Track if any rollout has had any meaningful changes.
         // Also see function documentation about meaningful changes.
         let mut meaningful_updates_to_any_rollout = false;
@@ -741,20 +634,24 @@ impl RolloutApi {
 
                     macro_rules! trans_min {
                         ($input:expr) => {
-                            batch.set_min_subnet_state(
+                            annotate_subnet_state(
+                                batch,
                                 $input,
                                 &task_instance,
                                 &self.airflow_api.as_ref().url,
-                            );
+                                true,
+                            )
                         };
                     }
                     macro_rules! trans_exact {
                         ($input:expr) => {
-                            batch.set_specific_subnet_state(
+                            annotate_subnet_state(
+                                batch,
                                 $input,
                                 &task_instance,
                                 &self.airflow_api.as_ref().url,
-                            );
+                                false,
+                            )
                         };
                     }
 
