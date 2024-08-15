@@ -5,6 +5,7 @@
   import Rollout from "./lib/Rollout.svelte";
   import { writable } from "svelte/store";
   import { ButtonGroup, Button } from "flowbite-svelte";
+  import { Footer, FooterLink, FooterLinkGroup } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
 
   let my_rollout_query = writable({
@@ -86,3 +87,16 @@
     <Rollout {rollout} />
   {/if}
 {/each}
+
+<Footer>
+  <div class="sm:flex sm:items-center sm:justify-center">
+    <FooterLinkGroup
+      ulClass="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
+    >
+      <FooterLink
+        href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
+        >Documentation</FooterLink
+      >
+    </FooterLinkGroup>
+  </div>
+</Footer>
