@@ -31,7 +31,8 @@ mod frontend_api;
 mod python;
 
 use crate::airflow_client::{AirflowClient, AirflowError};
-use crate::frontend_api::{Rollout, RolloutApi, RolloutDataGatherError};
+use crate::frontend_api::{RolloutApi, RolloutDataGatherError};
+use rollout_dashboard::types::Rollout;
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 
