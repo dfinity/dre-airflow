@@ -10,10 +10,12 @@ RUN cargo build --release && \
 
 FROM docker.io/node:alpine as node
 WORKDIR /
-COPY frontend/index.html frontend/*.json frontend/*.js frontend/*.ts ./
+# The following step copies only the package files so npm install can be cached.
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/*.json frontend/index.html frontend/*.js frontend/*.ts ./
 COPY frontend/public ./public
 COPY frontend/src ./src
-RUN npm install
 RUN npm run build
 
 FROM docker.io/debian:bookworm
