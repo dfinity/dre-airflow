@@ -74,6 +74,8 @@ jobs:
         run: mv -f rollout-dashboard/frontend/* .
       - name: prepare NPM for CI
         run: npm ci
+      - name: Security audit
+        run: npm audit
       - name: build frontend
         run: npm run build
       - name: run tests on frontend
