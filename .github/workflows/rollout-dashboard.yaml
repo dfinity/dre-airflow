@@ -38,6 +38,7 @@ jobs:
             ~/.cargo/git/db/
             target/debug/build
             target/debug/deps
+            target/debug/.fingerprint
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
