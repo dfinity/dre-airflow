@@ -90,8 +90,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}/cache
           tags: |
-            type=schedule
-            type=sha,format=long
+            type=sha
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
