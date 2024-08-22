@@ -28,6 +28,12 @@ jobs:
           key: cargo
           path: |
             ~/.cargo
+      - name: Cache target deps for faster execution
+        uses: actions/cache@v3
+        with:
+          key: target
+          path: |
+            target/debug/deps
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
