@@ -17,7 +17,6 @@ path = "src/main.rs"
 async-recursion = "1.1.1"
 async-stream = "0.3.5"
 axum = { version = "0.7.5", features = ["macros"] }
-axum-server = "0.6.0"
 chrono = { version = "0.4.38", features = ["serde"] }
 env_logger = "0.11.3"
 futures = "0.3.30"

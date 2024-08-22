@@ -28,6 +28,10 @@ jobs:
           toolchain: stable
       - name: Move backend files to source root
         run: mv -f rollout-dashboard/server/* .
+      - name: cargo machete
+        uses: actions-rs/cargo@v1
+        with:
+          command: machete
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
