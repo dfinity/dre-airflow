@@ -157,7 +157,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 "is in state %s and must be created again.  Will create.",
                 props_for_git_revision[0]["proposal_id"],
                 git_revision,
-                props_for_git_revision[0]["status"],
+                props_for_git_revision[0]["status"].name,
             )
         else:
             prop = props_for_git_revision[0]
