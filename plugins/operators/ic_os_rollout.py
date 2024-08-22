@@ -166,7 +166,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
                 "is in state %s and does not need to be created.",
                 prop["proposal_id"],
                 git_revision,
-                prop["status"],
+                prop["status"].name,
             )
             url = f"{self.network.proposal_display_url}/{prop['proposal_id']}"
             self.log.info(
