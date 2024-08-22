@@ -26,7 +26,6 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          components: clippy,machete
       - name: Move backend files to source root
         run: mv -f rollout-dashboard/server/* .
       - name: Security audit
@@ -34,9 +33,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo machete
-        uses: actions-rs/cargo@v1
-        with:
-          command: machete
+        run: cargo install cargo-machete && cargo machete
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
