@@ -27,13 +27,14 @@ jobs:
       - name: Cache Cargo stuff for faster execution
         uses: actions/cache@v3
         with:
-          key: cargo-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-build-deps-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target
+            target/debug/build
+            target/debug/deps
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
