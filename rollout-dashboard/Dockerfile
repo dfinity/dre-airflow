@@ -13,7 +13,8 @@ WORKDIR /
 COPY frontend/index.html frontend/*.json frontend/*.js frontend/*.ts ./
 COPY frontend/public ./public
 COPY frontend/src ./src
-RUN npm install && npm run build
+RUN npm install
+RUN npm run build
 
 FROM docker.io/debian:bookworm
 WORKDIR /
