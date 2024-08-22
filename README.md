@@ -14,6 +14,10 @@ This repository contains:
 To effectively contribute code to this repository, you must first
 set up a local development environment.  See below for instructions.
 
+This code is distributed under the Apache 2.0 license, the contents of
+which can be found [here](./LICENSE).  External contributions are not
+accepted at this time.
+
 [[_TOC_]]
 
 ## Airflow content artifacts distributed in this repository
