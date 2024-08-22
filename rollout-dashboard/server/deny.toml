@@ -1,5 +1,4 @@
 [licenses]
-unlicensed = "allow"
 allow = [
 "Apache-2.0",
 "MIT",
