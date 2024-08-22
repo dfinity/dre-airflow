@@ -22,6 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Cargo stuff for faster execution
+        uses: actions/cache@v3
+        with:
+          key: cargo
+          path: |
+            ~/.cargo
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -33,7 +39,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo machete
-        run: cargo install cargo-machete && cargo machete
+        run: |
+          set -e
+          which cargo
+          which cargo-machete || cargo install cargo-machete
+          cargo machete
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
