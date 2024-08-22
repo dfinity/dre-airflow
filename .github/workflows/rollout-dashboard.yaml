@@ -103,9 +103,8 @@ jobs:
       - uses: int128/kaniko-action@v1
         name: Create rollout-dashboard container
         with:
-          push: false
+          push: true
           tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
           cache: true
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: rollout-dashboard
