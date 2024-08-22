@@ -164,7 +164,7 @@ class CreateProposalIdempotently(ICRolloutBaseOperator):
             self.log.info(
                 "Proposal %s with git revision %s for subnet "
                 "is in state %s and does not need to be created.",
-                ["proposal_id"],
+                prop["proposal_id"],
                 git_revision,
                 prop["status"],
             )
