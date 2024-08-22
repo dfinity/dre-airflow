@@ -337,7 +337,13 @@ class AuthenticatedDRE(DRE):
             raise AirflowException("dre exited with status code %d", r.exit_code)
         if dry_run:
             return FAKE_PROPOSAL_NUMBER
-        return int(r.output.rstrip().splitlines()[-1].split()[1])
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
 
 
 if __name__ == "__main__":
