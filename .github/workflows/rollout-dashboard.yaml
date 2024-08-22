@@ -104,7 +104,7 @@ jobs:
         name: Create rollout-dashboard container
         with:
           push: true
-          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
           cache: true
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: rollout-dashboard
