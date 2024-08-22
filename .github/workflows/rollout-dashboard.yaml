@@ -22,27 +22,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Move backend files to source root
+        run: mv -f rollout-dashboard/server/* .
       - name: Cache Cargo stuff for faster execution
         uses: actions/cache@v3
         with:
-          key: cargo-home
+          key: cargo-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+            target
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - name: Move backend files to source root
-        run: mv -f rollout-dashboard/server/* .
-      - name: Cache target deps for faster execution
-        uses: actions/cache@v3
-        with:
-          key: target-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          path: |
-            target
       - name: Security audit
         uses: actions-rs/audit-check@v1
         with:
