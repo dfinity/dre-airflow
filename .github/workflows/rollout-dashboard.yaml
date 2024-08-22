@@ -21,13 +21,16 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      - name: Set month and year for cache key
+        id: date
+        run: echo "::set-output name=date::$(date +'%Y-%m')"
       - uses: actions/checkout@v4
       - name: Move backend files to source root
         run: mv -f rollout-dashboard/server/* .
-      - name: Cache Cargo stuff for faster execution
+      - name: Cache Cargo stuff once a month for faster execution
         uses: actions/cache@v3
         with:
-          key: cargo-build-deps-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-build-deps-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.date.outputs.date }}
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
