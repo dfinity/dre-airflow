@@ -111,7 +111,7 @@ class DRE:
         *args: str,
         dry_run: bool = False,
         yes: bool = False,
-        ic_admin_fallback: bool = True,
+        ic_admin_fallback: bool = False,
         full_stdout: bool = False,
     ) -> SubprocessResult:
         """
