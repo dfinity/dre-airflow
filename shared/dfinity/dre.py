@@ -111,7 +111,7 @@ class DRE:
         *args: str,
         dry_run: bool = False,
         yes: bool = False,
-        ic_admin_fallback: bool = False,
+        ic_admin_fallback: bool = True,
         full_stdout: bool = False,
     ) -> SubprocessResult:
         """
@@ -122,6 +122,8 @@ class DRE:
           appended at the end.
         * yes: if true, --yes appended at the end, but only if
           dry_run is not true.
+        * ic_admin_fallback: if true, the command will run with fallback
+          ic_admin version.
         """
         self._prep()
         # Locking to prevent clashes in
