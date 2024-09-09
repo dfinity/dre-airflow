@@ -111,7 +111,8 @@ class DRE:
         *args: str,
         dry_run: bool = False,
         yes: bool = False,
-        full_stdout: bool = False,
+        ic_admin_fallback: bool = False,
+        full_stdout: bool = True,
     ) -> SubprocessResult:
         """
         Run dre, potentially downloading it if not present.
@@ -149,6 +150,8 @@ class DRE:
                         cmd.insert(pos + 1, "--yes")
                     except ValueError:
                         cmd.append("--yes")
+                if ic_admin_fallback:
+                    cmd.append("--ic-admin-version fallback")
 
                 print("::group::DRE output")
                 if full_stdout:
