@@ -16,7 +16,7 @@ from dfinity.ic_os_rollout import (
     RolloutPlanWithRevision,
     SubnetIdWithRevision,
     assign_default_revision,
-    check_plan,
+    # check_plan,
     rollout_planner,
     subnet_id_and_git_revision_from_args,
 )
