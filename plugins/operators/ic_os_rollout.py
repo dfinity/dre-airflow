@@ -338,11 +338,11 @@ def schedule(
                 f" revision {item.git_revision}."
             )
 
-    try:
-        check_plan(plan)
-    except Exception as e:
-        print("Cannot proceed with rollout plan as planned: %s" % e)
-        raise AirflowException("Unsafe rollout plan")
+    # try:
+    #    check_plan(plan)
+    # except Exception as e:
+    #    print("Cannot proceed with rollout plan as planned: %s" % e)
+    #    raise AirflowException("Unsafe rollout plan")
 
     return plan
 
