@@ -16,7 +16,7 @@ from dfinity.ic_os_rollout import (
     RolloutPlanWithRevision,
     SubnetIdWithRevision,
     assign_default_revision,
-    # check_plan,
+    check_plan,
     rollout_planner,
     subnet_id_and_git_revision_from_args,
 )
@@ -338,11 +338,11 @@ def schedule(
                 f" revision {item.git_revision}."
             )
 
-    # try:
-    #    check_plan(plan)
-    # except Exception as e:
-    #    print("Cannot proceed with rollout plan as planned: %s" % e)
-    #    raise AirflowException("Unsafe rollout plan")
+    try:
+        check_plan(plan)
+    except Exception as e:
+        print("Cannot proceed with rollout plan as planned: %s" % e)
+        raise AirflowException("Unsafe rollout plan")
 
     return plan
 
