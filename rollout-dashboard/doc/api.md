@@ -5,7 +5,7 @@
 To learn about the API, how to use it, and how to interpret the data
 served by API calls, please consult the programming documentation
 that accompanies the `rollout_dashboard` crate, available under folder
-[`server/`](server/) by running the `cargo rustdoc` program within that
+[`../server/`](../server/) by running the `cargo rustdoc` program within that
 folder, and then launching the Web page it generates for you.
 
 Please do not proceed with creating a client

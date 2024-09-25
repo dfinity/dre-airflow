@@ -52,6 +52,18 @@ fn add_updated_parameters(
     )
 }
 
+fn add_executed_parameters(
+    url: String,
+    execution_date_lte: Option<DateTime<Utc>>,
+    execution_date_gte: Option<DateTime<Utc>>,
+) -> String {
+    add_date_parm(
+        add_date_parm(url, "execution_date_lte", execution_date_lte),
+        "execution_date_gte",
+        execution_date_gte,
+    )
+}
+
 fn add_ended_parameters(
     url: String,
     end_date_lte: Option<DateTime<Utc>>,
@@ -233,6 +245,39 @@ pub struct TaskInstancesResponseItem {
     pub note: Option<String>,
 }
 
+impl TaskInstancesResponseItem {
+    #[allow(dead_code)]
+    pub fn latest_date(&self) -> DateTime<Utc> {
+        let mut d = self.execution_date;
+        if let Some(dd) = self.start_date {
+            if dd > d {
+                d = dd
+            }
+        }
+        if let Some(dd) = self.end_date {
+            if dd > d {
+                d = dd
+            }
+        }
+        d
+    }
+    #[allow(dead_code)]
+    pub fn earliest_date(&self) -> DateTime<Utc> {
+        let mut d = self.execution_date;
+        if let Some(dd) = self.start_date {
+            if dd < d {
+                d = dd
+            }
+        }
+        if let Some(dd) = self.end_date {
+            if dd < d {
+                d = dd
+            }
+        }
+        d
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 
 pub struct TaskInstancesResponse {
@@ -275,6 +320,8 @@ impl Pageable for TaskInstancesResponse {
 
 #[derive(Default)]
 pub struct TaskInstanceRequestFilters {
+    executed_at_lte: Option<DateTime<Utc>>,
+    executed_at_gte: Option<DateTime<Utc>>,
     updated_at_lte: Option<DateTime<Utc>>,
     updated_at_gte: Option<DateTime<Utc>>,
     ended_at_lte: Option<DateTime<Utc>>,
@@ -282,6 +329,15 @@ pub struct TaskInstanceRequestFilters {
 }
 
 impl TaskInstanceRequestFilters {
+    #[allow(dead_code)]
+    pub fn executed_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
+        self.executed_at_lte = date;
+        self
+    }
+    pub fn executed_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
+        self.executed_at_gte = date;
+        self
+    }
     #[allow(dead_code)]
     pub fn updated_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
         self.updated_at_lte = date;
@@ -737,6 +793,7 @@ impl AirflowClient {
         filters: TaskInstanceRequestFilters,
     ) -> Result<TaskInstancesResponse, AirflowError> {
         let mut url = format!("dags/{}/dagRuns/{}/taskInstances", dag_id, dag_run_id);
+        url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
         url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
         url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
         _paged_get(
