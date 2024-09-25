@@ -890,7 +890,7 @@ impl RolloutApi {
             }
 
             if rollout_had_changed_tasks {
-                // We ump the cache entry's last update time, to only retrieve
+                // We bump the cache entry's last update time, to only retrieve
                 // tasks from this point in time on during subsequent retrievals.
                 // We only do this at the end, in case any code above returns
                 // early, to force a full state recalculation if there was a
