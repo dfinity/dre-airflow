@@ -253,17 +253,27 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
     }
 }
 
+#[derive(Clone, Serialize)]
 enum ScheduleCache {
     Empty,
-    Invalid,
-    Valid(String),
+    Valid(usize, String),
 }
+
 struct RolloutDataCache {
     task_instances: HashMap<String, HashMap<Option<usize>, TaskInstancesResponseItem>>,
     dispatch_time: DateTime<Utc>,
     note: Option<String>,
     schedule: ScheduleCache,
     last_update_time: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct RolloutDataCacheResponse {
+    rollout_id: String,
+    dispatch_time: DateTime<Utc>,
+    schedule: ScheduleCache,
+    last_update_time: Option<DateTime<Utc>>,
+    linearized_task_instances: Vec<TaskInstancesResponseItem>,
 }
 
 struct RolloutApiCache {
@@ -347,6 +357,32 @@ impl RolloutApi {
                 by_dag_run: HashMap::new(),
             })),
         }
+    }
+
+    pub async fn get_cache(&self) -> Vec<RolloutDataCacheResponse> {
+        let cache = self.cache.lock().await;
+        let mut result: Vec<_> = cache
+            .by_dag_run
+            .iter()
+            .map(|(k, v)| {
+                let linearized_tasks = v
+                    .task_instances
+                    .iter()
+                    .flat_map(|(_, tasks)| tasks.iter().map(|(_, task)| task.clone()))
+                    .collect();
+                RolloutDataCacheResponse {
+                    rollout_id: k.clone(),
+                    linearized_task_instances: linearized_tasks,
+                    dispatch_time: v.dispatch_time,
+                    last_update_time: v.last_update_time,
+                    schedule: v.schedule.clone(),
+                }
+            })
+            .collect();
+        drop(cache);
+        result.sort_by_key(|v| v.dispatch_time);
+        result.reverse();
+        result
     }
 
     /// Retrieve all rollout data, using a cache to avoid
@@ -524,9 +560,6 @@ impl RolloutApi {
             // Let's update the cache to incorporate the most up-to-date task instances.
             for task_instance in all_task_instances.into_iter() {
                 let task_instance_id = task_instance.task_id.clone();
-                if task_instance_id == "schedule" {
-                    cache_entry.schedule = ScheduleCache::Invalid;
-                }
 
                 let by_name = cache_entry
                     .task_instances
@@ -580,6 +613,10 @@ impl RolloutApi {
                 //   any  non-subnet-related task is running / pending.
                 // * handle tasks corresponding to a batch/subnet in a special way
                 //   (commented below in its pertinent section).
+                debug!(
+                    target: "frontend_api", "Processing task {}.{:?} in state {:?}",
+                    task_instance.task_id, task_instance.map_index, task_instance.state,
+                );
                 if task_instance.task_id == "schedule" {
                     match task_instance.state {
                         Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
@@ -598,9 +635,15 @@ impl RolloutApi {
                         | Some(TaskInstanceState::Scheduled)
                         | None => rollout.state = min(rollout.state, RolloutState::Preparing),
                         Some(TaskInstanceState::Success) => {
+                            if let ScheduleCache::Valid(try_number, _) = cache_entry.schedule {
+                                if try_number != task_instance.try_number {
+                                    // Another task run of the same task has executed.  We must clear the cache entry.
+                                    cache_entry.schedule = ScheduleCache::Empty;
+                                }
+                            }
                             let schedule_string = match &cache_entry.schedule {
-                                ScheduleCache::Valid(s) => s,
-                                ScheduleCache::Invalid | ScheduleCache::Empty => {
+                                ScheduleCache::Valid(_, s) => s,
+                                ScheduleCache::Empty => {
                                     let value = self
                                         .airflow_api
                                         .xcom_entry(
@@ -613,8 +656,10 @@ impl RolloutApi {
                                         .await;
                                     let schedule = match value {
                                         Ok(schedule) => {
-                                            cache_entry.schedule =
-                                                ScheduleCache::Valid(schedule.value.clone());
+                                            cache_entry.schedule = ScheduleCache::Valid(
+                                                task_instance.try_number,
+                                                schedule.value.clone(),
+                                            );
                                             schedule.value
                                         }
                                         Err(AirflowError::StatusCode(

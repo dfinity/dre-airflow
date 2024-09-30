@@ -5,7 +5,7 @@ use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
 use serde::de::Error;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -166,7 +166,7 @@ pub struct XComEntryResponse {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Display)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskInstanceState {
     Success,
@@ -216,7 +216,7 @@ where
     })
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskInstancesResponseItem {
     pub task_id: String,
     #[allow(dead_code)]
