@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use regex::Regex;
 use rollout_dashboard::types::{
     Batch, Rollout, RolloutState, Rollouts, Subnet, SubnetRolloutState,
@@ -637,6 +637,7 @@ impl RolloutApi {
                         Some(TaskInstanceState::Success) => {
                             if let ScheduleCache::Valid(try_number, _) = cache_entry.schedule {
                                 if try_number != task_instance.try_number {
+                                    info!(target: "frontend_api", "{}: resetting schedule cache", dag_run.dag_run_id);
                                     // Another task run of the same task has executed.  We must clear the cache entry.
                                     cache_entry.schedule = ScheduleCache::Empty;
                                 }
@@ -660,6 +661,7 @@ impl RolloutApi {
                                                 task_instance.try_number,
                                                 schedule.value.clone(),
                                             );
+                                            info!(target: "frontend_api", "{}: saving schedule cache", dag_run.dag_run_id);
                                             schedule.value
                                         }
                                         Err(AirflowError::StatusCode(
@@ -668,6 +670,7 @@ impl RolloutApi {
                                             // There is no schedule to be found.
                                             // Or there was no schedule to be found last time
                                             // it was queried.
+                                            warn!(target: "frontend_api", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
                                             cache_entry.schedule = ScheduleCache::Empty;
                                             continue;
                                         }
