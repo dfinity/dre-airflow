@@ -5,6 +5,7 @@ use axum::response::Sse;
 use axum::Json;
 use axum::{routing::get, Router};
 use chrono::{DateTime, Utc};
+use frontend_api::RolloutDataCacheResponse;
 use futures::stream::Stream;
 use log::{debug, error, info};
 use reqwest::Url;
@@ -162,6 +163,13 @@ impl Server {
             Err(e) => Err(e),
         }
     }
+
+    // #[debug_handler]
+    async fn get_cache(&self) -> Result<Json<Vec<RolloutDataCacheResponse>>, (StatusCode, String)> {
+        let m = self.rollout_api.get_cache().await;
+        Ok(Json(m))
+    }
+
     fn produce_rollouts_sse_stream(&self) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
         debug!(target: "sse", "New client connected.");
 
@@ -251,13 +259,16 @@ async fn main() -> ExitCode {
     let (finish_loop_tx, mut finish_loop_rx) = watch::channel(());
 
     let server_for_rollouts_handler = server.clone();
+    let server_for_cache_handler = server.clone();
     let server_for_sse_handler = server.clone();
     let rollouts_handler =
         move || async move { server_for_rollouts_handler.get_rollout_data().await };
+    let cached_data_handler = move || async move { server_for_cache_handler.get_cache().await };
     let rollouts_sse_handler =
         move || async move { server_for_sse_handler.produce_rollouts_sse_stream() };
     let mut tree = Router::new();
     tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
+    tree = tree.route("/api/v1/cache", get(cached_data_handler));
     tree = tree.route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
