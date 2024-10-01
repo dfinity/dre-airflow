@@ -345,43 +345,37 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             # a message to Slack notifying the DRE operator that a subnet
             # has not exited the alerts condition in over an hour.
             now = time.time()
-            first_alert_check_timestamp = context["task_instance"].xcom_pull(
-                key="first_alert_check_timestamp",
+            key = "alert_check_timestamp"
+            alert_check_timestamp = context["task_instance"].xcom_pull(
+                key=key,
                 map_indexes=context["task_instance"].map_index,
             )
-            if not first_alert_check_timestamp:
+            if not alert_check_timestamp:
+                # Value is not yet xcommed.  Xcom it now.
+                deadline = now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
                 self.log.info(
-                    "Notification routine not yet run; storing timestamp %s",
-                    now,
+                    "Notification deadline not initialized, storing %s", deadline
                 )
-                # Value is not yet xcommed.
-                context["task_instance"].xcom_push(
-                    key="first_alert_check_timestamp",
-                    value=now,
-                )
+                context["task_instance"].xcom_push(key=key, value=deadline)
             else:
-                self.log.info(
-                    "Notification routine already ran at %r",
-                    first_alert_check_timestamp,
-                )
-                first_alert_check_timestamp = float(first_alert_check_timestamp)
-                if (
-                    first_alert_check_timestamp
-                    > now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
-                ):
-                    self.log.info(
-                        "Routine ran over %s seconds ago, notifying",
-                        now - first_alert_check_timestamp,
-                    )
+                deadline = float(alert_check_timestamp)
+                if now > deadline:
                     # Value is xcommed and is old enough.
+                    deadline = now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
+                    self.log.info(
+                        "Notification deadline has been hit, notifying"
+                        " and resetting deadline to %s",
+                        deadline,
+                    )
+                    # Send message here.
                     NotifyAboutStalledSubnet(
                         task_id="notify_about_stalled_subnet",
                         subnet_id=subnet_id,
                     ).execute(context=context)
-                    # send message here, then
+                    # Remember new deadline.
                     context["task_instance"].xcom_push(
-                        key="first_alert_check_timestamp",
-                        value=now + 3600,
+                        key=key,
+                        value=deadline,
                     )
 
         subnet_id, git_revision = subnet_id_and_git_revision_from_args(
