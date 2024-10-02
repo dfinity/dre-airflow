@@ -350,6 +350,9 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 key=key,
                 map_indexes=context["task_instance"].map_index,
             )
+            self.log.info(
+                "Here is the current alert check timestamp: %r", alert_check_timestamp
+            )
             if not alert_check_timestamp:
                 # Value is not yet xcommed.  Xcom it now.
                 deadline = now + SUBNET_UPDATE_STALL_TIMEOUT_SECONDS
