@@ -346,8 +346,16 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             # has not exited the alerts condition in over an hour.
             now = time.time()
             key = "alert_check_timestamp"
+            task_id = context["task_instance"].task_id
+            self.log.info(
+                "Pulling alert check timestamp from xcom for %s %s %s",
+                key,
+                task_id,
+                context["task_instance"].map_index,
+            )
             alert_check_timestamp = context["task_instance"].xcom_pull(
                 key=key,
+                task_ids=task_id,
                 map_indexes=context["task_instance"].map_index,
             )
             self.log.info(
