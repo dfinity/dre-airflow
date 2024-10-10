@@ -256,7 +256,11 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
 #[derive(Clone, Serialize)]
 enum ScheduleCache {
     Empty,
-    Valid(usize, String),
+    Valid {
+        try_number: usize,
+        task_date: DateTime<Utc>,
+        cached_schedule: String,
+    },
 }
 
 struct RolloutDataCache {
@@ -635,15 +639,24 @@ impl RolloutApi {
                         | Some(TaskInstanceState::Scheduled)
                         | None => rollout.state = min(rollout.state, RolloutState::Preparing),
                         Some(TaskInstanceState::Success) => {
-                            if let ScheduleCache::Valid(try_number, _) = cache_entry.schedule {
-                                if try_number != task_instance.try_number {
+                            if let ScheduleCache::Valid {
+                                try_number,
+                                task_date,
+                                ..
+                            } = cache_entry.schedule
+                            {
+                                if try_number != task_instance.try_number
+                                    || task_date != task_instance.latest_date()
+                                {
                                     info!(target: "frontend_api", "{}: resetting schedule cache", dag_run.dag_run_id);
                                     // Another task run of the same task has executed.  We must clear the cache entry.
                                     cache_entry.schedule = ScheduleCache::Empty;
                                 }
                             }
                             let schedule_string = match &cache_entry.schedule {
-                                ScheduleCache::Valid(_, s) => s,
+                                ScheduleCache::Valid {
+                                    cached_schedule, ..
+                                } => cached_schedule,
                                 ScheduleCache::Empty => {
                                     let value = self
                                         .airflow_api
@@ -657,10 +670,11 @@ impl RolloutApi {
                                         .await;
                                     let schedule = match value {
                                         Ok(schedule) => {
-                                            cache_entry.schedule = ScheduleCache::Valid(
-                                                task_instance.try_number,
-                                                schedule.value.clone(),
-                                            );
+                                            cache_entry.schedule = ScheduleCache::Valid {
+                                                try_number: task_instance.try_number,
+                                                task_date: task_instance.latest_date(),
+                                                cached_schedule: schedule.value.clone(),
+                                            };
                                             info!(target: "frontend_api", "{}: saving schedule cache", dag_run.dag_run_id);
                                             schedule.value
                                         }
