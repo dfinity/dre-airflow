@@ -292,7 +292,9 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
             + f'ic_subnet="{subnet_id}"'
             + "}) by (ic_active_version, ic_subnet)"
         )
-        self.log.info(f"Querying Prometheus servers: {query}")
+        print("::group::Querying Prometheus servers")
+        self.log.info(f"{query}")
+        print("::endgroup::")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) == 1 and res[0]["metric"]["ic_active_version"] == git_revision:
             current_replica_count = int(res[0]["value"])
@@ -406,7 +408,9 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                 "subnet_id": subnet_id,
             }
         )
-        self.log.info(f"Querying Prometheus servers: {query}")
+        print("::group::Querying Prometheus servers")
+        self.log.info(f"{query}")
+        print("::endgroup::")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) > 0:
             self.log.info("There are still Prometheus alerts on the subnet:")
@@ -631,7 +635,9 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
                 f" last 1 day before {subnet_id}"
             )
             query = "sum(changes(ic_replica_info{" + f'ic_subnet="{other}"' + "}[1d]))"
-            self.log.info(f"Querying Prometheus servers: {query}")
+            print("::group::Querying Prometheus servers")
+            self.log.info(f"{query}")
+            print("::endgroup::")
             res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
             if not res:
                 raise RuntimeError(("Prometheus returned no sum of updates: %r" % res,))
