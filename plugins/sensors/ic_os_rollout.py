@@ -293,7 +293,7 @@ class WaitForReplicaRevisionUpdated(ICRolloutSensorBaseOperator):
             + "}) by (ic_active_version, ic_subnet)"
         )
         print("::group::Querying Prometheus servers")
-        self.log.info(f"{query}")
+        self.log.info(query)
         print("::endgroup::")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) == 1 and res[0]["metric"]["ic_active_version"] == git_revision:
