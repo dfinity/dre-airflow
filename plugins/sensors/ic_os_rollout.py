@@ -409,7 +409,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
             }
         )
         print("::group::Querying Prometheus servers")
-        self.log.info(f"{query}")
+        self.log.info(query)
         print("::endgroup::")
         res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
         if len(res) > 0:
@@ -636,7 +636,7 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
             )
             query = "sum(changes(ic_replica_info{" + f'ic_subnet="{other}"' + "}[1d]))"
             print("::group::Querying Prometheus servers")
-            self.log.info(f"{query}")
+            self.log.info(query)
             print("::endgroup::")
             res = prom.query_prometheus_servers(self.network.prometheus_urls, query)
             if not res:
