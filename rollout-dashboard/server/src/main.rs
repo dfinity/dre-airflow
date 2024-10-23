@@ -116,10 +116,10 @@ impl Server {
                     match d {
                         Ok((new_rollouts, updated)) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
-                            info!(target: "update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
+                            info!(target: "server::update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
                             changed = updated;
                             if errored {
-                                info!(target: "update_loop", "Successfully processed rollout data again after temporary error");
+                                info!(target: "server::update_loop", "Successfully processed rollout data again after temporary error");
                                 // Clear error flag.
                                 errored = false;
                                 // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
@@ -129,7 +129,7 @@ impl Server {
                         }
                         Err(res) => {
                             error!(
-                                target: "update_loop", "After processing fetch_rollout_data: {}",
+                                target: "server::update_loop", "After processing fetch_rollout_data: {}",
                                 res.1
                             );
                             errored = true;
@@ -171,13 +171,13 @@ impl Server {
     }
 
     fn produce_rollouts_sse_stream(&self) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-        debug!(target: "sse", "New client connected.");
+        debug!(target: "server::sse", "New client connected.");
 
         struct DisconnectionGuard {}
 
         impl Drop for DisconnectionGuard {
             fn drop(&mut self) {
-                debug!(target: "sse", "Client disconnected.");
+                debug!(target: "server::sse", "Client disconnected.");
             }
         }
 
@@ -205,7 +205,7 @@ impl Server {
 
             loop {
                 if stream_rx.changed().await.is_err() {
-                    debug!(target: "sse", "No more transmissions.  Stopping client SSE streaming.");
+                    debug!(target: "server::sse", "No more transmissions.  Stopping client SSE streaming.");
                     break;
                 }
                 let current_rollout_status = &stream_rx.borrow_and_update().clone();
