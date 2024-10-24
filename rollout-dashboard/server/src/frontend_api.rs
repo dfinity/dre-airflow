@@ -487,6 +487,7 @@ struct RolloutDataCache {
     note: Option<String>,
     schedule: ScheduleCache,
     last_update_time: Option<DateTime<Utc>>,
+    update_count: usize,
 }
 
 #[derive(Serialize)]
@@ -495,6 +496,7 @@ pub struct RolloutDataCacheResponse {
     dispatch_time: DateTime<Utc>,
     schedule: ScheduleCache,
     last_update_time: Option<DateTime<Utc>>,
+    update_count: usize,
     linearized_task_instances: Vec<TaskInstancesResponseItem>,
 }
 
@@ -578,23 +580,26 @@ impl<'a> RolloutUpdater<'a> {
         airflow_api: &AirflowClient,
         sorter: TaskInstanceTopologicalSorter,
         last_event_log_update: Option<DateTime<Utc>>,
-    ) -> Result<(bool, Rollout, RolloutDataCache), RolloutDataGatherError> {
-        let mut meaningful_updates_to_this_rollout = false;
-
+    ) -> Result<(Rollout, RolloutDataCache), RolloutDataGatherError> {
         // If the note of the rollout has changed,
         // note that this has been updated.
         let cache_entry = &mut self.cache_entry;
         let dag_run = &self.dag_run;
         let dag_run_update_type = &self.update_type;
 
-        if cache_entry.note != dag_run.note {
-            meaningful_updates_to_this_rollout = true;
-            cache_entry.note.clone_from(&dag_run.note);
-        }
         // Same for the dispatch time.
+        // In this case, the rollout was restarted completely.
+        // We must evict the task cache.
         if cache_entry.dispatch_time != dag_run.logical_date {
-            meaningful_updates_to_this_rollout = true;
             cache_entry.dispatch_time = dag_run.logical_date;
+            cache_entry.schedule = ScheduleCache::Empty;
+            cache_entry.task_instances = HashMap::new();
+            cache_entry.update_count += 1;
+        }
+
+        if cache_entry.note != dag_run.note {
+            cache_entry.note.clone_from(&dag_run.note);
+            cache_entry.update_count += 1;
         }
 
         type TaskInstanceResponse = Result<Vec<TaskInstancesResponseItem>, AirflowError>;
@@ -603,105 +608,107 @@ impl<'a> RolloutUpdater<'a> {
         let dag_id = dag_run.dag_id.as_str();
         let dag_run_id = dag_run.dag_run_id.as_str();
 
-        let requests: Vec<Pin<Box<dyn Future<Output = TaskInstanceResponse> + Send>>> =
-            match dag_run_update_type {
-                DagRunUpdateType::AllTaskInstances => {
-                    debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about all task instances", dag_run.dag_run_id);
-                    vec![Box::pin(async move {
+        let requests: Vec<Pin<Box<dyn Future<Output = TaskInstanceResponse> + Send>>> = match (
+            dag_run_update_type,
+            cache_entry.task_instances.is_empty(),
+        ) {
+            (_, true) | (DagRunUpdateType::AllTaskInstances, _) => {
+                debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about all task instances", dag_run.dag_run_id);
+                vec![Box::pin(async move {
+                    match airflow_api
+                        .task_instances(
+                            dag_id,
+                            dag_run.dag_run_id.as_str(),
+                            TASK_INSTANCE_LIST_LIMIT,
+                            0,
+                            TaskInstanceRequestFilters::default(),
+                        )
+                        .await
+                    {
+                        Ok(r) => Ok(r.task_instances),
+                        Err(e) => Err(e),
+                    }
+                })]
+            }
+            (DagRunUpdateType::SomeTaskInstances(updated_task_instances), false) => {
+                let updated_task_instances =
+                    updated_task_instances.iter().cloned().collect::<Vec<_>>();
+                debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about task instances updated since {:?} and a specific set of tasks too: {:?}", dag_run_id, last_update_time, updated_task_instances);
+                vec![
+                    Box::pin(async move {
                         match airflow_api
-                            .task_instances(
-                                &dag_id,
-                                dag_run.dag_run_id.as_str(),
-                                TASK_INSTANCE_LIST_LIMIT,
-                                0,
-                                TaskInstanceRequestFilters::default(),
+                            .task_instances_batch(
+                                Some(vec![dag_id.to_string()]),
+                                Some(vec![dag_run_id.to_string()]),
+                                Some(updated_task_instances),
                             )
                             .await
                         {
                             Ok(r) => Ok(r.task_instances),
                             Err(e) => Err(e),
                         }
-                    })]
-                }
-                DagRunUpdateType::SomeTaskInstances(updated_task_instances) => {
-                    let updated_task_instances =
-                        updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                    debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about task instances updated since {:?} and a specific set of tasks too: {:?}", dag_run_id, last_update_time, updated_task_instances);
-                    vec![
-                        Box::pin(async move {
-                            match airflow_api
-                                .task_instances_batch(
-                                    Some(vec![dag_id.to_string()]),
-                                    Some(vec![dag_run_id.to_string()]),
-                                    Some(updated_task_instances),
-                                )
-                                .await
-                            {
-                                Ok(r) => Ok(r.task_instances),
-                                Err(e) => Err(e),
-                            }
-                        }),
-                        Box::pin(async move {
-                            match airflow_api
-                                .task_instances(
-                                    dag_id,
-                                    dag_run_id,
-                                    TASK_INSTANCE_LIST_LIMIT,
-                                    0,
-                                    TaskInstanceRequestFilters::default()
-                                        .executed_on_or_after(last_update_time),
-                                )
-                                .await
-                            {
-                                Ok(r) => Ok(r.task_instances),
-                                Err(e) => Err(e),
-                            }
-                        }),
-                        Box::pin(async move {
-                            match last_update_time {
-                                None => Ok(vec![]),
-                                Some(_) => {
-                                    match airflow_api
-                                        .task_instances(
-                                            dag_id,
-                                            dag_run_id,
-                                            TASK_INSTANCE_LIST_LIMIT,
-                                            0,
-                                            TaskInstanceRequestFilters::default()
-                                                .updated_on_or_after(last_update_time),
-                                        )
-                                        .await
-                                    {
-                                        Ok(r) => Ok(r.task_instances),
-                                        Err(e) => Err(e),
-                                    }
+                    }),
+                    Box::pin(async move {
+                        match airflow_api
+                            .task_instances(
+                                dag_id,
+                                dag_run_id,
+                                TASK_INSTANCE_LIST_LIMIT,
+                                0,
+                                TaskInstanceRequestFilters::default()
+                                    .executed_on_or_after(last_update_time),
+                            )
+                            .await
+                        {
+                            Ok(r) => Ok(r.task_instances),
+                            Err(e) => Err(e),
+                        }
+                    }),
+                    Box::pin(async move {
+                        match last_update_time {
+                            None => Ok(vec![]),
+                            Some(_) => {
+                                match airflow_api
+                                    .task_instances(
+                                        dag_id,
+                                        dag_run_id,
+                                        TASK_INSTANCE_LIST_LIMIT,
+                                        0,
+                                        TaskInstanceRequestFilters::default()
+                                            .updated_on_or_after(last_update_time),
+                                    )
+                                    .await
+                                {
+                                    Ok(r) => Ok(r.task_instances),
+                                    Err(e) => Err(e),
                                 }
                             }
-                        }),
-                        Box::pin(async move {
-                            match last_update_time {
-                                None => Ok(vec![]),
-                                Some(_) => {
-                                    match airflow_api
-                                        .task_instances(
-                                            dag_id,
-                                            dag_run_id,
-                                            TASK_INSTANCE_LIST_LIMIT,
-                                            0,
-                                            TaskInstanceRequestFilters::default()
-                                                .ended_on_or_after(last_update_time),
-                                        )
-                                        .await
-                                    {
-                                        Ok(r) => Ok(r.task_instances),
-                                        Err(e) => Err(e),
-                                    }
+                        }
+                    }),
+                    Box::pin(async move {
+                        match last_update_time {
+                            None => Ok(vec![]),
+                            Some(_) => {
+                                match airflow_api
+                                    .task_instances(
+                                        dag_id,
+                                        dag_run_id,
+                                        TASK_INSTANCE_LIST_LIMIT,
+                                        0,
+                                        TaskInstanceRequestFilters::default()
+                                            .ended_on_or_after(last_update_time),
+                                    )
+                                    .await
+                                {
+                                    Ok(r) => Ok(r.task_instances),
+                                    Err(e) => Err(e),
                                 }
                             }
-                        }),
-                    ]
-                }
-            };
+                        }
+                    }),
+                ]
+            }
+        };
 
         let mut retrieved_task_instances: Vec<TaskInstancesResponseItem> = vec![];
         for r in join_all(requests).await.into_iter() {
@@ -712,12 +719,6 @@ impl<'a> RolloutUpdater<'a> {
             target: "frontend_api::get_rollout_data", "{}: retrieved {} tasks",
             dag_run_id, retrieved_task_instances.len()
         );
-
-        if !retrieved_task_instances.is_empty() {
-            // At least one task has updated or finished.
-            // See function documentation about meaningful changes.
-            meaningful_updates_to_this_rollout = true;
-        };
 
         let mut rollout = Rollout::new(
             dag_run.dag_run_id.to_string(),
@@ -737,6 +738,7 @@ impl<'a> RolloutUpdater<'a> {
             cache_entry.dispatch_time,
             dag_run.last_scheduling_decision,
             dag_run.conf.clone(),
+            cache_entry.update_count,
         );
 
         // Let's update the cache to incorporate the most up-to-date task instances.
@@ -749,15 +751,20 @@ impl<'a> RolloutUpdater<'a> {
             let by_name = cache_entry
                 .task_instances
                 .entry(task_instance_id)
-                .or_insert(HashMap::new());
+                .or_default();
 
             match by_name.entry(task_instance.map_index) {
                 Vacant(entry) => {
                     entry.insert(task_instance);
+                    rollout.update_count += 1;
                 }
                 Occupied(mut entry) => {
-                    if task_instance.latest_date() > entry.get().latest_date() {
+                    if task_instance.latest_date() > entry.get().latest_date()
+                        || task_instance.state != entry.get().state
+                        || task_instance.note != entry.get().note
+                    {
                         entry.insert(task_instance.clone());
+                        rollout.update_count += 1;
                     }
                 }
             };
@@ -772,6 +779,7 @@ impl<'a> RolloutUpdater<'a> {
                         task_instance_id
                     );
                     tasks.remove(&None);
+                    rollout.update_count += 1;
                 }
             }
         }
@@ -830,7 +838,7 @@ impl<'a> RolloutUpdater<'a> {
                             ScheduleCache::Empty => {
                                 let value = airflow_api
                                     .xcom_entry(
-                                        &dag_id,
+                                        dag_id,
                                         dag_run.dag_run_id.as_str(),
                                         task_instance.task_id.as_str(),
                                         task_instance.map_index,
@@ -1113,12 +1121,9 @@ impl<'a> RolloutUpdater<'a> {
         // early, to force a full state recalculation if there was a
         // failure or an early return.
         cache_entry.last_update_time = new_last_update_time;
+        cache_entry.update_count = rollout.update_count;
 
-        Ok((
-            meaningful_updates_to_this_rollout,
-            rollout,
-            cache_entry.clone(),
-        ))
+        Ok((rollout, cache_entry.clone()))
     }
 }
 #[derive(Clone)]
@@ -1154,6 +1159,7 @@ impl RolloutApi {
                     linearized_task_instances: linearized_tasks,
                     dispatch_time: v.dispatch_time,
                     last_update_time: v.last_update_time,
+                    update_count: v.update_count,
                     schedule: v.schedule.clone(),
                 }
             })
@@ -1167,10 +1173,11 @@ impl RolloutApi {
     /// Retrieve all rollout data, using a cache to avoid
     /// re-fetching task instances not updated since last time.
     ///
-    /// Returns a tuple of the the rollout data and a flag
-    /// indicating if the rollout data was updated since
-    /// the last time.  The flag should be used by calling
-    /// code to decide whether to send data to clients or not.
+    /// Returns a tuple of the the rollout data and a map of
+    /// flags indicating if each rollout (keyed by name) was
+    /// updated since the last time.  The flag should be used by
+    /// calling code to decide whether to send updated data to
+    /// clients or not.
     ///
     /// The rollout structure itself is updated on every call
     /// for every DAG run.  However, not every change in the DAG
@@ -1181,7 +1188,7 @@ impl RolloutApi {
     pub async fn get_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<(Rollouts, bool), RolloutDataGatherError> {
+    ) -> Result<Rollouts, RolloutDataGatherError> {
         let mut cache = self.cache.lock().await;
         let dag_id = "rollout_ic_os_to_mainnet_subnets";
 
@@ -1221,6 +1228,7 @@ impl RolloutApi {
                         note: dag_run.note.clone(),
                         schedule: ScheduleCache::Empty,
                         last_update_time: None,
+                        update_count: 0,
                     }),
             })
             .collect::<Vec<_>>();
@@ -1237,13 +1245,9 @@ impl RolloutApi {
             })
             .collect::<Vec<_>>();
 
-        // Track if any rollout has had any meaningful changes.
-        // Also see function documentation about meaningful changes.
-        let mut meaningful_updates_to_any_rollout = false;
         let mut res: Rollouts = vec![];
         for fut in updateds.into_iter() {
-            let (updated, rollout, cache_entry) = fut.await?;
-            meaningful_updates_to_any_rollout = updated || meaningful_updates_to_any_rollout;
+            let (rollout, cache_entry) = fut.await?;
             cache.by_dag_run.insert(rollout.name.clone(), cache_entry);
             res.push(rollout);
         }
@@ -1251,6 +1255,6 @@ impl RolloutApi {
         // Save the state of the log inspector after everything was successful.
         cache.log_inspector = updated_log_inspector;
 
-        Ok((res, meaningful_updates_to_any_rollout))
+        Ok(res)
     }
 }

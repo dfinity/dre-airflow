@@ -25,6 +25,8 @@ const MAX_BATCH_SIZE: usize = 100;
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 /// Default timeout per request to Airflow.
 const PER_REQUEST_TIMEOUT: u64 = 15;
+// API sub-URL for Airflow.
+const API_SUBURL: &str = "api/v1/";
 
 fn add_date_parm(url: String, parm_name: &str, date: Option<DateTime<Utc>>) -> String {
     let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
@@ -761,7 +763,7 @@ impl AirflowClient {
     }
 
     async fn _get_logged_in(&self, suburl: String) -> Result<serde_json::Value, AirflowError> {
-        let suburl = "api/v1/".to_string() + &suburl;
+        let suburl = API_SUBURL.to_string() + &suburl;
         self._get_or_login_and_get(suburl, true).await
     }
 
@@ -773,7 +775,7 @@ impl AirflowClient {
     where
         T: Serialize + Sync + Send,
     {
-        let suburl = "api/v1/".to_string() + &suburl;
+        let suburl = API_SUBURL.to_string() + &suburl;
         self._post_or_login_and_post(suburl, content, true).await
     }
 
