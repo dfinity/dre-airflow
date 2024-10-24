@@ -1,4 +1,5 @@
 use async_stream::try_stream;
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -9,15 +10,17 @@ use frontend_api::RolloutDataCacheResponse;
 use futures::stream::Stream;
 use log::{debug, error, info};
 use reqwest::Url;
-use serde::Serialize;
+use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::from_str;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::env;
 use std::error::Error;
+use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::process::ExitCode;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use tokio::signal::unix::{signal, SignalKind};
@@ -50,7 +53,7 @@ struct Server {
 
 impl Server {
     fn new(rollout_api: Arc<RolloutApi>) -> Self {
-        let init = Err((StatusCode::NO_CONTENT, "".to_string()));
+        let init: CurrentRolloutStatus = Err((StatusCode::NO_CONTENT, "".to_string()));
         let (stream_tx, _stream_rx) = watch::channel::<CurrentRolloutStatus>(init.clone());
         Self {
             rollout_api,
@@ -61,9 +64,9 @@ impl Server {
     async fn fetch_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<(VecDeque<Rollout>, bool), (StatusCode, String)> {
+    ) -> Result<VecDeque<Rollout>, (StatusCode, String)> {
         match self.rollout_api.get_rollout_data(max_rollouts).await {
-            Ok((rollouts, updated)) => Ok((rollouts.into(), updated)),
+            Ok(rollouts) => Ok(rollouts.into()),
             Err(e) => {
                 let res = match e {
                     RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
@@ -110,22 +113,18 @@ impl Server {
         loop {
             let loop_start_time: DateTime<Utc> = Utc::now();
 
-            let mut changed = true;
-            let data = select! {
+            let d = select! {
                 d = self.fetch_rollout_data(max_rollouts) => {
-                    match d {
-                        Ok((new_rollouts, updated)) => {
+                    match &d {
+                        Ok(new_rollouts) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
-                            info!(target: "server::update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
-                            changed = updated;
+                            info!(target: "server::update_loop", "After {}, obtained {} rollouts from Airflow", loop_delta_time, new_rollouts.len());
                             if errored {
                                 info!(target: "server::update_loop", "Successfully processed rollout data again after temporary error");
                                 // Clear error flag.
                                 errored = false;
                                 // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
-                                changed = true;
                             }
-                            Ok(new_rollouts)
                         }
                         Err(res) => {
                             error!(
@@ -133,24 +132,21 @@ impl Server {
                                 res.1
                             );
                             errored = true;
-                            Err(res)
                         }
                     }
+                    d
                 },
-                _ignored = &mut cancel => break,
+                _ = &mut cancel => break,
             };
 
-            if changed {
-                let _ = self.stream_tx.send(data.clone());
-
-                let mut container = self.last_rollout_data.lock().await;
-                *container = data;
-                drop(container);
-            }
+            let _ = self.stream_tx.send_replace(d.clone());
+            let mut current_rollout_data = self.last_rollout_data.lock().await;
+            *current_rollout_data = d;
+            drop(current_rollout_data);
 
             select! {
-                _ignored1 = sleep(Duration::from_secs(refresh_interval)) => (),
-                _ignored2 = &mut cancel => break,
+                _ = sleep(Duration::from_secs(refresh_interval)) => (),
+                _ = &mut cancel => break,
             }
         }
     }
@@ -170,10 +166,29 @@ impl Server {
         Ok(Json(m))
     }
 
-    fn produce_rollouts_sse_stream(&self) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-        debug!(target: "server::sse", "New client connected.");
-
+    /// Produce an SSE stream structured as a dictionary:
+    /// * rollouts: appears and contains a list of Rollout when rollouts have been updated and
+    ///             the caller did not indicate delta_support.  If the caller indicated
+    ///             delta_support, then this appears only on initial connection, or after a
+    ///             backend error has been reported in a prior message.
+    /// * error: always appears, but only contains an error (is non-null) when there was an
+    ///          error polling Airflow.
+    /// * updated: when the caller indicates delta_support, this appears and updated rollouts
+    ///            are listed here.
+    /// * deleted: when the caller indicates delta_support, this appears and lists the names
+    ///            of the rollouts that have disappeared.
+    fn produce_rollouts_sse_stream(
+        &self,
+        delta_support: bool,
+    ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
         struct DisconnectionGuard {}
+
+        impl Default for DisconnectionGuard {
+            fn default() -> Self {
+                debug!(target: "server::sse", "New client connected.");
+                Self {}
+            }
+        }
 
         impl Drop for DisconnectionGuard {
             fn drop(&mut self) {
@@ -181,43 +196,88 @@ impl Server {
             }
         }
 
-        #[derive(Serialize)]
+        #[derive(Serialize, Default)]
         struct SseResponse {
-            rollouts: VecDeque<Rollout>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            rollouts: Option<VecDeque<Rollout>>,
+            #[serde(skip_serializing_if = "VecDeque::is_empty")]
+            updated: VecDeque<Rollout>,
+            #[serde(skip_serializing_if = "VecDeque::is_empty")]
+            deleted: VecDeque<String>,
             error: Option<(u16, String)>,
         }
 
+        impl SseResponse {
+            fn error(e: &(StatusCode, String)) -> Self {
+                Self {
+                    error: Some((e.0.as_u16(), e.1.clone())),
+                    ..Default::default()
+                }
+            }
+            fn full(rollouts: &VecDeque<Rollout>) -> Self {
+                Self {
+                    rollouts: Some(rollouts.clone()),
+                    ..Default::default()
+                }
+            }
+        }
+
         let mut stream_rx = self.stream_tx.subscribe();
-        let last_rollout_data = self.last_rollout_data.clone();
+
         let stream = try_stream! {
             // Set up something that will be dropped (thus log) when SSE is disconnected.
-            let guard = DisconnectionGuard{};
+            let disconnection_guard = DisconnectionGuard::default();
 
-            // Send first message from existing data.
-            let mfk = last_rollout_data.lock().await.clone();
-            let data_to_serialize = match &mfk {
-                Ok(rollouts) => serde_json::to_string(&SseResponse{rollouts: rollouts.clone(), error: None}),
-                Err(e) => serde_json::to_string(&SseResponse{rollouts: VecDeque::new(), error: Some((e.0.as_u16(), e.1.clone()))}),
-            }.unwrap();
-            drop(mfk);
-            let event = Event::default().data(data_to_serialize);
-            yield event;
+            // Set an initial message to diff the first broadcast message against.
+            let mut last_rollout_data: CurrentRolloutStatus = Err((StatusCode::OK, "".to_string()));
 
             loop {
+                let current_rollout_data = stream_rx.borrow_and_update().clone();
+
+                let message = match (&current_rollout_data, &last_rollout_data) {
+                    // Error before.  Send full sync.
+                    (Ok(new_rollouts), Err(_)) => Some(SseResponse::full(new_rollouts)),
+                    // Last time was a good update.  Send differential sync.
+                    (Ok(new_rollouts), Ok(old_rollouts)) => {
+                        let new_names = new_rollouts.iter().map(|r| r.name.clone()).collect::<HashSet<String>>();
+                        let old_rollouts_map = old_rollouts.iter().map(|r| (r.name.clone(), r)).collect::<HashMap<String, &Rollout>>();
+                            let updated = new_rollouts.iter().filter_map(|r| match old_rollouts_map.get(&r.name) { None => Some(r.clone()), Some(old_rollout) => match r.update_count != old_rollout.update_count {true => Some(r.clone()), false => None}}).collect::<VecDeque<Rollout>>();
+                            let deleted = old_rollouts.iter().filter_map(|r| match new_names.contains(&r.name) { true => None, false => Some(r.name.clone())}).collect::<VecDeque<String>>();
+                            match updated.is_empty() && deleted.is_empty() {
+                                true => None,
+                                false => match delta_support {
+                                    false => Some(SseResponse::full(new_rollouts)),
+                                    true => Some(SseResponse{
+                                        updated,
+                                        deleted,
+                                        error: None,
+                                        ..Default::default()
+                                    }),
+                                }
+                            }
+                    }
+                    // Error after a good update.  Send error.
+                    (Err(e), Ok(_)) => Some(SseResponse::error(e)),
+                    // Error after an error.  Only send update if errors differ.
+                    (Err(e), Err(olde)) => match e == olde {
+                        true => None,
+                        false => Some(SseResponse::error(e)),
+                    },
+                };
+
+                match &message {
+                    Some(m) => yield Event::default().data(serde_json::to_string(m).unwrap()),
+                    None => ()
+                }
+
+                last_rollout_data = current_rollout_data;
                 if stream_rx.changed().await.is_err() {
-                    debug!(target: "server::sse", "No more transmissions.  Stopping client SSE streaming.");
                     break;
                 }
-                let current_rollout_status = &stream_rx.borrow_and_update().clone();
-                let mfk = current_rollout_status.clone();
-                let data_to_serialize = match mfk {
-                    Ok(rollouts) => serde_json::to_string(&SseResponse{rollouts, error: None}),
-                    Err(e) => serde_json::to_string(&SseResponse{rollouts: VecDeque::new(), error: Some((e.0.as_u16(), e.1))}),
-                }.unwrap();
-                let event = Event::default().data(data_to_serialize);
-                yield event;
             }
-            drop(guard);
+
+            // Drop the disconnection guard to log the message that the client disconnected.
+            drop(disconnection_guard);
         };
 
         Sse::new(stream).keep_alive(
@@ -226,6 +286,28 @@ impl Server {
                 .text("keepalive"),
         )
     }
+}
+
+/// Serde deserialization decorator to map empty Strings to None,
+fn empty_value_as_true<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let opt = Option::<String>::deserialize(de)?;
+    match opt.as_deref() {
+        Some("") | None => FromStr::from_str("true")
+            .map_err(de::Error::custom)
+            .map(Some),
+        Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
+    }
+}
+
+#[derive(Deserialize)]
+struct SseHandlerParameters {
+    #[serde(default, deserialize_with = "empty_value_as_true")]
+    incremental: Option<bool>,
 }
 
 #[tokio::main]
@@ -264,12 +346,18 @@ async fn main() -> ExitCode {
     let rollouts_handler =
         move || async move { server_for_rollouts_handler.get_rollout_data().await };
     let cached_data_handler = move || async move { server_for_cache_handler.get_cache().await };
-    let rollouts_sse_handler =
-        move || async move { server_for_sse_handler.produce_rollouts_sse_stream() };
+    let rollouts_sse_handler = move |options: Query<SseHandlerParameters>| {
+        let options: SseHandlerParameters = options.0;
+        async move {
+            server_for_sse_handler
+                .produce_rollouts_sse_stream(options.incremental.unwrap_or_default())
+        }
+    };
     let mut tree = Router::new();
-    tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
-    tree = tree.route("/api/v1/cache", get(cached_data_handler));
-    tree = tree.route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
+    tree = tree
+        .route("/api/v1/rollouts", get(rollouts_handler))
+        .route("/api/v1/cache", get(cached_data_handler))
+        .route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

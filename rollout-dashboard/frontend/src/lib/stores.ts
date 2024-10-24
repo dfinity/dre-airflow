@@ -10,7 +10,7 @@ export type RolloutResult = {
 
 
 const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v1";
-const url = API_URL + "/rollouts/sse"
+const url = API_URL + "/rollouts/sse?incremental"
 var evtSource: EventSource;
 
 const rollout_store = writable<RolloutResult>({ rollouts: [], error: "loading" })
@@ -37,10 +37,46 @@ function resetupEventSource() {
                 })
             }
         } else {
-            rollout_store.set({
-                rollouts: current_rollout_result.rollouts,
-                error: null
-            })
+            if (current_rollout_result.rollouts !== undefined) {
+                rollout_store.set({
+                    rollouts: current_rollout_result.rollouts,
+                    error: null
+                })
+            } else {
+                var rollouts: Rollout[] = get(rollout_store).rollouts;
+                var updated: Rollout[] | undefined = current_rollout_result["updated"];
+                var deleted: String[] | undefined = current_rollout_result["deleted"];
+                if (updated !== undefined) {
+                    for (var i = updated.length - 1; i >= 0; i--) {
+                        var found = false;
+                        for (var j = rollouts.length - 1; j >= 0; j--) {
+                            if (rollouts[j].name == updated[i].name) {
+                                found = true;
+                                rollouts[j] = updated[i];
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            rollouts.unshift(updated[i]);
+                        }
+                    }
+                }
+                if (deleted !== undefined) {
+                    for (const deleted_name of deleted) {
+                        for (var j = rollouts.length - 1; j >= 0; j--) {
+                            console.log(rollouts[j].name + "    " + deleted_name)
+                            if (rollouts[j].name == deleted_name) {
+                                rollouts.splice(j, 1);
+                                break;
+                            }
+                        }
+                    }
+                }
+                rollout_store.set({
+                    rollouts: rollouts,
+                    error: null
+                })
+            }
         }
     }
     evtSource.onerror = function (e) {

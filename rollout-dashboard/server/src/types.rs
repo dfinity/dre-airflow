@@ -95,6 +95,7 @@ pub struct Rollout {
     pub batches: IndexMap<usize, Batch>,
     /// Configuration associated to the rollout.
     pub conf: HashMap<String, serde_json::Value>,
+    pub update_count: usize,
 }
 
 impl Rollout {
@@ -105,6 +106,7 @@ impl Rollout {
         dispatch_time: DateTime<Utc>,
         last_scheduling_decision: Option<DateTime<Utc>>,
         conf: HashMap<String, serde_json::Value>,
+        update_count: usize,
     ) -> Self {
         Self {
             name,
@@ -115,6 +117,7 @@ impl Rollout {
             last_scheduling_decision,
             batches: IndexMap::new(),
             conf,
+            update_count,
         }
     }
 }
