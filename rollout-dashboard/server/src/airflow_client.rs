@@ -90,6 +90,74 @@ trait Pageable {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct DagsResponseItem {
+    /// dag_id is unique, enforced by Airflow.
+    pub dag_id: String,
+    #[allow(dead_code)]
+    pub dag_display_name: String,
+    pub is_paused: bool,
+    pub is_active: bool,
+    pub has_import_errors: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DagsResponse {
+    pub dags: Vec<DagsResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<String, usize>,
+    total_entries: usize,
+}
+
+impl Pageable for DagsResponse {
+    fn len(&self) -> usize {
+        self.dags.len()
+    }
+    fn merge(&mut self, other: Self) {
+        for v in other.dags.clone().into_iter() {
+            let id = v.dag_id.clone();
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.dags[*pos] = v;
+                }
+                None => {
+                    //debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.dags.len());
+                    self.dags.push(v);
+                }
+            }
+        }
+        self.total_entries = other.total_entries;
+    }
+    fn truncate(&mut self, max_entries: usize) {
+        if self.dags.len() > max_entries {
+            self.dags.truncate(max_entries)
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct DagsQueryFilter<'a> {
+    pub dag_id_pattern: Option<&'a String>,
+}
+
+impl<'a> DagsQueryFilter<'a> {
+    fn as_queryparams(&self) -> Vec<(&str, String)> {
+        let shit = [self
+            .dag_id_pattern
+            .as_ref()
+            .map(|v| ("dag_id_pattern", (*v).clone()))];
+        let res: Vec<_> = shit
+            .iter()
+            .flatten()
+            .map(|(k, v)| (*k, (*v).clone()))
+            .collect();
+        res
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum DagRunState {
     Queued,
@@ -968,6 +1036,38 @@ impl AirflowClient {
         };
 
         Ok(())
+    }
+
+    /// Return DAG info, by default in alphabetical order.
+    #[allow(dead_code)]
+    pub async fn dags(
+        &self,
+        limit: usize,
+        offset: usize,
+        filter: &DagsQueryFilter<'_>,
+        order_by: Option<String>, // FIXME: use structural typing here.
+    ) -> Result<DagsResponse, AirflowError> {
+        let qpairs = filter.as_queryparams();
+        let qparams: querystring::QueryParams =
+            qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let suburl = "dags".to_string()
+            + (if !qparams.is_empty() {
+                "?".to_string() + querystring::stringify(qparams).as_str()
+            } else {
+                "".to_string()
+            })
+            .as_str();
+        _paged_get(
+            suburl,
+            match order_by {
+                Some(x) => Some(x),
+                None => Some("dag_id".into()),
+            },
+            Some(PagingParameters { limit, offset }),
+            MAX_BATCH_SIZE,
+            |x| self._get_logged_in(x),
+        )
+        .await
     }
 
     /// Return DAG runs from newest to oldest.
