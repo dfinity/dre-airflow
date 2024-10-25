@@ -13,7 +13,7 @@ use regex::Regex;
 use rollout_dashboard::types::{
     Batch, Rollout, RolloutState, Rollouts, Subnet, SubnetRolloutState,
 };
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::cmp::{max, min};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet};
@@ -267,7 +267,7 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone)]
 enum ScheduleCache {
     Missing,
     Invalid {
@@ -498,10 +498,24 @@ struct RolloutDataCache {
     update_count: usize,
 }
 
+fn serialize_cache_response<S>(cache: &ScheduleCache, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match cache {
+        ScheduleCache::Invalid { .. } => serializer.serialize_str("invalid"),
+        ScheduleCache::Missing { .. } => serializer.serialize_str("missing"),
+        ScheduleCache::Valid {
+            cached_schedule, ..
+        } => serializer.serialize_str(cached_schedule),
+    }
+}
+
 #[derive(Serialize)]
 pub struct RolloutDataCacheResponse {
     rollout_id: String,
     dispatch_time: DateTime<Utc>,
+    #[serde(serialize_with = "serialize_cache_response")]
     schedule: ScheduleCache,
     last_update_time: Option<DateTime<Utc>>,
     update_count: usize,
