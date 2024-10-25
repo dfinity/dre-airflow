@@ -283,7 +283,7 @@ enum ScheduleCacheValidity {
     Invalid,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 enum ScheduleCache {
     Unretrieved,
     ForTask {
@@ -691,7 +691,7 @@ impl<'a> RolloutUpdater<'a> {
         // We must evict the task cache.
         if cache_entry.dispatch_time != dag_run.logical_date {
             cache_entry.dispatch_time = dag_run.logical_date;
-            cache_entry.schedule = ScheduleCache::Unretrieved;
+            cache_entry.schedule = ScheduleCache::default();
             cache_entry.task_instances = HashMap::new();
             cache_entry.update_count += 1;
         }
@@ -1343,7 +1343,7 @@ impl RolloutApi {
                         task_instances: HashMap::new(),
                         dispatch_time: dag_run.logical_date,
                         note: dag_run.note.clone(),
-                        schedule: ScheduleCache::Unretrieved,
+                        schedule: ScheduleCache::default(),
                         last_update_time: None,
                         update_count: 0,
                     }),
