@@ -5,6 +5,7 @@ use axum::response::Sse;
 use axum::Json;
 use axum::{routing::get, Router};
 use chrono::{DateTime, Utc};
+use frontend_api::RolloutDataCacheResponse;
 use futures::stream::Stream;
 use log::{debug, error, info};
 use reqwest::Url;
@@ -115,10 +116,10 @@ impl Server {
                     match d {
                         Ok((new_rollouts, updated)) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
-                            info!(target: "update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
+                            info!(target: "server::update_loop", "After {}, obtained {} rollouts from Airflow (updated: {})", loop_delta_time, new_rollouts.len(), updated);
                             changed = updated;
                             if errored {
-                                info!(target: "update_loop", "Successfully processed rollout data again after temporary error");
+                                info!(target: "server::update_loop", "Successfully processed rollout data again after temporary error");
                                 // Clear error flag.
                                 errored = false;
                                 // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
@@ -128,7 +129,7 @@ impl Server {
                         }
                         Err(res) => {
                             error!(
-                                target: "update_loop", "After processing fetch_rollout_data: {}",
+                                target: "server::update_loop", "After processing fetch_rollout_data: {}",
                                 res.1
                             );
                             errored = true;
@@ -162,14 +163,21 @@ impl Server {
             Err(e) => Err(e),
         }
     }
+
+    // #[debug_handler]
+    async fn get_cache(&self) -> Result<Json<Vec<RolloutDataCacheResponse>>, (StatusCode, String)> {
+        let m = self.rollout_api.get_cache().await;
+        Ok(Json(m))
+    }
+
     fn produce_rollouts_sse_stream(&self) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-        debug!(target: "sse", "New client connected.");
+        debug!(target: "server::sse", "New client connected.");
 
         struct DisconnectionGuard {}
 
         impl Drop for DisconnectionGuard {
             fn drop(&mut self) {
-                debug!(target: "sse", "Client disconnected.");
+                debug!(target: "server::sse", "Client disconnected.");
             }
         }
 
@@ -197,7 +205,7 @@ impl Server {
 
             loop {
                 if stream_rx.changed().await.is_err() {
-                    debug!(target: "sse", "No more transmissions.  Stopping client SSE streaming.");
+                    debug!(target: "server::sse", "No more transmissions.  Stopping client SSE streaming.");
                     break;
                 }
                 let current_rollout_status = &stream_rx.borrow_and_update().clone();
@@ -251,13 +259,16 @@ async fn main() -> ExitCode {
     let (finish_loop_tx, mut finish_loop_rx) = watch::channel(());
 
     let server_for_rollouts_handler = server.clone();
+    let server_for_cache_handler = server.clone();
     let server_for_sse_handler = server.clone();
     let rollouts_handler =
         move || async move { server_for_rollouts_handler.get_rollout_data().await };
+    let cached_data_handler = move || async move { server_for_cache_handler.get_cache().await };
     let rollouts_sse_handler =
         move || async move { server_for_sse_handler.produce_rollouts_sse_stream() };
     let mut tree = Router::new();
     tree = tree.route("/api/v1/rollouts", get(rollouts_handler));
+    tree = tree.route("/api/v1/cache", get(cached_data_handler));
     tree = tree.route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
