@@ -118,7 +118,7 @@ impl Server {
                     match &d {
                         Ok(new_rollouts) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
-                            info!(target: "server::update_loop", "After {}, obtained {} rollouts from Airflow", loop_delta_time, new_rollouts.len());
+                            info!(target: "server::update_loop", "{} rollouts collected after {}.  Sleeping for {} seconds.", new_rollouts.len(), loop_delta_time, refresh_interval);
                             if errored {
                                 info!(target: "server::update_loop", "Successfully processed rollout data again after temporary error");
                                 // Clear error flag.
