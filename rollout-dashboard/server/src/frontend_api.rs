@@ -285,6 +285,7 @@ enum ScheduleCacheValidity {
 
 #[derive(Clone, Default)]
 enum ScheduleCache {
+    #[default]
     Unretrieved,
     ForTask {
         try_number: usize,
@@ -294,6 +295,10 @@ enum ScheduleCache {
 }
 
 impl ScheduleCache {
+    /// Retrieve whether the cache is updated based on the cache keys passed,
+    /// and if up to date, return the cache contents.  Return Stale if the
+    /// cache needs updating, and Invalid if the cache is up to date but
+    /// the contents are not valid for use.
     fn up_to_date(&self, try_number: usize, latest_date: DateTime<Utc>) -> ScheduleCacheValidity {
         match self {
             ScheduleCache::Unretrieved => ScheduleCacheValidity::Stale,
@@ -319,6 +324,7 @@ impl ScheduleCache {
         }
     }
 
+    /// Update the cache entry.
     fn update(
         &mut self,
         try_number: usize,
@@ -334,6 +340,7 @@ impl ScheduleCache {
         }
     }
 
+    /// Update the cache entry with (possibly) an invalid value.
     fn invalidate(
         &mut self,
         try_number: usize,
