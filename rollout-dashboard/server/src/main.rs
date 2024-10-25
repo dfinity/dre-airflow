@@ -353,11 +353,13 @@ async fn main() -> ExitCode {
                 .produce_rollouts_sse_stream(options.incremental.unwrap_or_default())
         }
     };
-    let mut tree = Router::new();
-    tree = tree
-        .route("/api/v1/rollouts", get(rollouts_handler))
-        .route("/api/v1/cache", get(cached_data_handler))
-        .route("/api/v1/rollouts/sse", get(rollouts_sse_handler));
+    let stable_api = Router::new()
+        .route("/rollouts", get(rollouts_handler))
+        .route("/rollouts/sse", get(rollouts_sse_handler));
+    let unstable_api = Router::new().route("/cache", get(cached_data_handler));
+    let mut tree = Router::new()
+        .nest("/api/v1", stable_api)
+        .nest("/api/unstable", unstable_api);
     tree = tree.nest_service("/", ServeDir::new(frontend_static_dir));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
