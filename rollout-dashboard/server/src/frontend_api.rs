@@ -1,7 +1,7 @@
 use crate::airflow_client::{
-    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, EventLogsResponseFilters,
-    TaskInstanceRequestFilters, TaskInstanceState, TaskInstancesResponseItem, TasksResponse,
-    TasksResponseItem,
+    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, DagsQueryFilter, DagsResponse,
+    DagsResponseItem, EventLogsResponseFilters, TaskInstanceRequestFilters, TaskInstanceState,
+    TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
 use crate::python;
 use chrono::{DateTime, Utc};
@@ -598,6 +598,42 @@ pub struct RolloutDataCacheResponse {
     last_update_time: Option<DateTime<Utc>>,
     update_count: usize,
     linearized_task_instances: Vec<TaskInstancesResponseItem>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum RolloutEngineState {
+    Missing,
+    Broken,
+    Paused,
+    Inactive,
+    Active,
+}
+
+impl From<DagsResponse> for RolloutEngineState {
+    fn from(resp: DagsResponse) -> Self {
+        match resp.dags.len() {
+            0 => RolloutEngineState::Missing,
+            _ => match resp.dags[0] {
+                DagsResponseItem {
+                    has_import_errors: true,
+                    ..
+                } => Self::Broken,
+                DagsResponseItem {
+                    is_paused: true, ..
+                } => Self::Paused,
+                DagsResponseItem {
+                    is_active: false, ..
+                } => Self::Inactive,
+                DagsResponseItem {
+                    is_active: true,
+                    is_paused: false,
+                    has_import_errors: false,
+                    ..
+                } => Self::Active,
+            },
+        }
+    }
 }
 
 struct RolloutApiCache {
@@ -1296,7 +1332,7 @@ impl RolloutApi {
     pub async fn get_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<Rollouts, RolloutDataGatherError> {
+    ) -> Result<(RolloutEngineState, Rollouts), RolloutDataGatherError> {
         let mut cache = self.cache.lock().await;
         let dag_id = "rollout_ic_os_to_mainnet_subnets";
 
@@ -1306,6 +1342,20 @@ impl RolloutApi {
             .log_inspector
             .incrementally_detect_dag_updates(&self.airflow_api, dag_id)
             .await?;
+
+        // Retrieve the latest X DAG runs.
+        let engine_state: RolloutEngineState = self
+            .airflow_api
+            .dags(
+                1000,
+                0,
+                &DagsQueryFilter {
+                    dag_id_pattern: Some(&dag_id.to_string()),
+                },
+                None,
+            )
+            .await?
+            .into();
 
         // Retrieve the latest X DAG runs.
         let dag_runs = self
@@ -1363,6 +1413,6 @@ impl RolloutApi {
         // Save the state of the log inspector after everything was successful.
         cache.log_inspector = updated_log_inspector;
 
-        Ok(res)
+        Ok((engine_state, res))
     }
 }

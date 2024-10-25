@@ -3,16 +3,18 @@ import { type Rollout } from './types'
 
 const BACKEND_TIMEOUT = 15000
 
-type IncrementalRolloutResult = {
+type SseMessage = {
     error: [number, string] | null;
     rollouts: Rollout[];
     updated: Rollout[] | undefined;
     deleted: String[] | undefined;
+    engine_state?: string;
 }
 
 export type RolloutResult = {
     error: [number, string] | string | null;
     rollouts: Rollout[];
+    engine_state?: string;
 }
 
 
@@ -37,7 +39,7 @@ function resetupEventSource() {
     // var evtSourceGenerated = new Date();
     evtSource = new EventSource(url);
     evtSource.onmessage = async function (event) {
-        var sse_message: IncrementalRolloutResult = JSON.parse(event.data);
+        var sse_message: SseMessage = JSON.parse(event.data);
         if (sse_message.error !== null) {
             let status = sse_message.error[0];
             if (status == 204) {
@@ -52,21 +54,23 @@ function resetupEventSource() {
                 console.log('Request for rollout data failed: ' + errorText)
                 rollout_store.set({
                     rollouts: get(rollout_store).rollouts,
+                    engine_state: get(rollout_store).engine_state,
                     error: errorText
                 })
             }
         } else if (sse_message.rollouts !== undefined) {
-            console.log("Full sync with " + sse_message.rollouts.length + " rollouts");
+            console.log("Full sync with " + sse_message.rollouts.length + " rollouts and engine state " + sse_message.engine_state);
             rollout_store.set({
                 rollouts: sse_message.rollouts,
-                error: null
+                error: null,
+                engine_state: sse_message.engine_state,
             })
         } else {
             var rollouts: Rollout[] = get(rollout_store).rollouts;
             var updated: Rollout[] | undefined = sse_message["updated"];
             var deleted: String[] | undefined = sse_message["deleted"];
             if (updated !== undefined) {
-                console.log("Update of " + updated.length + " rollouts");
+                console.log("Update of " + updated.length + " rollouts and engine state " + sse_message.engine_state);
                 for (var i = updated.length - 1; i >= 0; i--) {
                     var found = false;
                     for (var j = rollouts.length - 1; j >= 0; j--) {
@@ -95,7 +99,8 @@ function resetupEventSource() {
             }
             rollout_store.set({
                 rollouts: rollouts,
-                error: null
+                error: null,
+                engine_state: sse_message.engine_state,
             })
         }
     }

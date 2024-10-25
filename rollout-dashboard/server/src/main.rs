@@ -6,7 +6,7 @@ use axum::response::Sse;
 use axum::Json;
 use axum::{routing::get, Router};
 use chrono::{DateTime, Utc};
-use frontend_api::RolloutDataCacheResponse;
+use frontend_api::{RolloutDataCacheResponse, RolloutEngineState};
 use futures::stream::Stream;
 use log::{debug, error, info};
 use reqwest::Url;
@@ -43,7 +43,7 @@ const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 /// Contains either a list of rollouts ordered from newest to oldest,
 /// dated from the last time it was successfully updated, or an HTTP
 /// status code corresponding to -- and with -- a message for the last error.
-type CurrentRolloutStatus = Result<VecDeque<Rollout>, (StatusCode, String)>;
+type CurrentRolloutStatus = Result<(RolloutEngineState, VecDeque<Rollout>), (StatusCode, String)>;
 
 struct Server {
     rollout_api: Arc<RolloutApi>,
@@ -64,9 +64,9 @@ impl Server {
     async fn fetch_rollout_data(
         &self,
         max_rollouts: usize,
-    ) -> Result<VecDeque<Rollout>, (StatusCode, String)> {
+    ) -> Result<(RolloutEngineState, VecDeque<Rollout>), (StatusCode, String)> {
         match self.rollout_api.get_rollout_data(max_rollouts).await {
-            Ok(rollouts) => Ok(rollouts.into()),
+            Ok((engine_state, rollouts)) => Ok((engine_state, rollouts.into())),
             Err(e) => {
                 let res = match e {
                     RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
@@ -116,7 +116,7 @@ impl Server {
             let d = select! {
                 d = self.fetch_rollout_data(max_rollouts) => {
                     match &d {
-                        Ok(new_rollouts) => {
+                        Ok((_, new_rollouts)) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
                             info!(target: "server::update_loop", "{} rollouts collected after {}.  Sleeping for {} seconds.", new_rollouts.len(), loop_delta_time, refresh_interval);
                             if errored {
@@ -155,7 +155,16 @@ impl Server {
     async fn get_rollout_data(&self) -> Result<Json<VecDeque<Rollout>>, (StatusCode, String)> {
         let m = self.last_rollout_data.lock().await.clone();
         match m {
-            Ok(rollouts) => Ok(Json(rollouts)),
+            Ok((_, rollouts)) => Ok(Json(rollouts)),
+            Err(e) => Err(e),
+        }
+    }
+
+    // #[debug_handler]
+    async fn get_engine_state(&self) -> Result<Json<RolloutEngineState>, (StatusCode, String)> {
+        let m = self.last_rollout_data.lock().await.clone();
+        match m {
+            Ok((state, _)) => Ok(Json(state)),
             Err(e) => Err(e),
         }
     }
@@ -177,6 +186,8 @@ impl Server {
     ///            are listed here.
     /// * deleted: when the caller indicates delta_support, this appears and lists the names
     ///            of the rollouts that have disappeared.
+    /// * engine_state: explains the state of the rollout engine.  Only present if no error
+    ///                 is present.
     fn produce_rollouts_sse_stream(
         &self,
         delta_support: bool,
@@ -205,6 +216,8 @@ impl Server {
             #[serde(skip_serializing_if = "VecDeque::is_empty")]
             deleted: VecDeque<String>,
             error: Option<(u16, String)>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            engine_state: Option<RolloutEngineState>,
         }
 
         impl SseResponse {
@@ -214,9 +227,10 @@ impl Server {
                     ..Default::default()
                 }
             }
-            fn full(rollouts: &VecDeque<Rollout>) -> Self {
+            fn full(engine_state: &RolloutEngineState, rollouts: &VecDeque<Rollout>) -> Self {
                 Self {
                     rollouts: Some(rollouts.clone()),
+                    engine_state: Some(engine_state.clone()),
                     ..Default::default()
                 }
             }
@@ -236,9 +250,9 @@ impl Server {
 
                 let message = match (&current_rollout_data, &last_rollout_data) {
                     // Error before.  Send full sync.
-                    (Ok(new_rollouts), Err(_)) => Some(SseResponse::full(new_rollouts)),
+                    (Ok((engine_state, new_rollouts)), Err(_)) => Some(SseResponse::full(engine_state, new_rollouts)),
                     // Last time was a good update.  Send differential sync.
-                    (Ok(new_rollouts), Ok(old_rollouts)) => {
+                    (Ok((engine_state, new_rollouts)), Ok((_, old_rollouts))) => {
                         let new_names = new_rollouts.iter().map(|r| r.name.clone()).collect::<HashSet<String>>();
                         let old_rollouts_map = old_rollouts.iter().map(|r| (r.name.clone(), r)).collect::<HashMap<String, &Rollout>>();
                             let updated = new_rollouts.iter().filter_map(|r| match old_rollouts_map.get(&r.name) { None => Some(r.clone()), Some(old_rollout) => match r.update_count != old_rollout.update_count {true => Some(r.clone()), false => None}}).collect::<VecDeque<Rollout>>();
@@ -246,11 +260,12 @@ impl Server {
                             match updated.is_empty() && deleted.is_empty() {
                                 true => None,
                                 false => match delta_support {
-                                    false => Some(SseResponse::full(new_rollouts)),
+                                    false => Some(SseResponse::full(engine_state, new_rollouts)),
                                     true => Some(SseResponse{
                                         updated,
                                         deleted,
                                         error: None,
+                                        engine_state: Some(engine_state.clone()),
                                         ..Default::default()
                                     }),
                                 }
@@ -341,10 +356,13 @@ async fn main() -> ExitCode {
     let (finish_loop_tx, mut finish_loop_rx) = watch::channel(());
 
     let server_for_rollouts_handler = server.clone();
+    let server_for_engine_state_handler = server.clone();
     let server_for_cache_handler = server.clone();
     let server_for_sse_handler = server.clone();
     let rollouts_handler =
         move || async move { server_for_rollouts_handler.get_rollout_data().await };
+    let engine_state_handler =
+        move || async move { server_for_engine_state_handler.get_engine_state().await };
     let cached_data_handler = move || async move { server_for_cache_handler.get_cache().await };
     let rollouts_sse_handler = move |options: Query<SseHandlerParameters>| {
         let options: SseHandlerParameters = options.0;
@@ -355,6 +373,7 @@ async fn main() -> ExitCode {
     };
     let stable_api = Router::new()
         .route("/rollouts", get(rollouts_handler))
+        .route("/engine_state", get(engine_state_handler))
         .route("/rollouts/sse", get(rollouts_sse_handler));
     let unstable_api = Router::new().route("/cache", get(cached_data_handler));
     let mut tree = Router::new()
