@@ -299,7 +299,7 @@ impl ScheduleCache {
     /// and if up to date, return the cache contents.  Return Stale if the
     /// cache needs updating, and Invalid if the cache is up to date but
     /// the contents are not valid for use.
-    fn up_to_date(&self, try_number: usize, latest_date: DateTime<Utc>) -> ScheduleCacheValidity {
+    fn up_to_date(&self, task_instance: &TaskInstancesResponseItem) -> ScheduleCacheValidity {
         match self {
             ScheduleCache::Unretrieved => ScheduleCacheValidity::Stale,
             ScheduleCache::ForTask {
@@ -307,7 +307,7 @@ impl ScheduleCache {
                 latest_date: l,
                 kind,
             } => {
-                if *t == try_number && *l == latest_date {
+                if *t == task_instance.try_number && *l == task_instance.latest_date() {
                     match &kind {
                         ScheduleCacheState::Valid { cached_schedule } => {
                             ScheduleCacheValidity::UpToDate(cached_schedule.clone())
@@ -327,13 +327,12 @@ impl ScheduleCache {
     /// Update the cache entry.
     fn update(
         &mut self,
-        try_number: usize,
-        latest_date: DateTime<Utc>,
+        task_instance: &TaskInstancesResponseItem,
         batches: &IndexMap<usize, Batch>,
     ) {
         *self = Self::ForTask {
-            try_number,
-            latest_date,
+            try_number: task_instance.try_number,
+            latest_date: task_instance.latest_date(),
             kind: ScheduleCacheState::Valid {
                 cached_schedule: batches.clone(),
             },
@@ -341,15 +340,10 @@ impl ScheduleCache {
     }
 
     /// Update the cache entry with (possibly) an invalid value.
-    fn invalidate(
-        &mut self,
-        try_number: usize,
-        latest_date: DateTime<Utc>,
-        schedule: Option<String>,
-    ) {
+    fn invalidate(&mut self, task_instance: &TaskInstancesResponseItem, schedule: Option<String>) {
         *self = Self::ForTask {
-            try_number,
-            latest_date,
+            try_number: task_instance.try_number,
+            latest_date: task_instance.latest_date(),
             kind: match schedule {
                 None => ScheduleCacheState::Missing,
                 Some(schedule) => ScheduleCacheState::Invalid {
@@ -932,10 +926,7 @@ impl<'a> RolloutUpdater<'a> {
                     | Some(TaskInstanceState::Scheduled)
                     | None => rollout.state = min(rollout.state, RolloutState::Preparing),
                     Some(TaskInstanceState::Success) => {
-                        rollout.batches = match cache_entry
-                            .schedule
-                            .up_to_date(task_instance.try_number, task_instance.latest_date())
-                        {
+                        rollout.batches = match cache_entry.schedule.up_to_date(&task_instance) {
                             ScheduleCacheValidity::UpToDate(cache) => cache,
                             ScheduleCacheValidity::Invalid => {
                                 // Nothing has changed.  Stop processing this task.
@@ -958,18 +949,15 @@ impl<'a> RolloutUpdater<'a> {
                                         match &RolloutPlan::from_python_string(&schedule.value) {
                                             Ok(schedule) => {
                                                 info!(target: "frontend_api::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
-                                                cache_entry.schedule.update(
-                                                    task_instance.try_number,
-                                                    task_instance.latest_date(),
-                                                    &schedule.batches,
-                                                );
+                                                cache_entry
+                                                    .schedule
+                                                    .update(&task_instance, &schedule.batches);
                                                 schedule.batches.clone()
                                             }
                                             Err(e) => {
                                                 warn!(target: "frontend_api::get_rollout_data", "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
                                                 cache_entry.schedule.invalidate(
-                                                    task_instance.try_number,
-                                                    task_instance.latest_date(),
+                                                    &task_instance,
                                                     Some(schedule.value),
                                                 );
                                                 continue;
@@ -983,11 +971,7 @@ impl<'a> RolloutUpdater<'a> {
                                         // Or there was no schedule to be found last time
                                         // it was queried.
                                         warn!(target: "frontend_api::get_rollout_data", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
-                                        cache_entry.schedule.invalidate(
-                                            task_instance.try_number,
-                                            task_instance.latest_date(),
-                                            None,
-                                        );
+                                        cache_entry.schedule.invalidate(&task_instance, None);
                                         continue;
                                     }
                                     Err(e) => {
