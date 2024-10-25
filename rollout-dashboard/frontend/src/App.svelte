@@ -105,6 +105,10 @@
         href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
         target="_blank">Documentation</FooterLink
       >
+      <FooterLink
+        href="https://dfinity.enterprise.slack.com/archives/C01DB8MQ5M1"
+        target="_blank">Help</FooterLink
+      >
     </FooterLinkGroup>
   </div>
 </Footer>

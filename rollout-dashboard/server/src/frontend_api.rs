@@ -190,12 +190,11 @@ impl Display for RolloutPlanParseError {
 }
 
 impl RolloutPlan {
-    fn from_python_string(value: String) -> Result<Self, RolloutPlanParseError> {
+    fn from_python_string(value: &str) -> Result<Self, RolloutPlanParseError> {
         let mut res = RolloutPlan {
             batches: IndexMap::new(),
         };
-        let python_string_plan: PythonFormattedRolloutPlan = match python::from_str(value.as_str())
-        {
+        let python_string_plan: PythonFormattedRolloutPlan = match python::from_str(value) {
             Ok(s) => s,
             Err(e) => return Err(RolloutPlanParseError::UndecipherablePython(e)),
         };
@@ -268,17 +267,89 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
 }
 
 #[derive(Clone)]
-enum ScheduleCache {
+enum ScheduleCacheKind {
     Missing,
     Invalid {
-        try_number: usize,
-        latest_date: DateTime<Utc>,
-    },
-    Valid {
-        try_number: usize,
-        latest_date: DateTime<Utc>,
         cached_schedule: String,
     },
+    Valid {
+        cached_schedule: IndexMap<usize, Batch>,
+    },
+}
+#[derive(Clone)]
+enum ScheduleCache {
+    Unretrieved,
+    ForTask {
+        try_number: usize,
+        latest_date: DateTime<Utc>,
+        kind: ScheduleCacheKind,
+    },
+}
+
+enum ScheduleCacheValidity {
+    UpToDate(IndexMap<usize, Batch>),
+    Stale,
+    Invalid,
+}
+
+impl ScheduleCache {
+    fn up_to_date(&self, try_number: usize, latest_date: DateTime<Utc>) -> ScheduleCacheValidity {
+        match self {
+            ScheduleCache::Unretrieved => ScheduleCacheValidity::Stale,
+            ScheduleCache::ForTask {
+                try_number: t,
+                latest_date: l,
+                kind,
+            } => {
+                if *t == try_number && *l == latest_date {
+                    match &kind {
+                        ScheduleCacheKind::Valid { cached_schedule } => {
+                            ScheduleCacheValidity::UpToDate(cached_schedule.clone())
+                        }
+                        ScheduleCacheKind::Missing | ScheduleCacheKind::Invalid { .. } => {
+                            ScheduleCacheValidity::Invalid
+                        }
+                    }
+                } else {
+                    // Same schedule task has been updated.  Data may not be missing anymore.
+                    ScheduleCacheValidity::Stale
+                }
+            }
+        }
+    }
+
+    fn save(
+        &mut self,
+        try_number: usize,
+        latest_date: DateTime<Utc>,
+        batches: &IndexMap<usize, Batch>,
+    ) {
+        *self = Self::ForTask {
+            try_number,
+            latest_date,
+            kind: ScheduleCacheKind::Valid {
+                cached_schedule: batches.clone(),
+            },
+        }
+    }
+
+    fn invalidate(
+        &mut self,
+        try_number: usize,
+        latest_date: DateTime<Utc>,
+        schedule: Option<String>,
+    ) {
+        *self = Self::ForTask {
+            try_number,
+            latest_date,
+            kind: match schedule {
+                None => ScheduleCacheKind::Missing,
+                Some(schedule) => ScheduleCacheKind::Invalid {
+                    cached_schedule: schedule,
+                },
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -503,11 +574,16 @@ where
     S: Serializer,
 {
     match cache {
-        ScheduleCache::Invalid { .. } => serializer.serialize_str("invalid"),
-        ScheduleCache::Missing { .. } => serializer.serialize_str("missing"),
-        ScheduleCache::Valid {
-            cached_schedule, ..
-        } => serializer.serialize_str(cached_schedule),
+        ScheduleCache::Unretrieved { .. } => serializer.serialize_str("not retrieved yet"),
+        ScheduleCache::ForTask { kind, .. } => match kind {
+            ScheduleCacheKind::Missing { .. } => serializer.serialize_str("missing"),
+            ScheduleCacheKind::Invalid {
+                cached_schedule, ..
+            } => serializer.serialize_str(format!("<INVALID!>{}", cached_schedule).as_str()),
+            ScheduleCacheKind::Valid {
+                cached_schedule, ..
+            } => serializer.serialize_str(format!("<valid>{:?}", cached_schedule).as_str()),
+        },
     }
 }
 
@@ -614,7 +690,7 @@ impl<'a> RolloutUpdater<'a> {
         // We must evict the task cache.
         if cache_entry.dispatch_time != dag_run.logical_date {
             cache_entry.dispatch_time = dag_run.logical_date;
-            cache_entry.schedule = ScheduleCache::Missing;
+            cache_entry.schedule = ScheduleCache::Unretrieved;
             cache_entry.task_instances = HashMap::new();
             cache_entry.update_count += 1;
         }
@@ -848,41 +924,19 @@ impl<'a> RolloutUpdater<'a> {
                     | Some(TaskInstanceState::Scheduled)
                     | None => rollout.state = min(rollout.state, RolloutState::Preparing),
                     Some(TaskInstanceState::Success) => {
-                        if let ScheduleCache::Valid {
-                            try_number,
-                            latest_date,
-                            ..
-                        } = &cache_entry.schedule
+                        rollout.batches = match cache_entry
+                            .schedule
+                            .up_to_date(task_instance.try_number, task_instance.latest_date())
                         {
-                            if *try_number != task_instance.try_number
-                                || *latest_date != task_instance.latest_date()
-                            {
-                                info!(target: "frontend_api::get_rollout_data", "{}: resetting schedule cache due to changes to the schedule task", dag_run.dag_run_id);
-                                // Another task run of the same task has executed.  We must clear the cache entry.
-                                cache_entry.schedule = ScheduleCache::Missing;
+                            ScheduleCacheValidity::UpToDate(cache) => cache,
+                            ScheduleCacheValidity::Invalid => {
+                                // Nothing has changed.  Stop processing this task.
+                                continue;
                             }
-                        }
-                        if let ScheduleCache::Invalid {
-                            try_number,
-                            latest_date,
-                            ..
-                        } = &cache_entry.schedule
-                        {
-                            if *try_number != task_instance.try_number
-                                || *latest_date != task_instance.latest_date()
-                            {
-                                // Same schedule task has been updated.
-                                info!(target: "frontend_api::get_rollout_data", "{}: requerying schedule cache due to forward progress of the schedule task", dag_run.dag_run_id);
-                                cache_entry.schedule = ScheduleCache::Missing;
-                            }
-                        }
-                        let schedule_string = match &cache_entry.schedule {
-                            ScheduleCache::Valid {
-                                cached_schedule, ..
-                            } => cached_schedule,
-                            ScheduleCache::Invalid { .. } => continue,
-                            ScheduleCache::Missing => {
-                                let value = airflow_api
+                            ScheduleCacheValidity::Stale => {
+                                // Same schedule task has been updated.  Data may not be missing anymore.
+                                info!(target: "frontend_api::get_rollout_data", "{}: schedule task is outdated; requerying", dag_run.dag_run_id);
+                                match airflow_api
                                     .xcom_entry(
                                         dag_id,
                                         dag_run.dag_run_id.as_str(),
@@ -890,16 +944,29 @@ impl<'a> RolloutUpdater<'a> {
                                         task_instance.map_index,
                                         "return_value",
                                     )
-                                    .await;
-                                let schedule = match value {
+                                    .await
+                                {
                                     Ok(schedule) => {
-                                        cache_entry.schedule = ScheduleCache::Valid {
-                                            try_number: task_instance.try_number,
-                                            latest_date: task_instance.latest_date(),
-                                            cached_schedule: schedule.value.clone(),
-                                        };
-                                        info!(target: "frontend_api::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
-                                        schedule.value
+                                        match &RolloutPlan::from_python_string(&schedule.value) {
+                                            Ok(schedule) => {
+                                                info!(target: "frontend_api::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
+                                                cache_entry.schedule.save(
+                                                    task_instance.try_number,
+                                                    task_instance.latest_date(),
+                                                    &schedule.batches,
+                                                );
+                                                schedule.batches.clone()
+                                            }
+                                            Err(e) => {
+                                                warn!(target: "frontend_api::get_rollout_data", "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
+                                                cache_entry.schedule.invalidate(
+                                                    task_instance.try_number,
+                                                    task_instance.latest_date(),
+                                                    Some(schedule.value),
+                                                );
+                                                continue;
+                                            }
+                                        }
                                     }
                                     Err(AirflowError::StatusCode(
                                         reqwest::StatusCode::NOT_FOUND,
@@ -908,21 +975,20 @@ impl<'a> RolloutUpdater<'a> {
                                         // Or there was no schedule to be found last time
                                         // it was queried.
                                         warn!(target: "frontend_api::get_rollout_data", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
-                                        cache_entry.schedule = ScheduleCache::Invalid {
-                                            try_number: task_instance.try_number,
-                                            latest_date: task_instance.latest_date(),
-                                        };
+                                        cache_entry.schedule.invalidate(
+                                            task_instance.try_number,
+                                            task_instance.latest_date(),
+                                            None,
+                                        );
                                         continue;
                                     }
                                     Err(e) => {
+                                        // In this case the dashboard will try to requery in the future again.
                                         return Err(RolloutDataGatherError::AirflowError(e));
                                     }
-                                };
-                                &schedule.clone()
+                                }
                             }
                         };
-                        let schedule = RolloutPlan::from_python_string(schedule_string.clone())?;
-                        rollout.batches = schedule.batches;
                     }
                 }
             } else if task_instance.task_id == "wait_for_other_rollouts"
@@ -1276,7 +1342,7 @@ impl RolloutApi {
                         task_instances: HashMap::new(),
                         dispatch_time: dag_run.logical_date,
                         note: dag_run.note.clone(),
-                        schedule: ScheduleCache::Missing,
+                        schedule: ScheduleCache::Unretrieved,
                         last_update_time: None,
                         update_count: 0,
                     }),
