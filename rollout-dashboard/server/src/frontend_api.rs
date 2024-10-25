@@ -267,7 +267,7 @@ impl From<CyclicDependencyError> for RolloutDataGatherError {
 }
 
 #[derive(Clone)]
-enum ScheduleCacheKind {
+enum ScheduleCacheState {
     Missing,
     Invalid {
         cached_schedule: String,
@@ -276,20 +276,21 @@ enum ScheduleCacheKind {
         cached_schedule: IndexMap<usize, Batch>,
     },
 }
+
+enum ScheduleCacheValidity {
+    UpToDate(IndexMap<usize, Batch>),
+    Stale,
+    Invalid,
+}
+
 #[derive(Clone)]
 enum ScheduleCache {
     Unretrieved,
     ForTask {
         try_number: usize,
         latest_date: DateTime<Utc>,
-        kind: ScheduleCacheKind,
+        kind: ScheduleCacheState,
     },
-}
-
-enum ScheduleCacheValidity {
-    UpToDate(IndexMap<usize, Batch>),
-    Stale,
-    Invalid,
 }
 
 impl ScheduleCache {
@@ -303,10 +304,10 @@ impl ScheduleCache {
             } => {
                 if *t == try_number && *l == latest_date {
                     match &kind {
-                        ScheduleCacheKind::Valid { cached_schedule } => {
+                        ScheduleCacheState::Valid { cached_schedule } => {
                             ScheduleCacheValidity::UpToDate(cached_schedule.clone())
                         }
-                        ScheduleCacheKind::Missing | ScheduleCacheKind::Invalid { .. } => {
+                        ScheduleCacheState::Missing | ScheduleCacheState::Invalid { .. } => {
                             ScheduleCacheValidity::Invalid
                         }
                     }
@@ -318,7 +319,7 @@ impl ScheduleCache {
         }
     }
 
-    fn save(
+    fn update(
         &mut self,
         try_number: usize,
         latest_date: DateTime<Utc>,
@@ -327,7 +328,7 @@ impl ScheduleCache {
         *self = Self::ForTask {
             try_number,
             latest_date,
-            kind: ScheduleCacheKind::Valid {
+            kind: ScheduleCacheState::Valid {
                 cached_schedule: batches.clone(),
             },
         }
@@ -343,8 +344,8 @@ impl ScheduleCache {
             try_number,
             latest_date,
             kind: match schedule {
-                None => ScheduleCacheKind::Missing,
-                Some(schedule) => ScheduleCacheKind::Invalid {
+                None => ScheduleCacheState::Missing,
+                Some(schedule) => ScheduleCacheState::Invalid {
                     cached_schedule: schedule,
                 },
             },
@@ -576,11 +577,11 @@ where
     match cache {
         ScheduleCache::Unretrieved { .. } => serializer.serialize_str("not retrieved yet"),
         ScheduleCache::ForTask { kind, .. } => match kind {
-            ScheduleCacheKind::Missing { .. } => serializer.serialize_str("missing"),
-            ScheduleCacheKind::Invalid {
+            ScheduleCacheState::Missing { .. } => serializer.serialize_str("missing"),
+            ScheduleCacheState::Invalid {
                 cached_schedule, ..
             } => serializer.serialize_str(format!("<INVALID!>{}", cached_schedule).as_str()),
-            ScheduleCacheKind::Valid {
+            ScheduleCacheState::Valid {
                 cached_schedule, ..
             } => serializer.serialize_str(format!("<valid>{:?}", cached_schedule).as_str()),
         },
@@ -950,7 +951,7 @@ impl<'a> RolloutUpdater<'a> {
                                         match &RolloutPlan::from_python_string(&schedule.value) {
                                             Ok(schedule) => {
                                                 info!(target: "frontend_api::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
-                                                cache_entry.schedule.save(
+                                                cache_entry.schedule.update(
                                                     task_instance.try_number,
                                                     task_instance.latest_date(),
                                                     &schedule.batches,
