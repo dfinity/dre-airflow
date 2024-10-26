@@ -4,7 +4,7 @@
   import { type RolloutsView, rollouts_view } from "./lib/stores";
   import Rollout from "./lib/Rollout.svelte";
   import { writable } from "svelte/store";
-  import { ButtonGroup, Button, FooterCopyright } from "flowbite-svelte";
+  import { FooterCopyright } from "flowbite-svelte";
   import {
     Footer,
     FooterLink,
@@ -20,18 +20,23 @@
   onMount(async () => {
     view = rollouts_view();
   });
+
+  import { Navbar, NavLi, NavUl } from "flowbite-svelte";
+  $: activeUrl = $url.hash;
 </script>
 
 <SvelteToast />
 
-<nav>
-  <ButtonGroup class="*:!ring-primary-700">
-    <Button href="#active">Active</Button>
-    <Button href="#complete">Complete</Button>
-    <Button href="#failed">Failed</Button>
-    <Button href="#all">All</Button>
-  </ButtonGroup>
-</nav>
+<div style="margin-left: auto; margin-right: auto;">
+  <Navbar class="w-min">
+    <NavUl {activeUrl}>
+      <NavLi href="#active">Active</NavLi>
+      <NavLi href="#complete">Complete</NavLi>
+      <NavLi href="#failed">Failed</NavLi>
+      <NavLi href="#all">All</NavLi>
+    </NavUl>
+  </Navbar>
+</div>
 
 {#if $view.error && $view.error !== "loading"}
   <!-- note use of me-3 in svg icon to ensure icon actually shows not too stuck to the text -->
