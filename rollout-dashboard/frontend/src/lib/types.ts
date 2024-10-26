@@ -77,3 +77,10 @@ export type Rollout = {
     last_scheduling_decision?: Date;
     batches: Batch[];
 };
+export type RolloutsViewDelta = {
+    error: [number, string] | null;
+    rollouts: Rollout[];
+    updated: Rollout[] | undefined;
+    deleted: String[] | undefined;
+    engine_state?: string;
+}

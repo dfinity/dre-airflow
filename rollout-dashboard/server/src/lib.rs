@@ -21,4 +21,5 @@
 //! available by appending `/sse` to the rollouts API call.  The server
 //! will stream the initial state right away, then stream updates to
 //! the rollout data as they happen.
+pub mod airflow_client;
 pub mod types;
