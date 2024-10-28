@@ -52,10 +52,27 @@ def convert_sheet_data_into_feature_subnet_map(
         if not feature_requests:
             # No feature requests for this subnet.
             continue
-        col_index = [idx for idx, val in enumerate(feature_requests) if val == "yes"]
+        col_index = [
+            idx
+            for idx, val in enumerate(feature_requests)
+            if val.strip().lower() == "yes" or val.strip().lower() == "true"
+        ]
         if not col_index:
             # None of the columns is marked yes.  No feature request.
             continue
+        invalid_col_values = [
+            val
+            for idx, val in enumerate(feature_requests)
+            if not val.strip().lower() == "yes" and not val.strip().lower() == "true"
+            if not val.strip().lower() == "no"
+            and not val.strip().lower() == "false"
+            and not val.strip().lower() == ""
+        ]
+        if len(invalid_col_values):
+            raise ValueError(
+                f"Sheet contains invalid values {invalid_col_values} for "
+                f"subnet {subnet} under at least one feature"
+            )
         if len(col_index) > 1:
             raise ValueError(
                 f"Sheet contains an invalid 'yes' for subnet {subnet}"
