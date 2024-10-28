@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import url from "./lib/url.js";
-  import { type RolloutResult, rollout_query } from "./lib/stores";
+  import { rollouts_view } from "./lib/stores";
   import Rollout from "./lib/Rollout.svelte";
-  import { writable } from "svelte/store";
-  import { ButtonGroup, Button, FooterCopyright } from "flowbite-svelte";
+  import { FooterCopyright } from "flowbite-svelte";
   import {
     Footer,
     FooterLink,
@@ -13,27 +11,26 @@
   } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
 
-  let my_rollout_query = writable({
-    rollouts: [],
-    error: "loading",
-  } as RolloutResult);
-  onMount(async () => {
-    my_rollout_query = rollout_query();
-  });
+  let view = rollouts_view();
+
+  import { Navbar, NavLi, NavUl } from "flowbite-svelte";
+  $: activeUrl = $url.hash;
 </script>
 
 <SvelteToast />
 
-<nav>
-  <ButtonGroup class="*:!ring-primary-700">
-    <Button href="#active">Active</Button>
-    <Button href="#complete">Complete</Button>
-    <Button href="#failed">Failed</Button>
-    <Button href="#all">All</Button>
-  </ButtonGroup>
-</nav>
+<div style="margin-left: auto; margin-right: auto;">
+  <Navbar class="w-min">
+    <NavUl {activeUrl}>
+      <NavLi href="#active">Active</NavLi>
+      <NavLi href="#complete">Complete</NavLi>
+      <NavLi href="#failed">Failed</NavLi>
+      <NavLi href="#all">All</NavLi>
+    </NavUl>
+  </Navbar>
+</div>
 
-{#if $my_rollout_query.error && $my_rollout_query.error !== "loading"}
+{#if $view.error && $view.error !== "loading"}
   <!-- note use of me-3 in svg icon to ensure icon actually shows not too stuck to the text -->
   <div
     class="flex items-center p-4 mb-4 text-sm text-red-800 border border-red-300 rounded-lg bg-red-50 dark:bg-gray-800 dark:text-red-400 dark:border-red-800"
@@ -57,12 +54,12 @@
     <span class="sr-only">Error</span>
     <div>
       <span class="font-medium">Cannot retrieve rollout data:</span>
-      {$my_rollout_query.error}
+      {$view.error}
     </div>
   </div>
 {/if}
 
-{#if $my_rollout_query.error === "loading"}
+{#if $view.error === "loading"}
   <div
     class="flex items-center justify-center w-56 h-56 border border-gray-200 rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
     style="align-self: center"
@@ -87,7 +84,7 @@
   </div>
 {/if}
 
-{#if $my_rollout_query.engine_state === "missing"}
+{#if $view.engine_state === "missing"}
   <div
     class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
     role="alert"
@@ -112,7 +109,7 @@
   </div>
 {/if}
 
-{#if $my_rollout_query.engine_state === "inactive"}
+{#if $view.engine_state === "inactive"}
   <div
     class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
     role="alert"
@@ -137,7 +134,7 @@
   </div>
 {/if}
 
-{#if $my_rollout_query.engine_state === "broken"}
+{#if $view.engine_state === "broken"}
   <div
     class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
     role="alert"
@@ -162,7 +159,7 @@
   </div>
 {/if}
 
-{#if $my_rollout_query.engine_state === "paused"}
+{#if $view.engine_state === "paused"}
   <div
     class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
     role="alert"
@@ -186,7 +183,7 @@
   </div>
 {/if}
 
-{#each $my_rollout_query.rollouts as rollout}
+{#each $view.rollouts as rollout}
   {#if (($url.hash === "" || $url.hash === "#active") && rollout.state !== "complete" && rollout.state !== "failed") || ($url.hash === "#complete" && rollout.state === "complete") || ($url.hash === "#failed" && rollout.state === "failed") || $url.hash === "#all"}
     <Rollout {rollout} />
   {/if}

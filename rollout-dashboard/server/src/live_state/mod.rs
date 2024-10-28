@@ -1,22 +1,23 @@
-use crate::airflow_client::{
-    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, DagsQueryFilter, DagsResponse,
-    DagsResponseItem, EventLogsResponseFilters, TaskInstanceRequestFilters, TaskInstanceState,
-    TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
-};
-use crate::python;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use regex::Regex;
+use reqwest::StatusCode;
+use rollout_dashboard::airflow_client::{
+    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, DagsQueryFilter,
+    EventLogsResponseFilters, TaskInstanceRequestFilters, TaskInstanceState,
+    TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
+};
 use rollout_dashboard::types::{
-    Batch, Rollout, RolloutState, Rollouts, Subnet, SubnetRolloutState,
+    Batch, Rollout, RolloutEngineState, RolloutState, Rollouts, Subnet, SubnetRolloutState,
 };
 use serde::{Serialize, Serializer};
 use std::cmp::{max, min};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::error::Error;
 use std::fmt::{self, Display};
 use std::future::Future;
 use std::num::ParseIntError;
@@ -25,8 +26,14 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
+use tokio::sync::watch::{self, Sender};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, Duration};
+use tokio::{select, spawn};
 use topological_sort::TopologicalSort;
+
+mod python;
 
 lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
@@ -49,7 +56,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct CyclicDependencyError {
+struct CyclicDependencyError {
     message: String,
 }
 
@@ -242,7 +249,7 @@ impl RolloutPlan {
 }
 
 #[derive(Debug)]
-pub enum RolloutDataGatherError {
+enum RolloutDataGatherError {
     AirflowError(AirflowError),
     CyclicDependency(CyclicDependencyError),
     RolloutPlanParseError(RolloutPlanParseError),
@@ -474,7 +481,7 @@ impl AirflowIncrementalLogInspector {
                     || (event.event == "failed" && event.extra.is_some())
                     || (event.event == "clear" && event.extra.is_some());
 
-                trace!(target: "frontend_api::log_inspector", "Processing event:\n{:#?}\n", event);
+                trace!(target: "rollout_data::log_inspector", "Processing event:\n{:#?}\n", event);
 
                 match task_instances_to_update_per_dag
                     .dag_runs
@@ -484,13 +491,13 @@ impl AirflowIncrementalLogInspector {
                     Vacant(ventry) => {
                         ventry.insert(match (&event.task_id, force_refresh_all_tasks) {
                 (Some(t), false) => {
-                    trace!(target: "frontend_api::log_inspector", "{}: initializing plan with a request to update task {}", event_run_id, t);
+                    trace!(target: "rollout_data::log_inspector", "{}: initializing plan with a request to update task {}", event_run_id, t);
                     let mut init = HashSet::new();
                     init.insert(t.clone());
                     DagRunUpdateType::SomeTaskInstances(init)
                 },
                 _ => {
-                    trace!(target: "frontend_api::log_inspector", "{}: initializing plan with a request to update all tasks", event_run_id);
+                    trace!(target: "rollout_data::log_inspector", "{}: initializing plan with a request to update all tasks", event_run_id);
                     DagRunUpdateType::AllTaskInstances
                 },
             });
@@ -501,14 +508,14 @@ impl AirflowIncrementalLogInspector {
                             if let DagRunUpdateType::SomeTaskInstances(thevec) = entry.get_mut() {
                                 let ts = t.to_string();
                                 if !thevec.contains(&ts) {
-                                    trace!(target: "frontend_api::log_inspector", "{}: adding task {} to plan", event_run_id, ts);
+                                    trace!(target: "rollout_data::log_inspector", "{}: adding task {} to plan", event_run_id, ts);
                                     thevec.insert(ts);
                                 }
                             }
                         }
                         _ => {
                             if let DagRunUpdateType::SomeTaskInstances(_) = entry.get() {
-                                trace!(target: "frontend_api::log_inspector", "{}: switching plan to request to update all tasks", event_run_id);
+                                trace!(target: "rollout_data::log_inspector", "{}: switching plan to request to update all tasks", event_run_id);
                                 entry.insert(DagRunUpdateType::AllTaskInstances);
                             }
                         }
@@ -518,7 +525,7 @@ impl AirflowIncrementalLogInspector {
 
             // Now that we have a plan, we know what data to fetch from Airflow, minimizing the load on the server.
             for (k, v) in task_instances_to_update_per_dag.dag_runs.iter() {
-                debug!(target: "frontend_api::log_inspector", "{}: tasks that will be updated: {}", k, match v {
+                debug!(target: "rollout_data::log_inspector", "{}: tasks that will be updated: {}", k, match v {
                     DagRunUpdateType::AllTaskInstances => "all tasks".to_string(),
                     DagRunUpdateType::SomeTaskInstances(set_of_tasks) => set_of_tasks.iter().cloned().collect::<Vec<String>>().join(", "),
                 });
@@ -527,7 +534,7 @@ impl AirflowIncrementalLogInspector {
                 && !task_instances_to_update_per_dag.dag_runs.is_empty()
             {
                 debug!(
-                    target: "frontend_api::log_inspector", "Setting incremental refresh date to {:?}",
+                    target: "rollout_data::log_inspector", "Setting incremental refresh date to {:?}",
                     last_event_log_update
                 )
             };
@@ -548,7 +555,7 @@ impl AirflowIncrementalLogInspector {
                 last_event_log_update = Some(event.when);
             }
             if !event_logs.event_logs.is_empty() {
-                debug!(target: "frontend_api::log_inspector", "Setting initial refresh date to {:?}", last_event_log_update);
+                debug!(target: "rollout_data::log_inspector", "Setting initial refresh date to {:?}", last_event_log_update);
             }
         }
 
@@ -562,7 +569,7 @@ impl AirflowIncrementalLogInspector {
 }
 
 #[derive(Clone)]
-struct RolloutDataCache {
+struct RolloutInfoCache {
     task_instances: HashMap<String, HashMap<Option<usize>, TaskInstancesResponseItem>>,
     dispatch_time: DateTime<Utc>,
     note: Option<String>,
@@ -590,7 +597,7 @@ where
 }
 
 #[derive(Serialize)]
-pub struct RolloutDataCacheResponse {
+pub struct RolloutInfoCacheResponse {
     rollout_id: String,
     dispatch_time: DateTime<Utc>,
     #[serde(serialize_with = "serialize_cache_response")]
@@ -600,46 +607,10 @@ pub struct RolloutDataCacheResponse {
     linearized_task_instances: Vec<TaskInstancesResponseItem>,
 }
 
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum RolloutEngineState {
-    Missing,
-    Broken,
-    Paused,
-    Inactive,
-    Active,
-}
-
-impl From<DagsResponse> for RolloutEngineState {
-    fn from(resp: DagsResponse) -> Self {
-        match resp.dags.len() {
-            0 => RolloutEngineState::Missing,
-            _ => match resp.dags[0] {
-                DagsResponseItem {
-                    has_import_errors: true,
-                    ..
-                } => Self::Broken,
-                DagsResponseItem {
-                    is_paused: true, ..
-                } => Self::Paused,
-                DagsResponseItem {
-                    is_active: false, ..
-                } => Self::Inactive,
-                DagsResponseItem {
-                    is_active: true,
-                    is_paused: false,
-                    has_import_errors: false,
-                    ..
-                } => Self::Active,
-            },
-        }
-    }
-}
-
-struct RolloutApiCache {
+struct RolloutStateCache {
     /// Map from DAG run ID to task instance ID (with / without index)
     /// to task instance.
-    by_dag_run: HashMap<String, RolloutDataCache>,
+    by_dag_run: HashMap<String, RolloutInfoCache>,
     log_inspector: AirflowIncrementalLogInspector,
 }
 
@@ -668,10 +639,10 @@ fn annotate_subnet_state(
         if (only_decrease && new_state < subnet.state)
             || (!only_decrease && new_state != subnet.state)
         {
-            trace!(target: "frontend_api::annotate_subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+            trace!(target: "rollout_data::annotate_subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
             subnet.state = new_state.clone();
         } else {
-            trace!(target: "frontend_api::annotate_subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
+            trace!(target: "rollout_data::annotate_subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
         }
         if new_state == subnet.state {
             subnet.comment = format!(
@@ -706,7 +677,7 @@ fn annotate_subnet_state(
 
 struct RolloutUpdater<'a> {
     dag_run: &'a DagRunsResponseItem,
-    cache_entry: RolloutDataCache,
+    cache_entry: RolloutInfoCache,
     update_type: DagRunUpdateType,
 }
 
@@ -716,7 +687,7 @@ impl<'a> RolloutUpdater<'a> {
         airflow_api: &AirflowClient,
         sorter: TaskInstanceTopologicalSorter,
         last_event_log_update: Option<DateTime<Utc>>,
-    ) -> Result<(Rollout, RolloutDataCache), RolloutDataGatherError> {
+    ) -> Result<(Rollout, RolloutInfoCache), RolloutDataGatherError> {
         // If the note of the rollout has changed,
         // note that this has been updated.
         let cache_entry = &mut self.cache_entry;
@@ -749,7 +720,7 @@ impl<'a> RolloutUpdater<'a> {
             cache_entry.task_instances.is_empty(),
         ) {
             (_, true) | (DagRunUpdateType::AllTaskInstances, _) => {
-                debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about all task instances", dag_run.dag_run_id);
+                debug!(target:"rollout_data::get_rollout_data", "{}: collecting data about all task instances", dag_run.dag_run_id);
                 vec![Box::pin(async move {
                     match airflow_api
                         .task_instances(
@@ -769,7 +740,7 @@ impl<'a> RolloutUpdater<'a> {
             (DagRunUpdateType::SomeTaskInstances(updated_task_instances), false) => {
                 let updated_task_instances =
                     updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                debug!(target:"frontend_api::get_rollout_data", "{}: collecting data about task instances updated since {:?} and a specific set of tasks too: {:?}", dag_run_id, last_update_time, updated_task_instances);
+                debug!(target:"rollout_data::get_rollout_data", "{}: collecting data about task instances updated since {:?} and a specific set of tasks too: {:?}", dag_run_id, last_update_time, updated_task_instances);
                 vec![
                     Box::pin(async move {
                         match airflow_api
@@ -852,7 +823,7 @@ impl<'a> RolloutUpdater<'a> {
         }
 
         debug!(
-            target: "frontend_api::get_rollout_data", "{}: retrieved {} tasks",
+            target: "rollout_data::get_rollout_data", "{}: retrieved {} tasks",
             dag_run_id, retrieved_task_instances.len()
         );
 
@@ -911,7 +882,7 @@ impl<'a> RolloutUpdater<'a> {
             if tasks.len() > 1 {
                 if let Occupied(_) = tasks.entry(None) {
                     debug!(
-                        target: "frontend_api::get_rollout_data", "formerly unmapped task {} is now mapped",
+                        target: "rollout_data::get_rollout_data", "formerly unmapped task {} is now mapped",
                         task_instance_id
                     );
                     tasks.remove(&None);
@@ -927,7 +898,7 @@ impl<'a> RolloutUpdater<'a> {
             .collect();
 
         debug!(
-            target: "frontend_api::get_rollout_data", "{}: total disambiguated tasks including locally cached ones: {}",
+            target: "rollout_data::get_rollout_data", "{}: total disambiguated tasks including locally cached ones: {}",
             dag_run.dag_run_id, linearized_tasks.len(),
         );
 
@@ -943,7 +914,7 @@ impl<'a> RolloutUpdater<'a> {
             // * handle tasks corresponding to a batch/subnet in a special way
             //   (commented below in its pertinent section).
             trace!(
-                target: "frontend_api::get_rollout_data", "Processing task {}.{:?} in state {:?}",
+                target: "rollout_data::get_rollout_data", "Processing task {}.{:?} in state {:?}",
                 task_instance.task_id, task_instance.map_index, task_instance.state,
             );
             if task_instance.task_id == "schedule" {
@@ -970,7 +941,7 @@ impl<'a> RolloutUpdater<'a> {
                             }
                             ScheduleCacheValidity::Stale => {
                                 // Same schedule task has been updated.  Data may not be missing anymore.
-                                info!(target: "frontend_api::get_rollout_data", "{}: schedule task is outdated; requerying", dag_run.dag_run_id);
+                                info!(target: "rollout_data::get_rollout_data", "{}: schedule task is outdated; requerying", dag_run.dag_run_id);
                                 match airflow_api
                                     .xcom_entry(
                                         dag_id,
@@ -984,14 +955,14 @@ impl<'a> RolloutUpdater<'a> {
                                     Ok(schedule) => {
                                         match &RolloutPlan::from_python_string(&schedule.value) {
                                             Ok(schedule) => {
-                                                info!(target: "frontend_api::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
+                                                info!(target: "rollout_data::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
                                                 cache_entry
                                                     .schedule
                                                     .update(&task_instance, &schedule.batches);
                                                 schedule.batches.clone()
                                             }
                                             Err(e) => {
-                                                warn!(target: "frontend_api::get_rollout_data", "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
+                                                warn!(target: "rollout_data::get_rollout_data", "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
                                                 cache_entry.schedule.invalidate(
                                                     &task_instance,
                                                     Some(schedule.value),
@@ -1006,7 +977,7 @@ impl<'a> RolloutUpdater<'a> {
                                         // There is no schedule to be found.
                                         // Or there was no schedule to be found last time
                                         // it was queried.
-                                        warn!(target: "frontend_api::get_rollout_data", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
+                                        warn!(target: "rollout_data::get_rollout_data", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
                                         cache_entry.schedule.invalidate(&task_instance, None);
                                         continue;
                                     }
@@ -1050,7 +1021,7 @@ impl<'a> RolloutUpdater<'a> {
                 // * update the subnet link to the corresponding Airflow task if the
                 //   state of the task (after update) corresponds to the expected state,
                 // * update rollout state to problem / error depending on the task state.
-                trace!(target: "frontend_api::get_rollout_data::subnet_state", "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                 let (batch, task_name) = (
                     // We get away with unwrap() here because we know we captured an integer.
                     match rollout
@@ -1059,7 +1030,7 @@ impl<'a> RolloutUpdater<'a> {
                     {
                         Some(batch) => batch,
                         None => {
-                            trace!(target: "frontend_api::get_rollout_data::subnet_state", "{}: no corresponding batch, continuing", task_instance.dag_run_id);
+                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no corresponding batch, continuing", task_instance.dag_run_id);
                             continue;
                         }
                     },
@@ -1090,7 +1061,7 @@ impl<'a> RolloutUpdater<'a> {
                         if task_name == "collect_batch_subnets" {
                             trans_exact!(SubnetRolloutState::Pending);
                         } else {
-                            trace!(target: "frontend_api::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
+                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
                         }
                     }
                     Some(state) => match state {
@@ -1100,7 +1071,7 @@ impl<'a> RolloutUpdater<'a> {
                         // If a task is skipped, the next task (in state Running / Deferred)
                         // will pick up the slack for changing subnet state.
                         TaskInstanceState::Removed | TaskInstanceState::Skipped => {
-                            trace!(target: "frontend_api::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                         }
                         TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
                             trans_min!(SubnetRolloutState::Error);
@@ -1148,7 +1119,7 @@ impl<'a> RolloutUpdater<'a> {
                                     trans_min!(SubnetRolloutState::Complete);
                                 }
                                 &_ => {
-                                    warn!(target: "frontend_api::get_rollout_data::subnet_state", "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                    warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             }
                             rollout.state = min(rollout.state, RolloutState::UpgradingSubnets)
@@ -1222,7 +1193,7 @@ impl<'a> RolloutUpdater<'a> {
                                 batch.end_time = task_instance.end_date;
                             }
                             &_ => {
-                                warn!(target: "frontend_api::get_rollout_data::subnet_state", "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                             }
                         },
                     },
@@ -1247,7 +1218,7 @@ impl<'a> RolloutUpdater<'a> {
                     }
                 }
             } else {
-                warn!(target: "frontend_api::get_rollout_data::subnet_state", "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
+                warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
             }
         }
 
@@ -1271,23 +1242,23 @@ impl<'a> RolloutUpdater<'a> {
     }
 }
 #[derive(Clone)]
-pub struct RolloutApi {
+pub(crate) struct AirflowStateUpdater {
     airflow_api: Arc<AirflowClient>,
-    cache: Arc<Mutex<RolloutApiCache>>,
+    cache: Arc<Mutex<RolloutStateCache>>,
 }
 
-impl RolloutApi {
+impl AirflowStateUpdater {
     pub fn new(client: AirflowClient) -> Self {
         Self {
             airflow_api: Arc::new(client),
-            cache: Arc::new(Mutex::new(RolloutApiCache {
+            cache: Arc::new(Mutex::new(RolloutStateCache {
                 by_dag_run: HashMap::new(),
                 log_inspector: AirflowIncrementalLogInspector::default(),
             })),
         }
     }
 
-    pub async fn get_cache(&self) -> Vec<RolloutDataCacheResponse> {
+    pub async fn get_cache(&self) -> Vec<RolloutInfoCacheResponse> {
         let cache = self.cache.lock().await;
         let mut result: Vec<_> = cache
             .by_dag_run
@@ -1298,7 +1269,7 @@ impl RolloutApi {
                     .iter()
                     .flat_map(|(_, tasks)| tasks.iter().map(|(_, task)| task.clone()))
                     .collect();
-                RolloutDataCacheResponse {
+                RolloutInfoCacheResponse {
                     rollout_id: k.clone(),
                     linearized_task_instances: linearized_tasks,
                     dispatch_time: v.dispatch_time,
@@ -1329,7 +1300,7 @@ impl RolloutApi {
     /// true return in the update flag).  Currently, only a change
     /// in the rollout note, the state of any of its tasks, or
     /// the rollout dispatch time are considered meaningful changes.
-    pub async fn get_rollout_data(
+    async fn update(
         &self,
         max_rollouts: usize,
     ) -> Result<(RolloutEngineState, Rollouts), RolloutDataGatherError> {
@@ -1380,7 +1351,7 @@ impl RolloutApi {
                     .by_dag_run
                     .get(&dag_run.dag_run_id)
                     .map(ToOwned::to_owned)
-                    .unwrap_or(RolloutDataCache {
+                    .unwrap_or(RolloutInfoCache {
                         task_instances: HashMap::new(),
                         dispatch_time: dag_run.logical_date,
                         note: dag_run.note.clone(),
@@ -1414,5 +1385,171 @@ impl RolloutApi {
         cache.log_inspector = updated_log_inspector;
 
         Ok((engine_state, res))
+    }
+}
+
+/// Contains either a list of rollouts ordered from newest to oldest,
+/// dated from the last time it was successfully updated, or an HTTP
+/// status code corresponding to -- and with -- a message for the last error.
+pub type RolloutsView = Result<(RolloutEngineState, VecDeque<Rollout>), (StatusCode, String)>;
+
+pub(crate) struct Initial;
+pub(crate) struct Live;
+
+pub(crate) struct AirflowStateSyncer<S> {
+    state_updater: AirflowStateUpdater,
+    last_rollout_data: Arc<Mutex<RolloutsView>>,
+    stream_tx: Sender<RolloutsView>,
+    refresh_interval: u64,
+    max_rollouts: usize,
+    #[allow(dead_code)]
+    state: S,
+}
+
+impl AirflowStateSyncer<Initial> {
+    pub fn new(
+        rollout_api: AirflowStateUpdater,
+        max_rollouts: usize,
+        refresh_interval: u64,
+    ) -> Self {
+        let init: RolloutsView = Err((StatusCode::NO_CONTENT, "".to_string()));
+        let (stream_tx, _stream_rx) = watch::channel::<RolloutsView>(init.clone());
+        Self {
+            state_updater: rollout_api,
+            last_rollout_data: Arc::new(Mutex::new(init)),
+            stream_tx,
+            refresh_interval,
+            max_rollouts,
+            state: Initial,
+        }
+    }
+
+    pub fn start_syncing(
+        self,
+        mut cancel_receiver: watch::Receiver<()>,
+    ) -> (Arc<AirflowStateSyncer<Live>>, JoinHandle<()>) {
+        let ret: Arc<AirflowStateSyncer<Live>> = Arc::new(AirflowStateSyncer {
+            state: Live,
+            state_updater: self.state_updater,
+            last_rollout_data: self.last_rollout_data,
+            stream_tx: self.stream_tx,
+            refresh_interval: self.refresh_interval,
+            max_rollouts: self.max_rollouts,
+        });
+        let looper = ret.clone();
+        let background_loop_fut = spawn(async move {
+            looper
+                .periodically_sync_state(async move {
+                    let _ = cancel_receiver.changed().await;
+                })
+                .await
+        });
+        (ret, background_loop_fut)
+    }
+}
+
+impl AirflowStateSyncer<Live> {
+    pub async fn get_current_rollout_status(&self) -> RolloutsView {
+        self.last_rollout_data.lock().await.clone()
+    }
+
+    pub async fn get_cache(&self) -> Vec<RolloutInfoCacheResponse> {
+        self.state_updater.get_cache().await
+    }
+
+    /// Create a channel that will get state updates as soon as they are available.
+    /// This needs `periodically_refresh_state` running in a coroutine.
+    pub fn subscribe_to_state_updates(&self) -> watch::Receiver<RolloutsView> {
+        self.stream_tx.subscribe()
+    }
+
+    async fn sync_state(
+        &self,
+        max_rollouts: usize,
+    ) -> Result<(RolloutEngineState, VecDeque<Rollout>), (StatusCode, String)> {
+        match self.state_updater.update(max_rollouts).await {
+            Ok((engine_state, rollouts)) => Ok((engine_state, rollouts.into())),
+            Err(e) => {
+                let res = match e {
+                    RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
+                        (c, "Internal server error".to_string())
+                    }
+                    RolloutDataGatherError::AirflowError(AirflowError::ReqwestError(err)) => {
+                        let mut explanation = format!("Cannot contact Airflow: {}", err);
+                        let mut err = err.source();
+                        loop {
+                            match err {
+                                None => break,
+                                Some(e) => {
+                                    explanation = format!("{} -> {}", explanation.as_str(), e);
+                                    err = e.source();
+                                }
+                            }
+                        }
+                        (StatusCode::BAD_GATEWAY, explanation)
+                    }
+                    RolloutDataGatherError::AirflowError(AirflowError::Other(msg)) => {
+                        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                    }
+                    RolloutDataGatherError::RolloutPlanParseError(parse_error) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("{}", parse_error),
+                    ),
+                    RolloutDataGatherError::CyclicDependency(dep) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("A cyclic dependency was found in the task graph: {:?}", dep),
+                    ),
+                };
+                Err(res)
+            }
+        }
+    }
+
+    async fn periodically_sync_state<F>(self: Arc<Self>, cancel: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut errored = false;
+        tokio::pin!(cancel);
+
+        loop {
+            let loop_start_time: DateTime<Utc> = Utc::now();
+
+            let d = select! {
+                d = self.sync_state(self.max_rollouts) => {
+                    match &d {
+                        Ok((_, new_rollouts)) => {
+                            let loop_delta_time = Utc::now() - loop_start_time;
+                            info!(target: "rollout_data::state_syncer", "{} rollouts collected after {}.  Sleeping for {} seconds.", new_rollouts.len(), loop_delta_time, self.refresh_interval);
+                            if errored {
+                                info!(target: "rollout_data::state_syncer", "Successfully processed rollout data again after temporary error");
+                                // Clear error flag.
+                                errored = false;
+                                // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
+                            }
+                        }
+                        Err(res) => {
+                            error!(
+                                target: "rollout_data::state_syncer", "After processing fetch_rollout_data: {}",
+                                res.1
+                            );
+                            errored = true;
+                        }
+                    }
+                    d
+                },
+                _ = &mut cancel => break,
+            };
+
+            let _ = self.stream_tx.send_replace(d.clone());
+            let mut current_rollout_data = self.last_rollout_data.lock().await;
+            *current_rollout_data = d;
+            drop(current_rollout_data);
+
+            select! {
+                _ = sleep(Duration::from_secs(self.refresh_interval)) => (),
+                _ = &mut cancel => break,
+            }
+        }
     }
 }

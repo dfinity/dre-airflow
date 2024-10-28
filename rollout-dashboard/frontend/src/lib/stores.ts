@@ -1,28 +1,17 @@
 import { get, writable, type Writable } from 'svelte/store'
-import { type Rollout } from './types'
+import { type Rollout, type RolloutsViewDelta } from './types'
 
-const BACKEND_TIMEOUT = 15000
-
-type SseMessage = {
-    error: [number, string] | null;
-    rollouts: Rollout[];
-    updated: Rollout[] | undefined;
-    deleted: String[] | undefined;
-    engine_state?: string;
-}
-
-export type RolloutResult = {
+export type RolloutsView = {
     error: [number, string] | string | null;
     rollouts: Rollout[];
     engine_state?: string;
 }
 
-
 const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v1";
-const url = API_URL + "/rollouts/sse?incremental"
+const url = API_URL + "/sse/rollouts_view?incremental"
 var evtSource: null | EventSource = null;
 
-const rollout_store = writable<RolloutResult>({ rollouts: [], error: "loading" })
+const airflow_state = writable<RolloutsView>({ rollouts: [], error: "loading" })
 
 function resetupEventSource() {
     if (null !== evtSource) {
@@ -39,11 +28,11 @@ function resetupEventSource() {
     // var evtSourceGenerated = new Date();
     evtSource = new EventSource(url);
     evtSource.onmessage = async function (event) {
-        var sse_message: SseMessage = JSON.parse(event.data);
+        var sse_message: RolloutsViewDelta = JSON.parse(event.data);
         if (sse_message.error !== null) {
             let status = sse_message.error[0];
             if (status == 204) {
-                rollout_store.set({ rollouts: [], error: "loading" })
+                airflow_state.set({ rollouts: [], error: "loading" })
             } else {
                 let responseText = sse_message.error[1];
                 let errorText = status + " " + responseText;
@@ -52,21 +41,21 @@ function resetupEventSource() {
                     errorText = errorText + ": " + responseText
                 }
                 console.log('Request for rollout data failed: ' + errorText)
-                rollout_store.set({
-                    rollouts: get(rollout_store).rollouts,
-                    engine_state: get(rollout_store).engine_state,
+                airflow_state.set({
+                    rollouts: get(airflow_state).rollouts,
+                    engine_state: get(airflow_state).engine_state,
                     error: errorText
                 })
             }
         } else if (sse_message.rollouts !== undefined) {
             console.log("Full sync with " + sse_message.rollouts.length + " rollouts and engine state " + sse_message.engine_state);
-            rollout_store.set({
+            airflow_state.set({
                 rollouts: sse_message.rollouts,
                 error: null,
                 engine_state: sse_message.engine_state,
             })
         } else {
-            var rollouts: Rollout[] = get(rollout_store).rollouts;
+            var rollouts: Rollout[] = get(airflow_state).rollouts;
             var updated: Rollout[] | undefined = sse_message["updated"];
             var deleted: String[] | undefined = sse_message["deleted"];
             if (updated !== undefined) {
@@ -97,7 +86,7 @@ function resetupEventSource() {
                     }
                 }
             }
-            rollout_store.set({
+            airflow_state.set({
                 rollouts: rollouts,
                 error: null,
                 engine_state: sse_message.engine_state,
@@ -108,15 +97,15 @@ function resetupEventSource() {
         console.log({ message: "Disconnected from event source.  Reconnecting in 5 seconds.", event: e })
         if (evtSource !== null) { evtSource.close(); evtSource = null; }
         var errorText = 'Rollout dashboard is down — reconnecting in 5 seconds'
-        rollout_store.set({
-            rollouts: get(rollout_store).rollouts,
+        airflow_state.set({
+            rollouts: get(airflow_state).rollouts,
             error: errorText
         })
         setTimeout(resetupEventSource, 5000)
     }
 }
 
-export const rollout_query = ((): Writable<RolloutResult> => {
+export const rollouts_view = ((): Writable<RolloutsView> => {
     resetupEventSource()
-    return rollout_store
+    return airflow_state
 });
