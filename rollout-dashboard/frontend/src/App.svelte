@@ -1,9 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import url from "./lib/url.js";
-  import { type RolloutsView, rollouts_view } from "./lib/stores";
+  import { rollouts_view } from "./lib/stores";
   import Rollout from "./lib/Rollout.svelte";
-  import { writable } from "svelte/store";
   import { FooterCopyright } from "flowbite-svelte";
   import {
     Footer,
@@ -13,13 +11,7 @@
   } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
 
-  let view = writable({
-    rollouts: [],
-    error: "loading",
-  } as RolloutsView);
-  onMount(async () => {
-    view = rollouts_view();
-  });
+  let view = rollouts_view();
 
   import { Navbar, NavLi, NavUl } from "flowbite-svelte";
   $: activeUrl = $url.hash;
