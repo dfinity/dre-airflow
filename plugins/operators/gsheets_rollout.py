@@ -52,7 +52,11 @@ def convert_sheet_data_into_feature_subnet_map(
         if not feature_requests:
             # No feature requests for this subnet.
             continue
-        col_index = [idx for idx, val in enumerate(feature_requests) if val == "yes"]
+        col_index = [
+            idx
+            for idx, val in enumerate(feature_requests)
+            if val.strip().lower() == "yes"
+        ]
         if not col_index:
             # None of the columns is marked yes.  No feature request.
             continue
