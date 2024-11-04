@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from logging import Logger
 from typing import Any
 
 from dfinity.rollout_types import (
@@ -38,13 +39,18 @@ def convert_rollout_week_sheet_name(date_with_week_number: str) -> datetime.date
 
 def convert_sheet_data_into_feature_subnet_map(
     sheet_data: list[list[Any]],
+    log: Logger
 ) -> dict[SubnetId, FeatureName]:
     headings, rows = sheet_data[0], sheet_data[1:]
     if not headings:
         raise Warning("No headings on sheet, ignoring")
     feature_names = headings[1:]
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
-    for row in rows:
+    for (index, row) in enumerate(rows):
+        log.info("Checking row %s" % row)
+        if not len(row):
+            log.warning("Skipping completely empty row %s" % index)
+            continue
         subnet, feature_requests = row[0], row[1:]
         if not subnet:
             # Empty first cell in the row means no subnet, ignoring.
@@ -133,7 +139,8 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
             )
             try:
                 subnet_id_feature_map = convert_sheet_data_into_feature_subnet_map(
-                    values
+                    values,
+                    self.log
                 )
             except Warning as w:
                 self.log.warn("Ignoring sheet %s: %s", title, w)
