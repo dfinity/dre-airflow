@@ -5,15 +5,14 @@ import re
 from logging import Logger
 from typing import Any
 
+from airflow.providers.google.suite.hooks.sheets import GSheetsHook
+from airflow.providers.google.suite.operators.sheets import (
+    GoogleSheetsCreateSpreadsheetOperator,
+)
 from dfinity.rollout_types import (
     FeatureName,
     RolloutFeatures,
     SubnetId,
-)
-
-from airflow.providers.google.suite.hooks.sheets import GSheetsHook
-from airflow.providers.google.suite.operators.sheets import (
-    GoogleSheetsCreateSpreadsheetOperator,
 )
 
 
@@ -38,20 +37,21 @@ def convert_rollout_week_sheet_name(date_with_week_number: str) -> datetime.date
 
 
 def convert_sheet_data_into_feature_subnet_map(
-    sheet_data: list[list[Any]],
-    log: Logger
+    sheet_data: list[list[Any]], log: Logger
 ) -> dict[SubnetId, FeatureName]:
     headings, rows = sheet_data[0], sheet_data[1:]
     if not headings:
         raise Warning("No headings on sheet, ignoring")
     feature_names = headings[1:]
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
-    for (index, row) in enumerate(rows):
+    for index, row in enumerate(rows):
         log.info("Checking row %s: %s", index, row)
         # strip empty space at start / end, and keep only non-empty columns
         row = [r.strip() for r in row if r.strip()]
         if len(row) < 2:
-            log.warning("Row %s has only %s non-empty columns, skipping", index, len(row))
+            log.warning(
+                "Row %s has only %s non-empty columns, skipping", index, len(row)
+            )
             continue
         subnet, feature_enabled = row[0], row[1:]
         if not subnet:
@@ -70,9 +70,7 @@ def convert_sheet_data_into_feature_subnet_map(
             # No feature is enabled on the subnet, run the baseline version.
             continue
         invalid_col_values = [
-            val
-            for val in feature_enabled
-            if val not in ["true", "false", "yes", "no"]
+            val for val in feature_enabled if val not in ["true", "false", "yes", "no"]
         ]
         if len(invalid_col_values):
             raise ValueError(
@@ -86,7 +84,9 @@ def convert_sheet_data_into_feature_subnet_map(
         except IndexError:
             raise ValueError(f"In subnet {subnet} a feature without a name is enabled")
         if not feature_enabled:
-            raise ValueError(f"In subnet {subnet} a feature with an empty name is enabled")
+            raise ValueError(
+                f"In subnet {subnet} a feature with an empty name is enabled"
+            )
         subnet_id_feature_map[subnet] = feature_enabled
     return subnet_id_feature_map
 
@@ -129,8 +129,7 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
             )
             try:
                 subnet_id_feature_map = convert_sheet_data_into_feature_subnet_map(
-                    values,
-                    self.log
+                    values, self.log
                 )
             except Warning as w:
                 self.log.warn("Ignoring sheet %s: %s", title, w)
