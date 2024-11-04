@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import datetime
+from logging import Logger
 import re
 from typing import Any
-from logging import Logger
 
 from dfinity.rollout_types import (
     FeatureName,
