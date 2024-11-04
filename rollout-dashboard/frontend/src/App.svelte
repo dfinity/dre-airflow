@@ -191,7 +191,8 @@
 
 <Footer>
   <div class="sm:flex sm:items-center sm:justify-between">
-    <FooterCopyright>DFINITY Foundation</FooterCopyright>
+    <FooterCopyright by="DFINITY Foundation" copyrightMessage="/ Apache 2.0"
+    ></FooterCopyright>
     <FooterBrand name="Rollout dashboard" src="favicon-512x512.png"
     ></FooterBrand>
     <FooterLinkGroup
