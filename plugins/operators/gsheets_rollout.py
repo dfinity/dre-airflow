@@ -47,32 +47,32 @@ def convert_sheet_data_into_feature_subnet_map(
     feature_names = headings[1:]
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
     for (index, row) in enumerate(rows):
-        log.info("Checking row %s" % row)
-        if not len(row):
-            log.warning("Skipping completely empty row %s" % index)
+        log.info("Checking row %s: %s", index, row)
+        # strip empty space at start / end, and keep only non-empty columns
+        row = [r.strip() for r in row if r.strip()]
+        if len(row) < 2:
+            log.warning("Row %s has only %s non-empty columns, skipping", index, len(row))
             continue
-        subnet, feature_requests = row[0], row[1:]
+        subnet, feature_enabled = row[0], row[1:]
         if not subnet:
             # Empty first cell in the row means no subnet, ignoring.
             continue
-        if not feature_requests:
+        feature_enabled = [f.strip().lower() for f in feature_enabled if f.strip()]
+        if not feature_enabled:
             # No feature requests for this subnet.
             continue
         col_index = [
             idx
-            for idx, val in enumerate(feature_requests)
-            if val.strip().lower() == "yes" or val.strip().lower() == "true"
+            for idx, val in enumerate(feature_enabled)
+            if val == "yes" or val == "true"
         ]
         if not col_index:
-            # None of the columns is marked yes.  No feature request.
+            # No feature is enabled on the subnet, run the baseline version.
             continue
         invalid_col_values = [
             val
-            for idx, val in enumerate(feature_requests)
-            if not val.strip().lower() == "yes" and not val.strip().lower() == "true"
-            if not val.strip().lower() == "no"
-            and not val.strip().lower() == "false"
-            and not val.strip().lower() == ""
+            for val in feature_enabled
+            if val not in ["true", "false", "yes", "no"]
         ]
         if len(invalid_col_values):
             raise ValueError(
@@ -80,24 +80,14 @@ def convert_sheet_data_into_feature_subnet_map(
                 f"subnet {subnet} under at least one feature"
             )
         if len(col_index) > 1:
-            raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " under two different features"
-            )
+            raise ValueError(f"In subnet {subnet} more than one feature is enabled")
         try:
-            feature_name = feature_names[col_index[0]]
+            feature_enabled = feature_names[col_index[0]]
         except IndexError:
-            # There is a yes in the row, but no feature named.
-            raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " that has no feature name in the heading"
-            )
-        if not feature_name:
-            raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " that has an empty feature name in the heading"
-            )
-        subnet_id_feature_map[subnet] = feature_name
+            raise ValueError(f"In subnet {subnet} a feature without a name is enabled")
+        if not feature_enabled:
+            raise ValueError(f"In subnet {subnet} a feature with an empty name is enabled")
+        subnet_id_feature_map[subnet] = feature_enabled
     return subnet_id_feature_map
 
 
