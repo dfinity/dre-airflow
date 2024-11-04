@@ -40,55 +40,68 @@ def convert_rollout_week_sheet_name(date_with_week_number: str) -> datetime.date
 def convert_sheet_data_into_feature_subnet_map(
     sheet_data: list[list[Any]], log: Logger
 ) -> dict[SubnetId, FeatureName]:
+    if not sheet_data or not sheet_data[0]:
+        raise Warning("No headings in the provided sheet data, ignoring")
+
     headings, rows = sheet_data[0], sheet_data[1:]
-    if not headings:
-        raise Warning("No headings on sheet, ignoring")
-    feature_names = headings[1:]
+    feature_names = headings[1:]  # Skip the subnet column
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
+
     for index, row in enumerate(rows):
-        log.info("Checking row %s: %s", index, row)
-        # strip empty space at start / end, and keep only non-empty columns
-        row = [r.strip() for r in row if r.strip()]
+        log.info("Processing row %s: %s", index, row)
+
+        # Strip whitespaces from each cell
+        row = [cell.strip() for cell in row]
+
+        # Ensure there are enough columns
         if len(row) < 2:
-            log.warning(
-                "Row %s has only %s non-empty columns, skipping", index, len(row)
-            )
+            log.warning("Row %s has insufficient data, skipping", index)
             continue
-        subnet, feature_enabled = row[0], row[1:]
+
+        subnet, feature_values = row[0], row[1:]
+
+        # Skip rows with an empty subnet cell
         if not subnet:
-            # Empty first cell in the row means no subnet, ignoring.
+            log.warning("Row %s has no subnet specified, skipping", index)
             continue
-        feature_enabled = [f.strip().lower() for f in feature_enabled if f.strip()]
-        if not feature_enabled:
-            # No feature requests for this subnet.
+
+        # Normalize and filter the feature values
+        feature_values = [value.lower() for value in feature_values if value]
+        if not feature_values:
+            log.info("Row %s has no enabled features for subnet %s", index, subnet)
             continue
-        col_index = [
-            idx
-            for idx, val in enumerate(feature_enabled)
-            if val == "yes" or val == "true"
+
+        # Check if any invalid values exist
+        invalid_values = [
+            val for val in feature_values if val not in {"true", "false", "yes", "no"}
         ]
-        if not col_index:
-            # No feature is enabled on the subnet, run the baseline version.
-            continue
-        invalid_col_values = [
-            val for val in feature_enabled if val not in ["true", "false", "yes", "no"]
+        if invalid_values:
+            raise ValueError(
+                f"Invalid values {invalid_values} in row {index} for subnet {subnet}"
+            )
+
+        # Find the indices of enabled features
+        enabled_indices = [
+            idx for idx, val in enumerate(feature_values) if val in {"yes", "true"}
         ]
-        if len(invalid_col_values):
+
+        # Validate if only one feature is enabled
+        if len(enabled_indices) != 1:
             raise ValueError(
-                f"Sheet contains invalid values {invalid_col_values} for "
-                f"subnet {subnet} under at least one feature"
+                f"Subnet {subnet} has {len(enabled_indices)} enabled features; "
+                "expected exactly one"
             )
-        if len(col_index) > 1:
-            raise ValueError(f"In subnet {subnet} more than one feature is enabled")
-        try:
-            feature_enabled = feature_names[col_index[0]]
-        except IndexError:
-            raise ValueError(f"In subnet {subnet} a feature without a name is enabled")
-        if not feature_enabled:
+
+        # Retrieve the enabled feature name
+        enabled_feature = feature_names[enabled_indices[0]]
+        if not enabled_feature:
             raise ValueError(
-                f"In subnet {subnet} a feature with an empty name is enabled"
+                f"Subnet {subnet} has an enabled feature with an empty name"
             )
-        subnet_id_feature_map[subnet] = feature_enabled
+
+        # Map the subnet to the enabled feature
+        subnet_id_feature_map[subnet] = enabled_feature
+
     return subnet_id_feature_map
 
 
