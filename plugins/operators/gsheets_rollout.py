@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import datetime
-from logging import Logger
 import re
+from logging import Logger
 from typing import Any
 
 from dfinity.rollout_types import (
