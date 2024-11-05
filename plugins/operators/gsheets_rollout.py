@@ -50,8 +50,8 @@ def convert_sheet_data_into_feature_subnet_map(
     for index, row in enumerate(rows):
         log.info("Processing row %s: %s", index, row)
 
-        # Strip whitespaces from each cell
-        row = [cell.strip() for cell in row]
+        # Strip whitespaces from each cell, and convert to lowercase
+        row = [cell.strip().lower() for cell in row]
 
         # Ensure there are enough columns
         if len(row) < 2:
@@ -66,8 +66,12 @@ def convert_sheet_data_into_feature_subnet_map(
             continue
 
         # Normalize and filter the feature values
-        feature_values = [value.lower() for value in feature_values if value]
-        if not feature_values:
+        feature_values = [value for value in feature_values if value]
+        # Find the indices of enabled features
+        enabled_indices = [
+            idx for idx, val in enumerate(feature_values) if val in {"yes", "true"}
+        ]
+        if not feature_values or not enabled_indices:
             log.info("Row %s has no enabled features for subnet %s", index, subnet)
             continue
 
@@ -79,11 +83,6 @@ def convert_sheet_data_into_feature_subnet_map(
             raise ValueError(
                 f"Invalid values {invalid_values} in row {index} for subnet {subnet}"
             )
-
-        # Find the indices of enabled features
-        enabled_indices = [
-            idx for idx, val in enumerate(feature_values) if val in {"yes", "true"}
-        ]
 
         # Validate if only one feature is enabled
         if len(enabled_indices) != 1:
@@ -132,7 +131,7 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
             try:
                 date = convert_rollout_week_sheet_name(title)
             except ValueError as e:
-                self.log.warn("Ignoring sheet %s: cannot fathom date: %s", title, e)
+                self.log.warning("Ignoring sheet %s: cannot parse date: %s", title, e)
                 continue
             row_count = props["gridProperties"]["rowCount"]
             col_count = props["gridProperties"]["columnCount"]
@@ -146,7 +145,7 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
                     values, self.log
                 )
             except Warning as w:
-                self.log.warn("Ignoring sheet %s: %s", title, w)
+                self.log.warning("Ignoring sheet %s: %s", title, w)
             rollout_features.append(
                 {
                     "date": date,
