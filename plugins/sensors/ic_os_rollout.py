@@ -639,7 +639,7 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
                 + other
                 + '"}[1d])) > count (ic_replica_info{ic_subnet="'
                 + other
-                + '"}) / 3"'
+                + '"}) / 3'
             )
             print("::group::Querying Prometheus servers")
             self.log.info(query)
