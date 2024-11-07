@@ -634,13 +634,15 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
                 f"Checking that {other} has not been updated in the"
                 f" last 1 day before {subnet_id}"
             )
-            query = (
-                'sum(changes(ic_replica_info{ic_subnet="'
-                + other
-                + '"}[1d])) > count (ic_replica_info{ic_subnet="'
-                + other
-                + '"}) / 3'
-            )
+            # Tolerate up to 1/3 of the subnet being updated,
+            # e.g. if a node is joining a subnet.
+            query = f"""
+                (
+                    sum(changes((ic_replica_info{{ic_subnet="{other}"}})[1d]) or vector(0))
+                    >=
+                    scalar(job_ic_icsubnet:up:count{{job="replica", ic_subnet="{other}"}} / 3)
+                ) or 0
+            """
             print("::group::Querying Prometheus servers")
             self.log.info(query)
             print("::endgroup::")
