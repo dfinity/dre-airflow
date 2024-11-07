@@ -634,7 +634,13 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
                 f"Checking that {other} has not been updated in the"
                 f" last 1 day before {subnet_id}"
             )
-            query = "sum(changes(ic_replica_info{" + f'ic_subnet="{other}"' + "}[1d]))"
+            query = (
+                'sum(changes(ic_replica_info{ic_subnet="'
+                + other
+                + '"}[1d])) > count (ic_replica_info{ic_subnet="'
+                + other
+                + '"}) / 3"'
+            )
             print("::group::Querying Prometheus servers")
             self.log.info(query)
             print("::endgroup::")
