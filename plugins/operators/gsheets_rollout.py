@@ -44,7 +44,7 @@ def convert_sheet_data_into_feature_subnet_map(
         raise Warning("No headings in the provided sheet data, ignoring")
 
     headings, rows = sheet_data[0], sheet_data[1:]
-    feature_names = headings[1:]  # Skip the subnet column
+    feature_names = [x.strip() for x in headings[1:]]  # Skip the subnet column
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
 
     for index, row in enumerate(rows):
