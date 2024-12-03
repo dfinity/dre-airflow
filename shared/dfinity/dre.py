@@ -91,7 +91,8 @@ class DRE:
         self.subprocess_hook = subprocess_hook
         self.network = network
         # FIXME:
-        # Newer versions are linked against glibc 2.39 and we don't have that on airflow ATM.
+        # Newer versions are linked against glibc 2.39 and
+        # we don't have that on airflow ATM.
         self.ic_admin_version = "957689f550775c7dfb7767dc2085a7845cf52533"
 
     def authenticated(self) -> "AuthenticatedDRE":
