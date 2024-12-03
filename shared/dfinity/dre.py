@@ -90,6 +90,10 @@ class DRE:
         self.dre_path = os.path.join(self.base_dir, "dre")
         self.subprocess_hook = subprocess_hook
         self.network = network
+        # FIXME:
+        # Newer versions are linked against glibc 2.39 and
+        # we don't have that on airflow ATM.
+        self.ic_admin_version = "957689f550775c7dfb7767dc2085a7845cf52533"
 
     def authenticated(self) -> "AuthenticatedDRE":
         """
@@ -138,7 +142,12 @@ class DRE:
                     nid = ["--neuron-id", str(self.network.proposer_neuron_id)]
                 else:
                     pem, nid = [], []
-                cmd = [self.dre_path] + nnsurl + nid + pem + list(args)
+                cmd = [self.dre_path] + nnsurl + nid + pem
+
+                if self.ic_admin_version:
+                    cmd += ["--ic-admin-version", self.ic_admin_version]
+
+                cmd += list(args)
                 if dry_run:
                     cmd.append("--dry-run")
                 if yes and not dry_run:
