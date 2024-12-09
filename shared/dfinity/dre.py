@@ -93,7 +93,7 @@ class DRE:
         # FIXME:
         # Newer versions are linked against glibc 2.39 and
         # we don't have that on airflow ATM.
-        self.ic_admin_version = "957689f550775c7dfb7767dc2085a7845cf52533"
+        self.ic_admin_version = "72a6598aaa193edc965e0860da731cc5af7c89e0"
 
     def authenticated(self) -> "AuthenticatedDRE":
         """
