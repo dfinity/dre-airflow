@@ -2,7 +2,7 @@ name: Update k8s deployments
 description: Reusable action for updating k8s deployments
 
 inputs:
-  files_to_update:
+  files-to-update:
     description: "A space-separated list of files to update"
     required: true
   component:
@@ -26,7 +26,7 @@ runs:
       id: "update_k8s"
       env:
         GITHUB_API_TOKEN_FOR_K8S: ${{ steps.app-token.outputs.token }}
-        FILES: ${{ inputs.files_to_update }}
+        FILES_TO_UPDATE: ${{ inputs.files-to-update }}
         COMPONENT: ${{ inputs.component }}
       shell: bash
       run: |
@@ -42,12 +42,13 @@ runs:
         git config user.email "idx@dfinity.org"
         git config user.name "IDX Automation"
         SOURCE_BRANCH="${{ github.head_ref || github.ref_name }}"
-        K8S_REPO_BRANCH="update-dre-airflow-$COMPONENT-images-$SOURCE_BRANCH"
+        K8S_REPO_BRANCH="update-dre-airflow-$COMPONENT-images-from-$SOURCE_BRANCH"
+
         git checkout -b "${K8S_REPO_BRANCH}"
 
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
-        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $FILES
+        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
