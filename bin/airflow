@@ -1,9 +1,55 @@
-#!/bin/bash -e
+#!/bin/bash
+set -eEuo pipefail
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VENV_DIR=$( dirname "$SCRIPT_DIR" )/venv
+VENV_BIN_DIR="$VENV_DIR"/bin
 export AIRFLOW_HOME=$( dirname "$SCRIPT_DIR" )/airflow
 export PYTHONPATH=$(dirname "$SCRIPT_DIR")/shared
+AIRFLOW_BIN="$VENV_BIN_DIR"/airflow
+ONEPASS_BIN="$VENV_BIN_DIR"/1pass
+
+export AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(dfinity|airflow).*"
+export AIRFLOW__WEBSERVER__ALLOW_RAW_HTML_DESCRIPTIONS=true
+export PATH="$VENV_BIN_DIR:$PATH"
+
+function install_1pass_cli() {
+    if [ -x "$ONEPASS_BIN" ]; then
+        return 0
+    fi
+    if [[ "$(uname)" == "Linux" ]]; then
+        ARCH=$(dpkg --print-architecture) && \
+        wget "https://cache.agilebits.com/dist/1P/op2/pkg/v2.30.3/op_linux_${ARCH}_v2.30.3.zip" -O op.zip && \
+        unzip -d op op.zip && \
+        mv op/op "$VENV_BIN_DIR"/1pass && \
+        rm -r op.zip op && \
+        chmod 0755 "$VENV_BIN_DIR"/1pass && \
+        ln -sf 1pass "$VENV_BIN_DIR"/op
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        brew install 1password-cli
+    fi
+}
+
+function login_1pass() {
+    "$ONEPASS_BIN" whoami || {
+        "$ONEPASS_BIN" account add --address dfinity.1password.com
+        eval $("$ONEPASS_BIN" signin)
+    }
+}
+
+function setup_airflow_variables_and_connections() {
+    "$AIRFLOW_BIN" variables set "dfinity.ic_admin.mainnet.proposer_key_file" "$("$ONEPASS_BIN" read "op://DRE Team/DFX release-automation principal key/identity.pem")"
+    SLACK_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Slack token for Airflow connection slack.ic_os_rollout/credential")"
+    "$AIRFLOW_BIN" connections delete "slack.ic_os_rollout" || true
+    "$AIRFLOW_BIN" connections add "slack.ic_os_rollout" --conn-type slack --conn-password "$SLACK_CREDS" --conn-extra "{\"slack_token\": \"$SLACK_CREDS\"}"
+    GOOGLE_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Airflow Google Drive credentials/credential" | jq -c .)"
+    "$AIRFLOW_BIN" connections delete "google_cloud_default" || true
+    "$AIRFLOW_BIN" connections add "google_cloud_default" --conn-type google_cloud_platform --conn-extra "{
+        \"extra__google_cloud_platform__project\": \"airflow-422113\",
+        \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets\",
+        \"extra__google_cloud_platform__keyfile_dict\": $GOOGLE_CREDS}
+    "
+}
 
 if [ "$1" == "setup" ]
 then
@@ -23,6 +69,15 @@ then
     sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow.cfg
     sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
     popd
+
+    read -p "Do you want to set up Airflow variables and connections (optional for most local runs)? (y/n): " setup_choice
+    if [[ "$setup_choice" == "y" || "$setup_choice" == "Y" ]]; then
+        install_1pass_cli
+        login_1pass
+        setup_airflow_variables_and_connections
+    else
+        echo "Skipping Airflow variables and connections setup."
+    fi
 fi
 
 test -x "$VENV_DIR"/bin/airflow || {
@@ -50,16 +105,27 @@ then
     exit
 fi
 
-if [ "$1" == "unlockdb" ]
+if [ "$1" == "standalone" ]
+then
+if pgrep -f "venv/bin/airflow" > /dev/null
+then
+    echo "Another instance of Airflow is already running. Please terminate it or kill airflow processes to avoid database corruption." >&2
+    echo "Process IDs of running Airflow instances:" >&2
+    pgrep -f "venv/bin/airflow" >&2
+    exit 1
+fi
+fi
+
+if [ "$1" == "unlockdb" ] || [ "$1" == "standalone" ]
 then
     cd "$AIRFLOW_HOME"
     echo .dump | sqlite3 airflow.db | sqlite3 airflow.db-new
     mv -f airflow.db-new airflow.db
     echo "Database is now unlocked." >&2
-    exit
+    if [ "$1" == "unlockdb" ]
+    then
+        exit
+    fi
 fi
 
-export AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(dfinity|airflow).*"
-export AIRFLOW__WEBSERVER__ALLOW_RAW_HTML_DESCRIPTIONS=true
-export PATH="$VENV_DIR/bin:$PATH"
-exec "$VENV_DIR"/bin/airflow "$@"
+exec "$AIRFLOW_BIN" "$@"

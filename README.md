@@ -85,7 +85,7 @@ connections (unless specified otherwise):
 *
   * Connection ID: `airflow_logging`
   * Connection type: Amazon Web Services
-  * Description: Logging storage for Airflow.
+  * Description: S3 Logging storage for Airflow. Only needed for production (Kubernetes deployments)
   * AWS Access Key ID: the value of `AWS_ACCESS_KEY_ID` in K8s secret `airflow-logging`
   * AWS Secret Access Key: the value of `AWS_SECRET_ACCESS_KEY` in K8s secret `airflow-logging`
   * Extra: `{ "endpoint_url": "http://rook-ceph-rgw-ceph-store.rook-ceph.svc.cluster.local" }`
