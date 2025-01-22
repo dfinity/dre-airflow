@@ -1,6 +1,14 @@
 name: Update k8s deployments
 description: Reusable action for updating k8s deployments
 
+inputs:
+  files_to_update:
+    description: "A space-separated list of files to update"
+    required: true
+  component:
+    description: "Which component to update"
+    required: true
+
 runs:
   using: composite
   steps:
@@ -18,10 +26,12 @@ runs:
       id: "update_k8s"
       env:
         GITHUB_API_TOKEN_FOR_K8S: ${{ steps.app-token.outputs.token }}
+        FILES: ${{ inputs.files_to_update }}
+        COMPONENT: ${{ inputs.component }}
       shell: bash
       run: |
         set -eExou pipefail
-        files="bases/apps/rollout-dashboard/core/deployment.yaml"
+
         tmpdir=$(mktemp)
         trap 'rm -rf "$tmpdir"' EXIT
 
@@ -31,15 +41,13 @@ runs:
         cd k8s
         git config user.email "idx@dfinity.org"
         git config user.name "IDX Automation"
-        DRE_REPO_BRANCH="${{ github.head_ref || github.ref_name }}"
-        K8S_REPO_BRANCH="update-dre-airflow-images-$DRE_REPO_BRANCH"
+        SOURCE_BRANCH="${{ github.head_ref || github.ref_name }}"
+        K8S_REPO_BRANCH="update-dre-airflow-$COMPONENT-images-$SOURCE_BRANCH"
         git checkout -b "${K8S_REPO_BRANCH}"
 
-        # Update the internal dashboard image refs
-        # this regex matches the first group (ie the image name) and uses \1
-        # called a back-reference to insert the first group matched, the second
-        # part is to match the 40 characters hash that we replace with the $GITHUB_SHA
-        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $files
+        # Update the refs in the requested files.
+        # Refs are assumed to be named sha-[0-9a-f]+.
+        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $FILES
 
         # commit changes if there are any
         git add .
@@ -49,13 +57,13 @@ runs:
         fi
 
         # Push changes and create a new merge request
-        git commit -m "New rollout dashboard release from $DRE_REPO_BRANCH branch"
+        git commit -m "New $COMPONENT release from $SOURCE_BRANCH branch"
         git push \
           --force --set-upstream origin "${K8S_REPO_BRANCH}" || \
           git push --force --set-upstream origin "${K8S_REPO_BRANCH}"
 
         echo "k8s_branch=$K8S_REPO_BRANCH" >> $GITHUB_OUTPUT
-        echo "dre_airflow_branch=$DRE_REPO_BRANCH" >> $GITHUB_OUTPUT
+        echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
 
     - name: "Create PR on k8s repository"
       if: ${{ steps.update_k8s.outputs.k8s_branch != '' }}
@@ -65,10 +73,10 @@ runs:
         github-token: ${{ steps.app-token.outputs.token }}
         script: |
           const result = await github.rest.pulls.create({
-            title: '[nomrbot] - New rollout dashboard release',
+            title: '[nomrbot] - New ${{ inputs.component }} release from the dre-airflow repo',
             owner: 'dfinity-ops',
             repo: 'k8s',
             head: '${{ steps.update_k8s.outputs.k8s_branch }}',
             base: 'main',
-            body: 'Updating the DRE container images based on the latest changes in the DRE repository - [here](https://github.com/dfinity/dre/commits/${{ steps.update_k8s.outputs.dre_airflow_branch }})'
+            body: 'Updating container images based on the latest changes in [this repository](https://github.com/dfinity/dre-airflow/commits/${{ steps.update_k8s.outputs.source_branch }})'
           });

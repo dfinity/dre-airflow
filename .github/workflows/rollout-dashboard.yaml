@@ -139,3 +139,6 @@ jobs:
           context: rollout-dashboard
       - uses: ./.github/workflows/update-k8s-deployments
         name: Roll out new rollout-dashboard container
+        with:
+          files_to_update: bases/apps/rollout-dashboard/core/deployment.yaml
+          component: rollout-dashboard
