@@ -185,6 +185,7 @@ for network_name, network in IC_NETWORKS.items():
             task_id="upgrade_unassigned_nodes",
             simulate=cast(bool, "{{ params.simulate }}"),
             network=network,
+            retries=retries,
         )
 
         task_groups = []

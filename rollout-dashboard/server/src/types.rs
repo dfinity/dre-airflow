@@ -1,11 +1,14 @@
 //! Contains useful types to deserialize the result of the API calls
 //! made available by the rollout dashboard REST API.
 
+use crate::airflow_client::{DagsResponse, DagsResponseItem};
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::vec::Vec;
 use strum::Display;
 
@@ -95,6 +98,7 @@ pub struct Rollout {
     pub batches: IndexMap<usize, Batch>,
     /// Configuration associated to the rollout.
     pub conf: HashMap<String, serde_json::Value>,
+    pub update_count: usize,
 }
 
 impl Rollout {
@@ -105,6 +109,7 @@ impl Rollout {
         dispatch_time: DateTime<Utc>,
         last_scheduling_decision: Option<DateTime<Utc>>,
         conf: HashMap<String, serde_json::Value>,
+        update_count: usize,
     ) -> Self {
         Self {
             name,
@@ -115,6 +120,7 @@ impl Rollout {
             last_scheduling_decision,
             batches: IndexMap::new(),
             conf,
+            update_count,
         }
     }
 }
@@ -128,3 +134,99 @@ impl Rollout {
 /// Rollouts are always returned in reverse chronological order -- the most
 /// recent comes first, and the last item is the oldest rollout.
 pub type Rollouts = Vec<Rollout>;
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+/// Rollout engine state.
+///
+/// The API call `/api/v1/engine_state` returns this in JSON format as its content.
+/// If Airflow itself is malfunctioning, there is no guarantee that this will be up-to-date.
+pub enum RolloutEngineState {
+    Missing,
+    Broken,
+    Paused,
+    Inactive,
+    Active,
+}
+
+impl From<DagsResponse> for RolloutEngineState {
+    fn from(resp: DagsResponse) -> Self {
+        match resp.dags.len() {
+            0 => RolloutEngineState::Missing,
+            _ => match resp.dags[0] {
+                DagsResponseItem {
+                    has_import_errors: true,
+                    ..
+                } => Self::Broken,
+                DagsResponseItem {
+                    is_paused: true, ..
+                } => Self::Paused,
+                DagsResponseItem {
+                    is_active: false, ..
+                } => Self::Inactive,
+                DagsResponseItem {
+                    is_active: true,
+                    is_paused: false,
+                    has_import_errors: false,
+                    ..
+                } => Self::Active,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Default)]
+/// Incremental state update sent by Airflow via its SSE update endpoint.
+///
+/// To query this endpoint, use server-sent events client with URL
+/// /api/v1/sse/rollouts_view or URL /api/v1/rollouts/sse (for compatibility
+/// with old clients that do not support incremental updates).
+///
+/// By default, when invoked through /api/v1/rollouts/sse, only full updates
+/// of rollouts (the rollouts list) will be filled, or possibly the error
+/// field.  If /api/v1/sse/rollouts_view is used, or the query string parameter
+/// `incremental` is specified (and not valued false) in /api/v1/rollouts/sse,
+/// then the first update the client receives (and each update right after
+/// the dashboard has sent an error to the client) will contain the full
+/// rollouts list in the rollouts member, and subsequent updates will only
+/// include the updated and deleted members, if there are any updated or
+/// deleted rollouts.
+pub struct RolloutsViewDelta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rollouts: Option<VecDeque<Rollout>>,
+    #[serde(skip_serializing_if = "VecDeque::is_empty")]
+    updated: VecDeque<Rollout>,
+    #[serde(skip_serializing_if = "VecDeque::is_empty")]
+    deleted: VecDeque<String>,
+    error: Option<(u16, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    engine_state: Option<RolloutEngineState>,
+}
+
+impl RolloutsViewDelta {
+    pub fn error(e: &(StatusCode, String)) -> Self {
+        Self {
+            error: Some((e.0.as_u16(), e.1.clone())),
+            ..Default::default()
+        }
+    }
+    pub fn full(engine_state: &RolloutEngineState, rollouts: &VecDeque<Rollout>) -> Self {
+        Self {
+            rollouts: Some(rollouts.clone()),
+            engine_state: Some(engine_state.clone()),
+            ..Default::default()
+        }
+    }
+    pub fn partial(
+        engine_state: &RolloutEngineState,
+        updated: &VecDeque<Rollout>,
+        deleted: &VecDeque<String>,
+    ) -> Self {
+        Self {
+            updated: updated.clone(),
+            deleted: deleted.clone(),
+            engine_state: Some(engine_state.clone()),
+            ..Default::default()
+        }
+    }
+}

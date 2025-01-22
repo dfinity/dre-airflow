@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from logging import Logger
 from typing import Any
 
 from dfinity.rollout_types import (
@@ -37,44 +38,69 @@ def convert_rollout_week_sheet_name(date_with_week_number: str) -> datetime.date
 
 
 def convert_sheet_data_into_feature_subnet_map(
-    sheet_data: list[list[Any]],
+    sheet_data: list[list[Any]], log: Logger
 ) -> dict[SubnetId, FeatureName]:
+    if not sheet_data or not sheet_data[0]:
+        raise Warning("No headings in the provided sheet data, ignoring")
+
     headings, rows = sheet_data[0], sheet_data[1:]
-    if not headings:
-        raise Warning("No headings on sheet, ignoring")
-    feature_names = headings[1:]
+    feature_names = [x.strip() for x in headings[1:]]  # Skip the subnet column
     subnet_id_feature_map: dict[SubnetId, FeatureName] = {}
-    for row in rows:
-        subnet, feature_requests = row[0], row[1:]
+
+    for index, row in enumerate(rows):
+        log.info("Processing row %s: %s", index, row)
+
+        # Strip whitespaces from each cell, and convert to lowercase
+        row = [cell.strip().lower() for cell in row]
+
+        # Ensure there are enough columns
+        if len(row) < 2:
+            log.warning("Row %s has insufficient data, skipping", index)
+            continue
+
+        subnet, feature_values = row[0], row[1:]
+
+        # Skip rows with an empty subnet cell
         if not subnet:
-            # Empty first cell in the row means no subnet, ignoring.
+            log.warning("Row %s has no subnet specified, skipping", index)
             continue
-        if not feature_requests:
-            # No feature requests for this subnet.
+
+        # Normalize and filter the feature values
+        feature_values = [value for value in feature_values if value]
+        # Find the indices of enabled features
+        enabled_indices = [
+            idx for idx, val in enumerate(feature_values) if val in {"yes", "true"}
+        ]
+        if not feature_values or not enabled_indices:
+            log.info("Row %s has no enabled features for subnet %s", index, subnet)
             continue
-        col_index = [idx for idx, val in enumerate(feature_requests) if val == "yes"]
-        if not col_index:
-            # None of the columns is marked yes.  No feature request.
-            continue
-        if len(col_index) > 1:
+
+        # Check if any invalid values exist
+        invalid_values = [
+            val for val in feature_values if val not in {"true", "false", "yes", "no"}
+        ]
+        if invalid_values:
             raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " under two different features"
+                f"Invalid values {invalid_values} in row {index} for subnet {subnet}"
             )
-        try:
-            feature_name = feature_names[col_index[0]]
-        except IndexError:
-            # There is a yes in the row, but no feature named.
+
+        # Validate if only one feature is enabled
+        if len(enabled_indices) != 1:
             raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " that has no feature name in the heading"
+                f"Subnet {subnet} has {len(enabled_indices)} enabled features; "
+                "expected exactly one"
             )
-        if not feature_name:
+
+        # Retrieve the enabled feature name
+        enabled_feature = feature_names[enabled_indices[0]]
+        if not enabled_feature:
             raise ValueError(
-                f"Sheet contains an invalid 'yes' for subnet {subnet}"
-                " that has an empty feature name in the heading"
+                f"Subnet {subnet} has an enabled feature with an empty name"
             )
-        subnet_id_feature_map[subnet] = feature_name
+
+        # Map the subnet to the enabled feature
+        subnet_id_feature_map[subnet] = enabled_feature
+
     return subnet_id_feature_map
 
 
@@ -105,7 +131,7 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
             try:
                 date = convert_rollout_week_sheet_name(title)
             except ValueError as e:
-                self.log.warn("Ignoring sheet %s: cannot fathom date: %s", title, e)
+                self.log.warning("Ignoring sheet %s: cannot parse date: %s", title, e)
                 continue
             row_count = props["gridProperties"]["rowCount"]
             col_count = props["gridProperties"]["columnCount"]
@@ -116,10 +142,10 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
             )
             try:
                 subnet_id_feature_map = convert_sheet_data_into_feature_subnet_map(
-                    values
+                    values, self.log
                 )
             except Warning as w:
-                self.log.warn("Ignoring sheet %s: %s", title, w)
+                self.log.warning("Ignoring sheet %s: %s", title, w)
             rollout_features.append(
                 {
                     "date": date,

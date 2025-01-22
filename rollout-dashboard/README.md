@@ -39,7 +39,7 @@ set to the correct value (though sometimes the defaults are OK):
 6. `REFRESH_INTERVAL` optionally set to a nonzero positive integer
    as the number of seconds to wait between queries to Airflow.
 
-## Development
+## Developer information
 
-* [How to develop the dashboard further](doc/dev.md)
 * [How to use the dashboard API as a developer](doc/api.md)
+* [How to develop the dashboard further](doc/dev.md)

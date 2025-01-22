@@ -209,8 +209,7 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
         self.source_task_id = source_task_id
         dr_dre_slack_id = DR_DRE_SLACK_ID
         text = (
-            (
-                """Proposal <{{
+            """Proposal <{{
                     task_instance.xcom_pull(
                         task_ids='%(source_task_id)s',
                         map_indexes=task_instance.map_index,
@@ -221,10 +220,8 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
                         map_indexes=task_instance.map_index,
                     ).proposal_id
                 }}> is now up for voting. <!subteam^%(dr_dre_slack_id)s>"""
-                """ please vote for the proposal using your HSM."""
-            )
-            % locals()
-        )
+            """ please vote for the proposal using your HSM."""
+        ) % locals()
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
@@ -257,10 +254,10 @@ class NotifyAboutStalledSubnet(slack.SlackAPIPostOperator):
     ) -> None:
         dr_dre_slack_id = DR_DRE_SLACK_ID
         text = (
-            """Subnet `%(subnet_id)s` has not finished upgrading in over an hour."""
-            """  <!subteam^%(dr_dre_slack_id)s>"""
+            f"""Subnet `{subnet_id}` has not finished upgrading in over an hour."""
+            f"""  <!subteam^{dr_dre_slack_id}>"""
             """ please investigate *as soon as possible*."""
-        ) % locals()
+        )
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,

@@ -5,7 +5,7 @@ use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
 use serde::de::Error;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -25,6 +25,8 @@ const MAX_BATCH_SIZE: usize = 100;
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 /// Default timeout per request to Airflow.
 const PER_REQUEST_TIMEOUT: u64 = 15;
+// API sub-URL for Airflow.
+const API_SUBURL: &str = "api/v1/";
 
 fn add_date_parm(url: String, parm_name: &str, date: Option<DateTime<Utc>>) -> String {
     let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
@@ -52,6 +54,18 @@ fn add_updated_parameters(
     )
 }
 
+fn add_executed_parameters(
+    url: String,
+    execution_date_lte: Option<DateTime<Utc>>,
+    execution_date_gte: Option<DateTime<Utc>>,
+) -> String {
+    add_date_parm(
+        add_date_parm(url, "execution_date_lte", execution_date_lte),
+        "execution_date_gte",
+        execution_date_gte,
+    )
+}
+
 fn add_ended_parameters(
     url: String,
     end_date_lte: Option<DateTime<Utc>>,
@@ -73,6 +87,74 @@ trait Pageable {
     /// Remove all elements from the end beyond usize - 1.
     /// The modified structure has maximum max_entries elements.
     fn truncate(&mut self, max_entries: usize);
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DagsResponseItem {
+    /// dag_id is unique, enforced by Airflow.
+    pub dag_id: String,
+    #[allow(dead_code)]
+    pub dag_display_name: String,
+    pub is_paused: bool,
+    pub is_active: bool,
+    pub has_import_errors: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DagsResponse {
+    pub dags: Vec<DagsResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<String, usize>,
+    total_entries: usize,
+}
+
+impl Pageable for DagsResponse {
+    fn len(&self) -> usize {
+        self.dags.len()
+    }
+    fn merge(&mut self, other: Self) {
+        for v in other.dags.clone().into_iter() {
+            let id = v.dag_id.clone();
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.dags[*pos] = v;
+                }
+                None => {
+                    //debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.dags.len());
+                    self.dags.push(v);
+                }
+            }
+        }
+        self.total_entries = other.total_entries;
+    }
+    fn truncate(&mut self, max_entries: usize) {
+        if self.dags.len() > max_entries {
+            self.dags.truncate(max_entries)
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct DagsQueryFilter<'a> {
+    pub dag_id_pattern: Option<&'a String>,
+}
+
+impl<'a> DagsQueryFilter<'a> {
+    fn as_queryparams(&self) -> Vec<(&str, String)> {
+        let shit = [self
+            .dag_id_pattern
+            .as_ref()
+            .map(|v| ("dag_id_pattern", (*v).clone()))];
+        let res: Vec<_> = shit
+            .iter()
+            .flatten()
+            .map(|(k, v)| (*k, (*v).clone()))
+            .collect();
+        res
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -154,7 +236,7 @@ pub struct XComEntryResponse {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Display)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskInstanceState {
     Success,
@@ -204,7 +286,7 @@ where
     })
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskInstancesResponseItem {
     pub task_id: String,
     #[allow(dead_code)]
@@ -231,6 +313,39 @@ pub struct TaskInstancesResponseItem {
     pub rendered_map_index: Option<String>,
     #[allow(dead_code)]
     pub note: Option<String>,
+}
+
+impl TaskInstancesResponseItem {
+    #[allow(dead_code)]
+    pub fn latest_date(&self) -> DateTime<Utc> {
+        let mut d = self.execution_date;
+        if let Some(dd) = self.start_date {
+            if dd > d {
+                d = dd
+            }
+        }
+        if let Some(dd) = self.end_date {
+            if dd > d {
+                d = dd
+            }
+        }
+        d
+    }
+    #[allow(dead_code)]
+    pub fn earliest_date(&self) -> DateTime<Utc> {
+        let mut d = self.execution_date;
+        if let Some(dd) = self.start_date {
+            if dd < d {
+                d = dd
+            }
+        }
+        if let Some(dd) = self.end_date {
+            if dd < d {
+                d = dd
+            }
+        }
+        d
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -275,6 +390,8 @@ impl Pageable for TaskInstancesResponse {
 
 #[derive(Default)]
 pub struct TaskInstanceRequestFilters {
+    executed_at_lte: Option<DateTime<Utc>>,
+    executed_at_gte: Option<DateTime<Utc>>,
     updated_at_lte: Option<DateTime<Utc>>,
     updated_at_gte: Option<DateTime<Utc>>,
     ended_at_lte: Option<DateTime<Utc>>,
@@ -282,6 +399,15 @@ pub struct TaskInstanceRequestFilters {
 }
 
 impl TaskInstanceRequestFilters {
+    #[allow(dead_code)]
+    pub fn executed_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
+        self.executed_at_lte = date;
+        self
+    }
+    pub fn executed_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
+        self.executed_at_gte = date;
+        self
+    }
     #[allow(dead_code)]
     pub fn updated_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
         self.updated_at_lte = date;
@@ -394,6 +520,103 @@ impl Pageable for TasksResponse {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EventLogsResponseItem {
+    pub event_log_id: u64,
+    pub when: DateTime<Utc>,
+    pub dag_id: Option<String>,
+    pub task_id: Option<String>,
+    pub run_id: Option<String>,
+    pub map_index: Option<usize>,
+    pub try_number: Option<usize>,
+    pub event: String,
+    pub execution_date: Option<DateTime<Utc>>,
+    pub owner: Option<String>,
+    pub extra: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+
+pub struct EventLogsResponse {
+    pub event_logs: Vec<EventLogsResponseItem>,
+    #[serde(skip_serializing, skip_deserializing)]
+    position_cache: HashMap<u64, usize>,
+    total_entries: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct EventLogsResponseFilters<'a> {
+    pub dag_id: Option<&'a String>,
+    pub task_id: Option<&'a String>,
+    pub run_id: Option<&'a String>,
+    pub map_index: Option<usize>,
+    pub try_number: Option<usize>,
+    pub event: Option<&'a String>,
+    pub owner: Option<&'a String>,
+    pub before: Option<DateTime<Utc>>,
+    pub after: Option<DateTime<Utc>>,
+}
+
+impl<'a> EventLogsResponseFilters<'a> {
+    fn as_queryparams(&self) -> Vec<(&str, String)> {
+        let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
+        let shit = [
+            self.dag_id.as_ref().map(|v| ("dag_id", (*v).clone())),
+            self.task_id.as_ref().map(|v| ("task_id", (*v).clone())),
+            self.run_id.as_ref().map(|v| ("run_id", (*v).clone())),
+            self.map_index
+                .as_ref()
+                .map(|v| ("map_index", format!("{}", v).to_owned())),
+            self.try_number
+                .as_ref()
+                .map(|v| ("try_number", format!("{}", v).to_owned())),
+            self.event.as_ref().map(|v| ("event", (*v).clone())),
+            self.owner.as_ref().map(|v| ("owner", (*v).clone())),
+            self.before
+                .as_ref()
+                .map(|v| ("before", format!("{}", v.format(dfmt)).to_owned())),
+            self.after
+                .as_ref()
+                .map(|v| ("after", format!("{}", v.format(dfmt)).to_owned())),
+        ];
+        let res: Vec<_> = shit
+            .iter()
+            .flatten()
+            .map(|(k, v)| (*k, (*v).clone()))
+            .collect();
+        res
+    }
+}
+
+impl Pageable for EventLogsResponse {
+    fn len(&self) -> usize {
+        self.event_logs.len()
+    }
+    fn merge(&mut self, other: Self) {
+        for v in other.event_logs.clone().into_iter() {
+            let id = v.event_log_id;
+            match self.position_cache.get(&id) {
+                Some(pos) => {
+                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                    self.event_logs[*pos] = v;
+                }
+                None => {
+                    //debug!(target: "processing", "Consuming {}", id);
+                    self.position_cache.insert(id, self.event_logs.len());
+                    self.event_logs.push(v);
+                }
+            }
+        }
+        self.total_entries = other.total_entries;
+    }
+    fn truncate(&mut self, max_entries: usize) {
+        if self.event_logs.len() > max_entries {
+            self.event_logs.truncate(max_entries)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum AirflowError {
     StatusCode(reqwest::StatusCode),
@@ -453,7 +676,7 @@ where
             }
         }
 
-        trace!(target: "paged_get",
+        trace!(target: "airflow_client::paged_get",
             "retrieving {} instances of {} at offset {}, with {} already retrieved",
             batch_limit,
             suburl,
@@ -465,7 +688,7 @@ where
             Ok(json_value) => match <T>::deserialize(json_value.clone()) {
                 Ok(deserialized) => deserialized,
                 Err(e) => {
-                    warn!("Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
+                    warn!(target: "airflow_client::paged_get" ,"Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
                     return Err(AirflowError::Other(format!(
                         "Could not deserialize structure: {}",
                         e
@@ -475,9 +698,9 @@ where
             Err(e) => return Err(e),
         };
         let batch_len = batch.len();
-        trace!(target: "paged_get", "Got {} before discarding", batch_len);
+        trace!(target: "airflow_client::paged_get", "Got {} before discarding", batch_len);
         results.merge(batch);
-        trace!(target: "paged_get",
+        trace!(target: "airflow_client::paged_get",
             "Now we have {} objects after retrieving with offset {:?}",
             results.len(),
             current_offset
@@ -501,6 +724,45 @@ where
         }
         current_offset += batch_limit;
     }
+    Ok(results)
+}
+
+async fn _post<'a, T: Deserialize<'a> + Pageable + Default, W, G, Fut>(
+    url: String,
+    content: W,
+    mut poster: G,
+) -> Result<T, AirflowError>
+where
+    G: FnMut(String, W) -> Fut,
+    W: serde::Serialize + Sync + Send,
+    Fut: Future<Output = Result<serde_json::Value, AirflowError>>,
+{
+    let mut results = T::default();
+    trace!(target: "airflow_client::paged_post",
+        "posting to and retrieving {}",
+        url,
+    );
+
+    let batch = match poster(url, content).await {
+        Ok(json_value) => match <T>::deserialize(json_value.clone()) {
+            Ok(deserialized) => deserialized,
+            Err(e) => {
+                warn!(target: "airflow_client::paged_post", "Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
+                return Err(AirflowError::Other(format!(
+                    "Could not deserialize structure: {}",
+                    e
+                )));
+            }
+        },
+        Err(e) => return Err(e),
+    };
+    let batch_len = batch.len();
+    trace!(target: "airflow_client::paged_post", "Got {}", batch_len);
+    results.merge(batch);
+    trace!(target: "airflow_client::paged_post",
+        "Now we have {} objects after retrieving",
+        results.len(),
+    );
     Ok(results)
 }
 
@@ -569,8 +831,20 @@ impl AirflowClient {
     }
 
     async fn _get_logged_in(&self, suburl: String) -> Result<serde_json::Value, AirflowError> {
-        let suburl = "api/v1/".to_string() + &suburl;
+        let suburl = API_SUBURL.to_string() + &suburl;
         self._get_or_login_and_get(suburl, true).await
+    }
+
+    async fn _post_logged_in<T>(
+        &self,
+        suburl: String,
+        content: &T,
+    ) -> Result<serde_json::Value, AirflowError>
+    where
+        T: Serialize + Sync + Send,
+    {
+        let suburl = API_SUBURL.to_string() + &suburl;
+        self._post_or_login_and_post(suburl, content, true).await
     }
 
     #[async_recursion]
@@ -593,7 +867,7 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                debug!(target: "http_client", "GET {} HTTP {}", url, status);
+                debug!(target: "airflow_client::http_client", "GET {} HTTP {}", url, status);
                 match status {
                     reqwest::StatusCode::OK => match resp.json().await {
                         Ok(json) => Ok(json),
@@ -623,7 +897,67 @@ impl AirflowClient {
             }
             Err(err) => Err(AirflowError::ReqwestError(err)),
         };
-        trace!(target: "http_client", "Result: {:#?}", res);
+        trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
+        res
+    }
+
+    // FIXME: deduplicate with get_or_login_and_get
+    #[async_recursion]
+    async fn _post_or_login_and_post<T>(
+        &self,
+        suburl: String,
+        content: &T,
+        attempt_login: bool,
+    ) -> Result<serde_json::Value, AirflowError>
+    where
+        T: Serialize + Sync + Send,
+    {
+        // Next one cannot fail because self.url has already succeeded.
+        let url = self.url.join(suburl.as_str()).unwrap();
+
+        let c = self.client.clone();
+
+        let res = match c
+            .post(url.clone())
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(content)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                debug!(target: "airflow_client::http_client", "POST {} HTTP {}", url, status);
+                match status {
+                    reqwest::StatusCode::OK => match resp.json().await {
+                        Ok(json) => Ok(json),
+                        Err(err) => Err(AirflowError::Other(format!(
+                            "Could not decode JSON from Airflow: {}",
+                            err
+                        ))),
+                    },
+                    reqwest::StatusCode::FORBIDDEN => {
+                        if attempt_login {
+                            match self._login().await {
+                                Ok(..) => (),
+                                Err(err) => return Err(err),
+                            };
+                            self._post_or_login_and_post(suburl, content, false).await
+                        } else {
+                            Err(AirflowError::Other(
+                                "Forbidden from Airflow -- could not log in".into(),
+                            ))
+                        }
+                    }
+                    reqwest::StatusCode::NOT_FOUND => {
+                        Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
+                    }
+                    other => Err(AirflowError::StatusCode(other)),
+                }
+            }
+            Err(err) => Err(AirflowError::ReqwestError(err)),
+        };
+        trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
         res
     }
 
@@ -704,6 +1038,38 @@ impl AirflowClient {
         Ok(())
     }
 
+    /// Return DAG info, by default in alphabetical order.
+    #[allow(dead_code)]
+    pub async fn dags(
+        &self,
+        limit: usize,
+        offset: usize,
+        filter: &DagsQueryFilter<'_>,
+        order_by: Option<String>, // FIXME: use structural typing here.
+    ) -> Result<DagsResponse, AirflowError> {
+        let qpairs = filter.as_queryparams();
+        let qparams: querystring::QueryParams =
+            qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let suburl = "dags".to_string()
+            + (if !qparams.is_empty() {
+                "?".to_string() + querystring::stringify(qparams).as_str()
+            } else {
+                "".to_string()
+            })
+            .as_str();
+        _paged_get(
+            suburl,
+            match order_by {
+                Some(x) => Some(x),
+                None => Some("dag_id".into()),
+            },
+            Some(PagingParameters { limit, offset }),
+            MAX_BATCH_SIZE,
+            |x| self._get_logged_in(x),
+        )
+        .await
+    }
+
     /// Return DAG runs from newest to oldest.
     /// Optionally only return DAG runs updated between a certain time frame.
     pub async fn dag_runs(
@@ -737,6 +1103,7 @@ impl AirflowClient {
         filters: TaskInstanceRequestFilters,
     ) -> Result<TaskInstancesResponse, AirflowError> {
         let mut url = format!("dags/{}/dagRuns/{}/taskInstances", dag_id, dag_run_id);
+        url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
         url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
         url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
         _paged_get(
@@ -747,6 +1114,47 @@ impl AirflowClient {
             |x| self._get_logged_in(x),
         )
         .await
+    }
+
+    /// Return listed TaskInstances for a number of DAG IDs and DAG runs.
+    /// Mapped tasks are not returned here.
+    pub async fn task_instances_batch(
+        &self,
+        dag_ids: Option<Vec<String>>,
+        dag_run_ids: Option<Vec<String>>,
+        task_instances: Option<Vec<String>>,
+    ) -> Result<TaskInstancesResponse, AirflowError> {
+        if let Some(dag_ids) = &dag_ids {
+            if dag_ids.is_empty() {
+                return Ok(TaskInstancesResponse::default());
+            }
+        }
+        if let Some(dag_run_ids) = &dag_run_ids {
+            if dag_run_ids.is_empty() {
+                return Ok(TaskInstancesResponse::default());
+            }
+        }
+        if let Some(task_instances) = &task_instances {
+            if task_instances.is_empty() {
+                return Ok(TaskInstancesResponse::default());
+            }
+        }
+        let url = "dags/~/dagRuns/~/taskInstances/list";
+        #[derive(Serialize)]
+        struct TaskInstancesRequest {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            dag_ids: Option<Vec<String>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            dag_run_ids: Option<Vec<String>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            task_ids: Option<Vec<String>>,
+        }
+        let tr = TaskInstancesRequest {
+            dag_ids,
+            dag_run_ids,
+            task_ids: task_instances,
+        };
+        _post(url.to_string(), &tr, |x, c| self._post_logged_in(x, c)).await
     }
 
     /// Return TaskInstances for a DAG run.
@@ -820,13 +1228,45 @@ impl AirflowClient {
         match <XComEntryResponse>::deserialize(json_value.clone()) {
             Ok(deserialized) => Ok(deserialized),
             Err(e) => {
-                warn!("Error deserializing ({})\n{:?}", e, json_value);
+                warn!(target: "airflow_client::xcom_entry", "Error deserializing ({})\n{:?}", e, json_value);
                 Err(AirflowError::Other(format!(
                     "Could not deserialize structure: {}",
                     e
                 )))
             }
         }
+    }
+
+    /// Return event logs matching the filters specified.
+    /// Events are returned in chronological order (old to new).
+    pub async fn event_logs(
+        &self,
+        limit: usize,
+        offset: usize,
+        filters: &EventLogsResponseFilters<'_>,
+        order_by: Option<String>, // FIXME: use structural typing here.
+    ) -> Result<EventLogsResponse, AirflowError> {
+        let qpairs = filters.as_queryparams();
+        let qparams: querystring::QueryParams =
+            qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let suburl = "eventLogs".to_string()
+            + (if !qparams.is_empty() {
+                "?".to_string() + querystring::stringify(qparams).as_str()
+            } else {
+                "".to_string()
+            })
+            .as_str();
+        _paged_get(
+            suburl,
+            match order_by {
+                Some(x) => Some(x),
+                None => Some("event_log_id".into()),
+            },
+            Some(PagingParameters { limit, offset }),
+            MAX_BATCH_SIZE,
+            |x| self._get_logged_in(x),
+        )
+        .await
     }
 }
 

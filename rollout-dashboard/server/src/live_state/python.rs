@@ -13,7 +13,7 @@ use std::error;
 use std::result;
 
 #[derive(Debug)]
-pub enum ErrorCode {
+pub(crate) enum ErrorCode {
     TrailingCharacters,
     Eof,
     ExpectedBoolean,
@@ -39,9 +39,9 @@ impl Display for ErrorCode {
 }
 
 #[derive(Debug)]
-pub struct ErrorImpl {
-    pub code: ErrorCode,
-    pub message: Option<String>,
+pub(crate) struct ErrorImpl {
+    pub(crate) code: ErrorCode,
+    pub(crate) message: Option<String>,
 }
 
 impl From<ErrorCode> for ErrorImpl {
@@ -91,9 +91,9 @@ impl error::Error for ErrorImpl {
     }
 }
 
-pub type Result<T> = result::Result<T, ErrorImpl>;
+pub(crate) type Result<T> = result::Result<T, ErrorImpl>;
 
-pub struct Deserializer<'de> {
+pub(crate) struct Deserializer<'de> {
     // This string starts with the input data and characters are truncated off
     // the beginning as data is parsed.
     input: &'de str,
@@ -104,7 +104,7 @@ impl<'de> Deserializer<'de> {
     // That way basic use cases are satisfied by something like
     // `serde_json::from_str(...)` while advanced use cases that require a
     // deserializer can make one with `serde_json::Deserializer::from_str(...)`.
-    pub fn from_str(input: &'de str) -> Self {
+    pub(crate) fn from_str(input: &'de str) -> Self {
         Deserializer { input }
     }
 }
@@ -114,7 +114,7 @@ impl<'de> Deserializer<'de> {
 // depending on what Rust types the deserializer is able to consume as input.
 //
 // This basic deserializer supports only `from_str`.
-pub fn from_str<'a, T>(s: &'a str) -> Result<T>
+pub(crate) fn from_str<'a, T>(s: &'a str) -> Result<T>
 where
     T: Deserialize<'a>,
 {

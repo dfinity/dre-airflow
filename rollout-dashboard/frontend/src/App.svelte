@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import url from "./lib/url.js";
-  import { type RolloutResult, rollout_query } from "./lib/stores";
+  import { rollouts_view } from "./lib/stores";
   import Rollout from "./lib/Rollout.svelte";
-  import { writable } from "svelte/store";
-  import { ButtonGroup, Button, FooterCopyright } from "flowbite-svelte";
+  import { FooterCopyright } from "flowbite-svelte";
   import {
     Footer,
     FooterLink,
@@ -13,27 +11,26 @@
   } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
 
-  let my_rollout_query = writable({
-    rollouts: [],
-    error: "loading",
-  } as RolloutResult);
-  onMount(async () => {
-    my_rollout_query = rollout_query();
-  });
+  let view = rollouts_view();
+
+  import { Navbar, NavLi, NavUl } from "flowbite-svelte";
+  $: activeUrl = $url.hash;
 </script>
 
 <SvelteToast />
 
-<nav>
-  <ButtonGroup class="*:!ring-primary-700">
-    <Button href="#active">Active</Button>
-    <Button href="#complete">Complete</Button>
-    <Button href="#failed">Failed</Button>
-    <Button href="#all">All</Button>
-  </ButtonGroup>
-</nav>
+<div style="margin-left: auto; margin-right: auto;">
+  <Navbar class="w-min">
+    <NavUl {activeUrl}>
+      <NavLi href="#active">Active</NavLi>
+      <NavLi href="#complete">Complete</NavLi>
+      <NavLi href="#failed">Failed</NavLi>
+      <NavLi href="#all">All</NavLi>
+    </NavUl>
+  </Navbar>
+</div>
 
-{#if $my_rollout_query.error && $my_rollout_query.error !== "loading"}
+{#if $view.error && $view.error !== "loading"}
   <!-- note use of me-3 in svg icon to ensure icon actually shows not too stuck to the text -->
   <div
     class="flex items-center p-4 mb-4 text-sm text-red-800 border border-red-300 rounded-lg bg-red-50 dark:bg-gray-800 dark:text-red-400 dark:border-red-800"
@@ -57,12 +54,12 @@
     <span class="sr-only">Error</span>
     <div>
       <span class="font-medium">Cannot retrieve rollout data:</span>
-      {$my_rollout_query.error}
+      {$view.error}
     </div>
   </div>
 {/if}
 
-{#if $my_rollout_query.error === "loading"}
+{#if $view.error === "loading"}
   <div
     class="flex items-center justify-center w-56 h-56 border border-gray-200 rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
     style="align-self: center"
@@ -87,7 +84,106 @@
   </div>
 {/if}
 
-{#each $my_rollout_query.rollouts as rollout}
+{#if $view.engine_state === "missing"}
+  <div
+    class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
+    role="alert"
+  >
+    <svg
+      class="flex-shrink-0 inline w-4 h-4 me-3"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+      />
+    </svg>
+    <span class="sr-only">Info</span>
+    <div>
+      <span class="font-medium">Rollout flow missing.</span> Airflow cannot find
+      the flow in charge of executing the rollouts. Use the <i>Help</i> link below
+      to contact DRE.
+    </div>
+  </div>
+{/if}
+
+{#if $view.engine_state === "inactive"}
+  <div
+    class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
+    role="alert"
+  >
+    <svg
+      class="flex-shrink-0 inline w-4 h-4 me-3"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+      />
+    </svg>
+    <span class="sr-only">Info</span>
+    <div>
+      <span class="font-medium">Rollouts inactive.</span> The Airflow scheduler
+      cannot see the flow in charge of executing the rollouts. Use the
+      <i>Help</i> link below to contact DRE.
+    </div>
+  </div>
+{/if}
+
+{#if $view.engine_state === "broken"}
+  <div
+    class="flex items-center p-4 mb-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-gray-800 dark:text-yellow-300"
+    role="alert"
+  >
+    <svg
+      class="flex-shrink-0 inline w-4 h-4 me-3"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+      />
+    </svg>
+    <span class="sr-only">Info</span>
+    <div>
+      <span class="font-medium">Rollout flow broken.</span> The Airflow
+      scheduler cannot process the flow in charge of executing the rollouts. Use
+      the <i>Help</i> link below to contact DRE.
+    </div>
+  </div>
+{/if}
+
+{#if $view.engine_state === "paused"}
+  <div
+    class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
+    role="alert"
+  >
+    <svg
+      class="flex-shrink-0 inline w-4 h-4 me-3"
+      aria-hidden="true"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+      />
+    </svg>
+    <span class="sr-only">Info</span>
+    <div>
+      <span class="font-medium">Rollout engine paused.</span> Rollouts have been
+      paused by DRE. Use the <i>Help</i> link below if you want to inquire why.
+    </div>
+  </div>
+{/if}
+
+{#each $view.rollouts as rollout}
   {#if (($url.hash === "" || $url.hash === "#active") && rollout.state !== "complete" && rollout.state !== "failed") || ($url.hash === "#complete" && rollout.state === "complete") || ($url.hash === "#failed" && rollout.state === "failed") || $url.hash === "#all"}
     <Rollout {rollout} />
   {/if}
@@ -95,7 +191,8 @@
 
 <Footer>
   <div class="sm:flex sm:items-center sm:justify-between">
-    <FooterCopyright>DFINITY Foundation</FooterCopyright>
+    <FooterCopyright by="DFINITY Foundation" copyrightMessage="/ Apache 2.0"
+    ></FooterCopyright>
     <FooterBrand name="Rollout dashboard" src="favicon-512x512.png"
     ></FooterBrand>
     <FooterLinkGroup
@@ -104,6 +201,10 @@
       <FooterLink
         href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
         target="_blank">Documentation</FooterLink
+      >
+      <FooterLink
+        href="https://dfinity.enterprise.slack.com/archives/C01DB8MQ5M1"
+        target="_blank">Help</FooterLink
       >
     </FooterLinkGroup>
   </div>
