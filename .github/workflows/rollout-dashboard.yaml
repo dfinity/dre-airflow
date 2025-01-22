@@ -87,60 +87,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository }}/cache
-          tags: |
-            type=sha,format=long
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: int128/kaniko-action@v1
+      - uses: ./.github/workflows/publish
         name: Create rollout-dashboard container
         with:
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache: true
-          cache-repository: ghcr.io/${{ github.repository }}/cache
-          context: rollout-dashboard
+          container: rollout-dashboard
+          registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
     # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' # FIXME delete me and uncomment line above.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository }}/rollout-dashboard
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=tag
-            type=ref,event=pr
-            type=sha,format=long
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: int128/kaniko-action@v1
+      - uses: ./.github/workflows/publish
         name: Create and publish rollout-dashboard container
         with:
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache: true
-          cache-repository: ghcr.io/${{ github.repository }}/cache
-          context: rollout-dashboard
-      - uses: ./.github/workflows/update-k8s-deployments
-        name: Roll out new rollout-dashboard container
-        with:
-          files-to-update: bases/apps/rollout-dashboard/core/deployment.yaml
-          component: rollout-dashboard
+          container: rollout-dashboard
+          registry-token: ${{ secrets.GITHUB_TOKEN }}
+          publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}
+          files-to-update: bases/apps/rollout-dashboard/core/deployment.yaml
