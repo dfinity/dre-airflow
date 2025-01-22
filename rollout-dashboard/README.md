@@ -20,7 +20,7 @@ In production, it is composed of two distinct pieces:
 ## Production information
 
 To upgrade the dashboard in production, simply approve the latest
-PR created in the [K8s repo](https://github.com/dfinity-ops/k8s/pull)
+PR created in the [K8s repo](https://github.com/dfinity-ops/k8s/pulls)
 by this repository's release automation.  For more information,
 [consult the relevant document](https://dfinity-ops.github.io/k8s/#/bases/apps/rollout-dashboard/).
 
