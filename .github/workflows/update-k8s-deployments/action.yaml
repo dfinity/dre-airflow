@@ -34,7 +34,7 @@ runs:
         # this regex matches the first group (ie the image name) and uses \1
         # called a back-reference to insert the first group matched, the second
         # part is to match the 40 characters hash that we replace with the $GITHUB_SHA
-        sed -i "s~\(\([[:alpha:]]\|-\)\+\):[[:alnum:]]\{40\}~\1:${GITHUB_SHA}~g" $files
+        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $files
 
         # commit changes if there are any
         git add .
@@ -44,7 +44,7 @@ runs:
         fi
 
         # Push changes and create a new merge request
-        git commit -m "Updating rollout dashboard container image from $DRE_REPO_BRANCH branch"
+        git commit -m "New rollout dashboard release from $DRE_REPO_BRANCH branch"
         git push \
           --force --set-upstream origin "${K8S_REPO_BRANCH}" || \
           git push --force --set-upstream origin "${K8S_REPO_BRANCH}"
@@ -59,7 +59,7 @@ runs:
         github-token: ${{ inputs.github_api_token }}
         script: |
           const result = await github.rest.pulls.create({
-            title: '[nomrbot] - Updating rollout dashboard container images',
+            title: '[nomrbot] - New rollout dashboard release',
             owner: 'dfinity-ops',
             repo: 'k8s',
             head: '${{ steps.update_k8s.outputs.k8s_branch }}',
