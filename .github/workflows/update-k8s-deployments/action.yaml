@@ -1,11 +1,6 @@
 name: Update k8s deployments
 description: Reusable action for updating k8s deployments
 
-inputs:
-  github_api_token:
-    description: "A Github API token with access to the k8s repository"
-    required: true
-
 runs:
   using: composite
   steps:
