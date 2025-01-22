@@ -137,3 +137,7 @@ jobs:
           cache: true
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: rollout-dashboard
+      - uses: ./.github/workflows/update-k8s-deployments
+        name: Update k8s deployments
+        with:
+          github_api_token: ${{ secrets.K8S_API_TOKEN }}

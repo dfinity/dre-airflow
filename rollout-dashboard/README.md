@@ -19,8 +19,10 @@ In production, it is composed of two distinct pieces:
 
 ## Production information
 
-To upgrade the dashboard in production,
-[consult the relevant document](https://dfinity-lab.gitlab.io/private/k8s/k8s/#/bases/apps/rollout-dashboard/).
+To upgrade the dashboard in production, simply approve the latest
+PR created in the [K8s repo](https://github.com/dfinity-ops/k8s/pull)
+by this repository's release automation.  For more information,
+[consult the relevant document](https://dfinity-ops.github.io/k8s/#/bases/apps/rollout-dashboard/).
 
 The backend server must have the following environment variables
 set to the correct value (though sometimes the defaults are OK):
