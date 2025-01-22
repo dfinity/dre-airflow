@@ -109,7 +109,8 @@ jobs:
           context: rollout-dashboard
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,14 +143,4 @@ jobs:
         with:
           files-to-update: bases/apps/rollout-dashboard/core/deployment.yaml
           component: rollout-dashboard
-
-  login-to-publish-rollout-dashboard-container:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create GitHub app token
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ vars.PR_AUTOMATION_BOT_PUBLIC_APP_ID }}
-          private-key: ${{ secrets.PR_AUTOMATION_BOT_PUBLIC_PRIVATE_KEY }}
+          push-token: ${{ secrets.K8S_API_TOKEN }}
