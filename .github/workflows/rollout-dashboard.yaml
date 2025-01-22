@@ -109,7 +109,7 @@ jobs:
           context: rollout-dashboard
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,3 +137,8 @@ jobs:
           cache: true
           cache-repository: ghcr.io/${{ github.repository }}/cache
           context: rollout-dashboard
+      - uses: ./.github/workflows/update-k8s-deployments
+        name: Roll out new rollout-dashboard container
+        with:
+          files-to-update: bases/apps/rollout-dashboard/core/deployment.yaml
+          component: rollout-dashboard
