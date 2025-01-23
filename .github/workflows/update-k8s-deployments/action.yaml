@@ -41,7 +41,8 @@ runs:
 
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
-        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $FILES_TO_UPDATE
+        prev_commit=$(sed -rn 's~(.+):sha-([a-f0-9]{40})~\2~p' $FILES_TO_UPDATE | head -1)
+        sed -rin 's~(.+):sha-([a-f0-9]{40})~\1:sha-'"${GITHUB_SHA}"'~p' $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
@@ -58,6 +59,7 @@ runs:
 
         echo "k8s_branch=$K8S_REPO_BRANCH" >> $GITHUB_OUTPUT
         echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
+        echo "previous_ref=$prev_commit" >> $GITHUB_OUTPUT
     - name: "Create PR to roll out with updated container images"
       id: create-rollout-pr
       if: ${{ steps.create-rollout-commit.outputs.k8s_branch != '' }}
@@ -67,10 +69,10 @@ runs:
         github-token: ${{ inputs.push-token }}
         script: |
           const result = await github.rest.pulls.create({
-            title: '[nomrbot] - New ${{ inputs.component }} release from the dre-airflow repo',
+            title: '[nomrbot] - New ${{ inputs.component }} release from ${{ vars.GITHUB_REPOSITORY }}',
             owner: 'dfinity-ops',
             repo: 'k8s',
             head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
             base: 'main',
-            body: 'Updating container images based on the latest changes in [this repository](https://github.com/dfinity/dre-airflow/commits/${{ steps.create-rollout-commit.outputs.source_branch }})'
+            body: 'Updating container images to incorporate [these changes](https://github.com/${{ vars.GITHUB_REPOSITORY }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.source_branch }}).'
           });
