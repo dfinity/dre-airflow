@@ -69,10 +69,10 @@ runs:
         github-token: ${{ inputs.push-token }}
         script: |
           const result = await github.rest.pulls.create({
-            title: '[nomrbot] - New ${{ inputs.component }} release from ${{ vars.GITHUB_REPOSITORY }}',
+            title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
             owner: 'dfinity-ops',
             repo: 'k8s',
             head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
             base: 'main',
-            body: 'Updating container images to incorporate [these changes](https://github.com/${{ vars.GITHUB_REPOSITORY }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.source_branch }}).'
+            body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.source_branch }}).'
           });
