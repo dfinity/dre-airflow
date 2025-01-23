@@ -5,6 +5,9 @@ inputs:
   files-to-update:
     description: "A space-separated list of files to update"
     required: true
+  text-prefix:
+    description: "A regular expression to match in the files when looking for the version to update"
+    required: false
   component:
     description: "Which component to update"
     required: true
@@ -36,13 +39,21 @@ runs:
         git config user.name "IDX Automation"
         SOURCE_BRANCH="${{ github.head_ref || github.ref_name }}"
         K8S_REPO_BRANCH="update-dre-airflow-$COMPONENT-images-from-$SOURCE_BRANCH"
+        base_regex='${{ inputs.text-prefix }}'
+
+        if [ -n "$base_regex" ]
+        then
+          base_regex="(${base_regex})"
+        else
+          base_regex="(.+:)"
+        fi
 
         git checkout -b "${K8S_REPO_BRANCH}"
 
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
-        prev_commit=$(sed -rn 's~(.+):sha-([a-f0-9]{40})~\2~p' $FILES_TO_UPDATE | head -1)
-        sed -ri 's~(.+):sha-([a-f0-9]{40})~\1:sha-'"${GITHUB_SHA}"'~' $FILES_TO_UPDATE
+        prev_commit=$(sed -rn 's~'"$base_regex"'sha-([a-f0-9]{40}).*~\2~p' $FILES_TO_UPDATE | head -1)
+        sed -ri 's~'"$base_regex"'sha-([a-f0-9]{40})~\1sha-'"${GITHUB_SHA}"'~' $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
