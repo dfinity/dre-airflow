@@ -36,9 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/workflows/publish
-        name: Create and publish airflow-customized container
+        name: Create and publish airflow-content-syncer container
         with:
-          container: airflow-customized
+          container: airflow-content-syncer
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}
