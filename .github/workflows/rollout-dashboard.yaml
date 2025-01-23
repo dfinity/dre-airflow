@@ -94,8 +94,7 @@ jobs:
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
-    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    if: github.event_name == 'pull_request' # FIXME delete me and uncomment line above.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
