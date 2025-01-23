@@ -77,17 +77,20 @@ runs:
             owner: owner,
             repo: repo,
             base: base,
-            head: head
+            head: head,
+            state: 'open'
           });
           if (pulls.data.length > 0) {
-            const result = await github.rest.pulls.update({
+            var result = await github.rest.pulls.update({
               owner: owner,
               repo: repo,
               pull_number: pulls.data[0].number,
               body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).',
             });
+            console.log("Updated pull request " + pulls.data[0].number);
+            return result;
           } else {
-            const result = await github.rest.pulls.create({
+            var result = await github.rest.pulls.create({
               title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
               owner: owner,
               repo: repo,
@@ -96,5 +99,6 @@ runs:
               maintainer_can_modify: true,
               body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
             });
+            console.log("Created pull request " + result.number);
+            return result;
           }
-          return result;
