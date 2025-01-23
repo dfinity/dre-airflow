@@ -69,12 +69,27 @@ runs:
       with:
         github-token: ${{ inputs.push-token }}
         script: |
-          const result = await github.rest.pulls.create({
-            title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
+          const pulls = await github.rest.pulls.list({
             owner: 'dfinity-ops',
             repo: 'k8s',
-            head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
             base: 'main',
-            maintainer_can_modify: true,
-            body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
+            head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}'
           });
+          if (pulls.length > 0) {
+            const result = await github.rest.pulls.update({
+              owner: 'dfinity-ops',
+              repo: 'k8s',
+              pull_number: pulls[0]["number"],
+              body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).',
+            });
+          } else {
+            const result = await github.rest.pulls.create({
+              title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
+              owner: 'dfinity-ops',
+              repo: 'k8s',
+              head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
+              base: 'main',
+              maintainer_can_modify: true,
+              body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
+            });
+          }
