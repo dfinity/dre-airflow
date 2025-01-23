@@ -70,7 +70,8 @@ then
     sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
     popd
 
-    read -p "Do you want to set up Airflow variables and connections (optional for most local runs)? (y/n): " setup_choice
+    # If running in an interactive shell, ask the user if they want to set up Airflow variables and connections
+    read -p "Do you want to set up Airflow variables and connections (optional for most local runs)? (y/n): " setup_choice < /dev/tty || setup_choice="n"
     if [[ "$setup_choice" == "y" || "$setup_choice" == "Y" ]]; then
         install_1pass_cli
         login_1pass
