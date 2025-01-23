@@ -113,6 +113,7 @@ runs:
               maintainer_can_modify: true,
               body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
             });
-            console.log("Created pull request " + result.number);
+            console.log("Created pull request:");
+            console.log(result);
             return result;
           }
