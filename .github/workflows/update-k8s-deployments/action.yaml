@@ -42,7 +42,7 @@ runs:
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
         prev_commit=$(sed -rn 's~(.+):sha-([a-f0-9]{40})~\2~p' $FILES_TO_UPDATE | head -1)
-        sed -rin 's~(.+):sha-([a-f0-9]{40})~\1:sha-'"${GITHUB_SHA}"'~p' $FILES_TO_UPDATE
+        sed -ri 's~(.+):sha-([a-f0-9]{40})~\1:sha-'"${GITHUB_SHA}"'~' $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
