@@ -8,35 +8,28 @@ inputs:
   component:
     description: "Which component to update"
     required: true
+  push-token:
+    description: "The Github token needed to create PRs"
+    required: true
 
 runs:
   using: composite
   steps:
-    # The GitHub App token is necessary for pushing changed files back to the repository
-    # If regular secrets.GITHUB_TOKEN is used instead, the push will not trigger any actions
-    # https://github.com/orgs/community/discussions/25702
-    - name: Create GitHub app token
-      uses: actions/create-github-app-token@v1
-      id: app-token
-      with:
-        app-id: ${{ vars.PR_AUTOMATION_BOT_PUBLIC_APP_ID }}
-        private-key: ${{ secrets.PR_AUTOMATION_BOT_PUBLIC_PRIVATE_KEY }}
-
     - name: "Create rollout commit with updated container images"
       id: "create-rollout-commit"
       env:
-        GITHUB_API_TOKEN_FOR_K8S: ${{ steps.app-token.outputs.token }}
+        PUSH_TOKEN: ${{ inputs.push-token }}
         FILES_TO_UPDATE: ${{ inputs.files-to-update }}
         COMPONENT: ${{ inputs.component }}
       shell: bash
       run: |
-        set -eExou pipefail
+        set -eExu -o pipefail
 
         tmpdir=$(mktemp)
         trap 'rm -rf "$tmpdir"' EXIT
 
         # checkout branch
-        git clone --depth 10 --branch "main" "https://${GITHUB_API_TOKEN_FOR_K8S}@github.com/dfinity-ops/k8s.git"
+        git clone --depth 10 --branch "main" "https://${PUSH_TOKEN}@github.com/dfinity-ops/k8s.git"
 
         cd k8s
         git config user.email "idx@dfinity.org"
@@ -48,7 +41,8 @@ runs:
 
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
-        sed -i "s~:sha-[a-f0-9]\{40\}\$~:sha-${GITHUB_SHA}~g" $FILES_TO_UPDATE
+        prev_commit=$(sed -rn 's~(.+):sha-([a-f0-9]{40})~\2~p' $FILES_TO_UPDATE | head -1)
+        sed -rin 's~(.+):sha-([a-f0-9]{40})~\1:sha-'"${GITHUB_SHA}"'~p' $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
@@ -65,20 +59,22 @@ runs:
 
         echo "k8s_branch=$K8S_REPO_BRANCH" >> $GITHUB_OUTPUT
         echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
-
+        echo "previous_ref=$prev_commit" >> $GITHUB_OUTPUT
+        echo "current_ref=$GITHUB_SHA" >> $GITHUB_OUTPUT
     - name: "Create PR to roll out with updated container images"
       id: create-rollout-pr
       if: ${{ steps.create-rollout-commit.outputs.k8s_branch != '' }}
       uses: actions/github-script@v7
       continue-on-error: true
       with:
-        github-token: ${{ steps.app-token.outputs.token }}
+        github-token: ${{ inputs.push-token }}
         script: |
           const result = await github.rest.pulls.create({
-            title: '[nomrbot] - New ${{ inputs.component }} release from the dre-airflow repo',
+            title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
             owner: 'dfinity-ops',
             repo: 'k8s',
             head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
             base: 'main',
-            body: 'Updating container images based on the latest changes in [this repository](https://github.com/dfinity/dre-airflow/commits/${{ steps.create-rollout-commit.outputs.source_branch }})'
+            maintainer_can_modify: true,
+            body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
           });

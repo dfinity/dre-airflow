@@ -1,0 +1,48 @@
+name: Build or publish container
+description: Reusable action for creating a container
+
+inputs:
+  container:
+    description: "The name of the container"
+    required: true
+  registry-token:
+    description: "The Github token needed to operate on the container registry"
+    required: true
+  publish:
+    description: "Whether to publish and roll out the container or not"
+    required: false
+  push-token:
+    description: "The Github token needed to create PRs for rolling out the container"
+    required: false
+  files-to-update:
+    description: "The files to update in the rollout PR"
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/metadata-action@v5
+      id: metadata
+      with:
+        images: ghcr.io/${{ github.repository }}/${{ inputs.publish && inputs.container || 'cache' }}
+        tags: |
+          type=sha,format=long
+    - uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.registry-token }}
+    - uses: int128/kaniko-action@v1
+      with:
+        push: true
+        tags: ${{ steps.metadata.outputs.tags }}
+        labels: ${{ steps.metadata.outputs.labels }}
+        cache: true
+        cache-repository: ghcr.io/${{ github.repository }}/cache
+        context: ${{ inputs.container }}
+    - uses: ./.github/workflows/update-k8s-deployments
+      if: ${{ inputs.publish }}
+      with:
+        files-to-update: ${{ inputs.files-to-update }}
+        component: ${{ inputs.container }}
+        push-token: ${{ inputs.push-token }}
