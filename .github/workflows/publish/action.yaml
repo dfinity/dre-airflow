@@ -17,6 +17,9 @@ inputs:
   files-to-update:
     description: "The files to update in the rollout PR"
     required: false
+  text-prefix:
+    description: "A regular expression to match in the files when looking for the version to update"
+    required: false
 
 runs:
   using: composite
@@ -46,3 +49,4 @@ runs:
         files-to-update: ${{ inputs.files-to-update }}
         component: ${{ inputs.container }}
         push-token: ${{ inputs.push-token }}
+        text-prefix: ${{ inputs.text-prefix }}
