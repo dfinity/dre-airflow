@@ -8,35 +8,28 @@ inputs:
   component:
     description: "Which component to update"
     required: true
+  push-token:
+    description: "The Github token needed to create PRs"
+    required: true
 
 runs:
   using: composite
   steps:
-    # The GitHub App token is necessary for pushing changed files back to the repository
-    # If regular secrets.GITHUB_TOKEN is used instead, the push will not trigger any actions
-    # https://github.com/orgs/community/discussions/25702
-    - name: Create GitHub app token
-      uses: actions/create-github-app-token@v1
-      id: app-token
-      with:
-        app-id: ${{ vars.PR_AUTOMATION_BOT_PUBLIC_APP_ID }}
-        private-key: ${{ secrets.PR_AUTOMATION_BOT_PUBLIC_PRIVATE_KEY }}
-
     - name: "Create rollout commit with updated container images"
       id: "create-rollout-commit"
       env:
-        GITHUB_API_TOKEN_FOR_K8S: ${{ steps.app-token.outputs.token }}
+        PUSH_TOKEN: ${{ inputs.push-token }}
         FILES_TO_UPDATE: ${{ inputs.files-to-update }}
         COMPONENT: ${{ inputs.component }}
       shell: bash
       run: |
-        set -eExou pipefail
+        set -eExu -o pipefail
 
         tmpdir=$(mktemp)
         trap 'rm -rf "$tmpdir"' EXIT
 
         # checkout branch
-        git clone --depth 10 --branch "main" "https://${GITHUB_API_TOKEN_FOR_K8S}@github.com/dfinity-ops/k8s.git"
+        git clone --depth 10 --branch "main" "https://${PUSH_TOKEN}@github.com/dfinity-ops/k8s.git"
 
         cd k8s
         git config user.email "idx@dfinity.org"
@@ -65,14 +58,13 @@ runs:
 
         echo "k8s_branch=$K8S_REPO_BRANCH" >> $GITHUB_OUTPUT
         echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
-
     - name: "Create PR to roll out with updated container images"
       id: create-rollout-pr
       if: ${{ steps.create-rollout-commit.outputs.k8s_branch != '' }}
       uses: actions/github-script@v7
       continue-on-error: true
       with:
-        github-token: ${{ steps.app-token.outputs.token }}
+        github-token: ${{ inputs.push-token }}
         script: |
           const result = await github.rest.pulls.create({
             title: '[nomrbot] - New ${{ inputs.component }} release from the dre-airflow repo',
