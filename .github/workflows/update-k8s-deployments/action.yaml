@@ -52,8 +52,8 @@ runs:
 
         # Update the refs in the requested files.
         # Refs are assumed to be named sha-[0-9a-f]+.
-        prev_commit=$(sed -rn 's~'"$base_regex"'sha-([a-f0-9]{40}).*~\2~p' $FILES_TO_UPDATE | head -1)
-        sed -ri 's~'"$base_regex"'sha-([a-f0-9]{40})~\1sha-'"${GITHUB_SHA}"'~' $FILES_TO_UPDATE
+        prev_commit=$(sed -rn 's~(.*)'"$base_regex"'sha-([a-f0-9]{40}).*~\3~p' $FILES_TO_UPDATE | head -1)
+        sed -ri 's~(.*)'"$base_regex"'sha-([a-f0-9]{40})~\1\2sha-'"${GITHUB_SHA}"'~' $FILES_TO_UPDATE
 
         # commit changes if there are any
         git add .
@@ -83,14 +83,14 @@ runs:
           const owner = 'dfinity-ops';
           const repo = 'k8s';
           const base = 'main';
-          const head = '${{ steps.create-rollout-commit.outputs.k8s_branch }}';
+          const title = '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}';
           const pulls = await github.rest.pulls.list({
             owner: owner,
             repo: repo,
             base: base,
-            head: head,
             state: 'open'
           });
+          const pulldata = pulls.data.filter((pull) => pull.title == title);
           if (pulls.data.length > 0) {
             var result = await github.rest.pulls.update({
               owner: owner,
@@ -102,7 +102,7 @@ runs:
             return result;
           } else {
             var result = await github.rest.pulls.create({
-              title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
+              title: title,
               owner: owner,
               repo: repo,
               head: head,
