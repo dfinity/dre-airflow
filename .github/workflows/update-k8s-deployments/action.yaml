@@ -83,6 +83,7 @@ runs:
           const owner = 'dfinity-ops';
           const repo = 'k8s';
           const base = 'main';
+          const head = '${{ steps.create-rollout-commit.outputs.k8s_branch }}';
           const title = '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}';
           const pulls = await github.rest.pulls.list({
             owner: owner,
