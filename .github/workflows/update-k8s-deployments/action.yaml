@@ -72,13 +72,14 @@ runs:
           const owner = 'dfinity-ops';
           const repo = 'k8s';
           const base = 'main';
+          const head = '${{ steps.create-rollout-commit.outputs.k8s_branch }}';
           const pulls = await github.rest.pulls.list({
             owner: owner,
             repo: repo,
             base: base,
-            head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}'
+            head: head
           });
-          if (pulls.length > 0) {
+          if (pulls.data.length > 0) {
             const result = await github.rest.pulls.update({
               owner: owner,
               repo: repo,
@@ -90,9 +91,10 @@ runs:
               title: '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}',
               owner: owner,
               repo: repo,
-              head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
+              head: head,
               base: base,
               maintainer_can_modify: true,
               body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
             });
           }
+          return result;
