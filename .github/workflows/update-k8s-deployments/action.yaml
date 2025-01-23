@@ -83,7 +83,7 @@ runs:
             const result = await github.rest.pulls.update({
               owner: owner,
               repo: repo,
-              pull_number: pulls[0]["number"],
+              pull_number: pulls.data[0].number,
               body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).',
             });
           } else {
