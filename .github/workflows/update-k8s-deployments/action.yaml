@@ -60,6 +60,7 @@ runs:
         echo "k8s_branch=$K8S_REPO_BRANCH" >> $GITHUB_OUTPUT
         echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
         echo "previous_ref=$prev_commit" >> $GITHUB_OUTPUT
+        echo "current_ref=$GITHUB_SHA" >> $GITHUB_OUTPUT
     - name: "Create PR to roll out with updated container images"
       id: create-rollout-pr
       if: ${{ steps.create-rollout-commit.outputs.k8s_branch != '' }}
@@ -74,5 +75,6 @@ runs:
             repo: 'k8s',
             head: '${{ steps.create-rollout-commit.outputs.k8s_branch }}',
             base: 'main',
-            body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.source_branch }}).'
+            maintainer_can_modify: true,
+            body: 'Updating container images to incorporate [these changes](https://github.com/${{ github.repository }}/compare/${{ steps.create-rollout-commit.outputs.previous_ref }}..${{ steps.create-rollout-commit.outputs.current_ref }}).'
           });
