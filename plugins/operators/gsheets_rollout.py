@@ -17,23 +17,11 @@ from airflow.providers.google.suite.operators.sheets import (
 )
 
 
-def convert_rollout_week_sheet_name(date_with_week_number: str) -> datetime.date:
-    day_without_year = re.search(
-        "(Jan|Feb|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]+)", date_with_week_number
-    )
-    day_with_year = re.search(
-        "(Jan|Feb|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]+) ([0-9][0-9][0-9][0-9])",
-        date_with_week_number,
-    )
-    if day_with_year:
-        thedate = datetime.datetime.strptime(day_with_year.string, "%b %d %Y").date()
-    elif day_without_year:
-        # Year was not specified
-        thedate = datetime.datetime.strptime(
-            day_without_year.string + " 2024", "Week %W: %b %d %Y"
-        ).date()
-    else:
-        raise ValueError(f"No legible date in {date_with_week_number}")
+def convert_rollout_week_sheet_name(sheet_name: str) -> datetime.date:
+    try:
+        thedate = datetime.datetime.strptime(sheet_name, "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError(f"No legible date in {sheet_name}")
     return thedate
 
 
