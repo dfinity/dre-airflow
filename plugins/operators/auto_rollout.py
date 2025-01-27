@@ -14,6 +14,7 @@ from dfinity.rollout_types import (
     SubnetNameOrNumberWithRevision,
 )
 
+from airflow.exceptions import DagRunAlreadyExists
 from airflow.models.baseoperator import BaseOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.context import Context
@@ -225,6 +226,16 @@ class TriggerRollout(TriggerDagRunOperator):
             plan=rollout_plan,
             simulate=self.simulate_rollout,
         )
-        date = datetime.datetime.now().isoformat()
-        self.trigger_run_id = f"{rc_name}_triggered_at_{date}"
-        super().execute(context)
+        try:
+            # Optimistically trigger DAG.
+            self.trigger_run_id = f"{rc_name}"
+            super().execute(context)
+        except DagRunAlreadyExists:
+            # Oh, another DAG already triggered with the same name.
+            # Trigger the DAG with a second name.  This second DAG
+            # will pause until all prior DAGs have finished, so for
+            # the new DAG run to continue, the prior DAG will have
+            # to be canceled by the operator.
+            retrigger_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+            self.trigger_run_id = f"{rc_name}_triggered_at_{retrigger_date}"
+            super().execute(context)
