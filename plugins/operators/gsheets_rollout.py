@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import re
 from logging import Logger
 from typing import Any
 
