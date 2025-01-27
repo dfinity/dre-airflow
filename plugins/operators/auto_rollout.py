@@ -225,5 +225,5 @@ class TriggerRollout(TriggerDagRunOperator):
             plan=rollout_plan,
             simulate=self.simulate_rollout,
         )
-        self.trigger_run_id = rc_name
+        self.trigger_run_id = f"{rc_name}_triggered_at_{datetime.datetime.now().isoformat()}"
         super().execute(context)
