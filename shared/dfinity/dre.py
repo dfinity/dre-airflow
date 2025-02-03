@@ -323,7 +323,7 @@ class AuthenticatedDRE(DRE):
         )
         r = self.run(
             "propose",
-            "update-subnet-replica-version",
+            "deploy-guestos-to-all-subnet-nodes",
             "--proposal-title",
             proposal_title,
             "--summary",
