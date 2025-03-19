@@ -68,6 +68,8 @@ then
     if ! test -f "$AIRFLOW_HOME"/airflow.db
     then
         PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db init
+    else
+        PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db migrate
     fi
     pushd "$AIRFLOW_HOME"
     ln -sfT ../dags dags

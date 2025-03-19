@@ -28,9 +28,6 @@ runs:
       run: |
         set -eExu -o pipefail
 
-        tmpdir=$(mktemp)
-        trap 'rm -rf "$tmpdir"' EXIT
-
         # checkout branch
         git clone --depth 10 --branch "main" "https://${PUSH_TOKEN}@github.com/dfinity-ops/k8s.git"
 
