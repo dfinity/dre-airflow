@@ -91,6 +91,7 @@ jobs:
         name: Create rollout-dashboard container
         with:
           container: rollout-dashboard
+          context: rollout-dashboard
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
@@ -102,6 +103,7 @@ jobs:
         name: Create and publish rollout-dashboard container
         with:
           container: rollout-dashboard
+          context: rollout-dashboard
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}

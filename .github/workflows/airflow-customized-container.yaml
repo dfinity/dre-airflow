@@ -27,6 +27,7 @@ jobs:
         name: Create airflow-customized container
         with:
           container: airflow-customized
+          context: airflow-customized
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-airflow-customized:
     name: Publish customized Airflow container
@@ -39,6 +40,7 @@ jobs:
         name: Create and publish airflow-customized container
         with:
           container: airflow-customized
+          context: airflow-customized
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}

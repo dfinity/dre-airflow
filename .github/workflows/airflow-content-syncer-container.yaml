@@ -27,6 +27,7 @@ jobs:
         name: Create airflow-content-syncer container
         with:
           container: airflow-content-syncer
+          context: airflow-content-syncer
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-airflow-content-syncer:
     name: Publish Airflow content syncer container
@@ -39,6 +40,7 @@ jobs:
         name: Create and publish airflow-content-syncer container
         with:
           container: airflow-content-syncer
+          context: airflow-content-syncer
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}

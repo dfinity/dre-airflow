@@ -5,6 +5,9 @@ inputs:
   container:
     description: "The name of the container"
     required: true
+  context:
+    description: "The folder containing the Dockerfile"
+    required: true
   registry-token:
     description: "The Github token needed to operate on the container registry"
     required: true
