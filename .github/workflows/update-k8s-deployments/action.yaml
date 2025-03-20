@@ -28,9 +28,6 @@ runs:
       run: |
         set -eExu -o pipefail
 
-        tmpdir=$(mktemp)
-        trap 'rm -rf "$tmpdir"' EXIT
-
         # checkout branch
         git clone --depth 10 --branch "main" "https://${PUSH_TOKEN}@github.com/dfinity-ops/k8s.git"
 
@@ -76,7 +73,6 @@ runs:
       id: create-rollout-pr
       if: ${{ steps.create-rollout-commit.outputs.k8s_branch != '' }}
       uses: actions/github-script@v7
-      continue-on-error: true
       with:
         github-token: ${{ inputs.push-token }}
         script: |
