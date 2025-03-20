@@ -376,9 +376,9 @@ and the branch can be overridden using variable
 `CONTENT_SYNCER_GIT_REPO_BRANCH`.
 
 The container image version is referred to as `syncer_image` in
-[this K8s file](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/deps/afvalues.yaml).
+[this K8s file](https://github.com/dfinity-ops/k8s/blob/main/bases/apps/airflow/core/values.yaml).
 When the container image is updated, Airflow must be
-[redeployed](https://gitlab.com/dfinity-lab/private/k8s/k8s/-/blob/main/bases/apps/airflow/README.md)
+[redeployed](https://github.com/dfinity-ops/k8s/blob/main/bases/apps/airflow/README.md)
 by updating the reference to the content syncer image in the
 file linked within this paragraph, then the K8s repository
 needs to have the update merged.
