@@ -85,7 +85,7 @@ runs:
           const repo = 'k8s';
           const base = 'main';
           const head = '${{ steps.create-rollout-commit.outputs.k8s_branch }}';
-          const title = '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}@${{ github.head_ref || github.ref_name }}';
+          const title = 'Rollout of ${{ inputs.component }} from ${{ github.repository }}@${{ github.head_ref || github.ref_name }}';
           const pulls = await github.rest.pulls.list({
             owner: owner,
             repo: repo,
