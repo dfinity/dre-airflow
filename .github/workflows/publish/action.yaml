@@ -45,7 +45,7 @@ runs:
         labels: ${{ steps.metadata.outputs.labels }}
         cache: true
         cache-repository: ghcr.io/${{ github.repository }}/cache
-        context: ${{ inputs.container }}
+        context: ${{ inputs.context }}
     - uses: ./.github/workflows/update-k8s-deployments
       if: ${{ inputs.publish }}
       with:
