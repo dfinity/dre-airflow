@@ -45,5 +45,5 @@ jobs:
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}
-          files-to-update: bases/apps/airflow/core/values.yaml bases/apps/airflow/core/patches/job-pod-init-container.yaml
+          files-to-update: bases/apps/airflow/core/values.yaml bases/apps/airflow/core/job-pod-init-container.yaml
           text-prefix: "airflow-content-syncer:"
