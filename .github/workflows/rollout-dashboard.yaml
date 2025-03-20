@@ -10,6 +10,7 @@ on:
     paths:
       - rollout-dashboard/**
       - .github/**
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   test-backend:
     name: Test rollout dashboard backend
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Set month and year for cache key
@@ -61,7 +62,7 @@ jobs:
         with:
           command: test
   test-frontend:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     name: Test rollout dashboard frontend
     runs-on: ubuntu-latest
     steps:
@@ -91,10 +92,11 @@ jobs:
         name: Create rollout-dashboard container
         with:
           container: rollout-dashboard
+          context: rollout-dashboard
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-rollout-dashboard-container:
     name: Publish rollout dashboard container
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +104,7 @@ jobs:
         name: Create and publish rollout-dashboard container
         with:
           container: rollout-dashboard
+          context: rollout-dashboard
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}

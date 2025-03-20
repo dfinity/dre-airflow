@@ -5,6 +5,9 @@ inputs:
   container:
     description: "The name of the container"
     required: true
+  context:
+    description: "The folder containing the Dockerfile"
+    required: true
   registry-token:
     description: "The Github token needed to operate on the container registry"
     required: true
@@ -42,7 +45,7 @@ runs:
         labels: ${{ steps.metadata.outputs.labels }}
         cache: true
         cache-repository: ghcr.io/${{ github.repository }}/cache
-        context: ${{ inputs.container }}
+        context: ${{ inputs.context }}
     - uses: ./.github/workflows/update-k8s-deployments
       if: ${{ inputs.publish }}
       with:

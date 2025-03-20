@@ -10,6 +10,7 @@ on:
     paths:
       - airflow-content-syncer/**
       - .github/**
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -27,10 +28,11 @@ jobs:
         name: Create airflow-content-syncer container
         with:
           container: airflow-content-syncer
+          context: airflow-content-syncer
           registry-token: ${{ secrets.GITHUB_TOKEN }}
   publish-airflow-content-syncer:
     name: Publish Airflow content syncer container
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # This image is based on ubuntu:20.04
     steps:
@@ -39,6 +41,7 @@ jobs:
         name: Create and publish airflow-content-syncer container
         with:
           container: airflow-content-syncer
+          context: airflow-content-syncer
           registry-token: ${{ secrets.GITHUB_TOKEN }}
           publish: true
           push-token: ${{ secrets.K8S_API_TOKEN }}
