@@ -18,6 +18,14 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check out k8s repository
+      uses: actions/checkout@v4
+      with:
+        repository: dfinity-ops/k8s
+        token: ${{ inputs.push-token }}
+        ref: main
+        fetch-depth: 10
+        path: k8s
     - name: "Create rollout commit with updated container images"
       id: "create-rollout-commit"
       env:
@@ -27,15 +35,12 @@ runs:
       shell: bash
       run: |
         set -eExu -o pipefail
-
-        # checkout branch
-        git clone --depth 10 --branch "main" "https://${PUSH_TOKEN}@github.com/dfinity-ops/k8s.git"
-
         cd k8s
+
         git config user.email "idx@dfinity.org"
         git config user.name "IDX Automation"
         SOURCE_BRANCH="${{ github.head_ref || github.ref_name }}"
-        K8S_REPO_BRANCH="update-dre-airflow-$COMPONENT-images-from-$SOURCE_BRANCH"
+        K8S_REPO_BRANCH="update-oncall-sync-$COMPONENT-images-from-$SOURCE_BRANCH"
         base_regex='${{ inputs.text-prefix }}'
 
         if [ -n "$base_regex" ]
@@ -80,7 +85,7 @@ runs:
           const repo = 'k8s';
           const base = 'main';
           const head = '${{ steps.create-rollout-commit.outputs.k8s_branch }}';
-          const title = '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}';
+          const title = '[nomrbot] - New ${{ inputs.component }} release from ${{ github.repository }}@${{ github.head_ref || github.ref_name }}';
           const pulls = await github.rest.pulls.list({
             owner: owner,
             repo: repo,
