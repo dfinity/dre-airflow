@@ -161,7 +161,7 @@ class DRE:
                         data = f.read()
                         result = SubprocessResult(r.exit_code, data)
                 else:
-                    result = self.subprocess_hook.run_command(cmd, env)
+                    result = self.subprocess_hook.run_command(cmd, env=env)
                 print("::endgroup::")
 
                 return result
