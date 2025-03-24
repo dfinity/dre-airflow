@@ -876,8 +876,9 @@ impl AirflowClient {
                             err
                         ))),
                     },
-                    reqwest::StatusCode::FORBIDDEN => {
+                    reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
                         if attempt_login {
+                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {}", status);
                             match self._login().await {
                                 Ok(..) => (),
                                 Err(err) => return Err(err),

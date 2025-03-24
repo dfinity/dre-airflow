@@ -27,6 +27,7 @@
     "vite": "^5.4.14"
   },
   "dependencies": {
+    "flowbite-svelte-icons": "^1.6.2",
     "svelte-markdown": "^0.4.1"
   }
 }
