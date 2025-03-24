@@ -21,7 +21,7 @@ from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
 DRE_URL = (
-    "https://github.com/dfinity/dre/releases/download/latest/dre-x86_64-unknown-linux"
+    "https://github.com/dfinity/dre/releases/latest/download/dre-x86_64-unknown-linux"
 )
 FAKE_PROPOSAL_NUMBER = -123456
 
