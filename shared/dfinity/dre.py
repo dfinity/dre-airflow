@@ -333,6 +333,7 @@ class AuthenticatedDRE(DRE):
             proposal_summary,
             subnet_id,
             git_revision,
+            "--forum-post-link=omit",
             dry_run=dry_run,
             yes=not dry_run,
         )
