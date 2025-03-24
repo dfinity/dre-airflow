@@ -326,8 +326,8 @@ class AuthenticatedDRE(DRE):
         )
         r = self.run(
             "propose",
-            "deploy-guestos-to-all-subnet-nodes",
             "--forum-post-link=omit",
+            "deploy-guestos-to-all-subnet-nodes",
             "--proposal-title",
             proposal_title,
             "--summary",
