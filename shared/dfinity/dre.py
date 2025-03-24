@@ -154,7 +154,9 @@ class DRE:
                 if full_stdout:
                     with tempfile.NamedTemporaryFile(mode="r") as f:
                         cmd = ["bash", "-c", shlex.join(cmd) + " > " + f.name]
-                        r = self.subprocess_hook.run_command(cmd)
+                        env = os.environ.copy()
+                        env["RUST_BACKTRACE"] = "1"
+                        r = self.subprocess_hook.run_command(cmd, env=env)
                         f.seek(0)
                         data = f.read()
                         result = SubprocessResult(r.exit_code, data)
