@@ -384,7 +384,7 @@ file linked within this paragraph, then the K8s repository
 needs to have the update merged.
 
 To determine if / when the artifacts have been synced, look at the
-log of the container `airflow-content-syncer` in any of the
+[log of the container `airflow-content-syncer`](https://grafana.ch1-rel1.dfinity.network/explore?schemaVersion=1&panes=%7B%22tvd%22%3A%7B%22datasource%22%3A%22P8E80F9AEF21F6940%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Bnamespace%3D%5C%22airflow%5C%22%2C+container%3D%5C%22airflow-content-syncer%5C%22%7D+%7C+line_format+%60%7B%7B.pod%7D%7D+%7B%7B__line__%7D%7D%60%22%2C%22queryType%22%3A%22range%22%2C%22datasource%22%3A%7B%22type%22%3A%22loki%22%2C%22uid%22%3A%22P8E80F9AEF21F6940%22%7D%2C%22editorMode%22%3A%22builder%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-15m%22%2C%22to%22%3A%22now%22%7D%7D%7D&orgId=1) in any of the
 triggerer, scheduler or worker pods of the Airflow deployment (in
 namespace `airflow`).  These logs can be retrieved from Loki in
 production (use the cluster's Grafana instance, *Explore* tab)
