@@ -327,13 +327,13 @@ class AuthenticatedDRE(DRE):
         r = self.run(
             "propose",
             "deploy-guestos-to-all-subnet-nodes",
+            "--forum-post-link=omit",
             "--proposal-title",
             proposal_title,
             "--summary",
             proposal_summary,
             subnet_id,
             git_revision,
-            "--forum-post-link=omit",
             dry_run=dry_run,
             yes=not dry_run,
         )
