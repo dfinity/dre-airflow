@@ -10,25 +10,51 @@
     FooterBrand,
   } from "flowbite-svelte";
   import { SvelteToast } from "@zerodevx/svelte-toast";
+  import { ChevronDownOutline } from "flowbite-svelte-icons";
 
   let view = rollouts_view();
 
-  import { Navbar, NavLi, NavUl } from "flowbite-svelte";
+  import {
+    Navbar,
+    NavLi,
+    NavUl,
+    NavBrand,
+    NavHamburger,
+    DropdownItem,
+    Dropdown,
+  } from "flowbite-svelte";
   $: activeUrl = $url.hash;
 </script>
 
 <SvelteToast />
 
-<div style="margin-left: auto; margin-right: auto;">
-  <Navbar class="w-min">
-    <NavUl {activeUrl}>
-      <NavLi href="#active">Active</NavLi>
-      <NavLi href="#complete">Complete</NavLi>
-      <NavLi href="#failed">Failed</NavLi>
-      <NavLi href="#all">All</NavLi>
-    </NavUl>
-  </Navbar>
-</div>
+<Navbar>
+  <NavBrand href="/">
+    <img src="/favicon-512x512.png" class="me-3 h-6 sm:h-9" alt="IC Logo" />
+    <span
+      class="self-center whitespace-nowrap text-xl font-semibold dark:text-white"
+      >Rollouts</span
+    >
+  </NavBrand>
+  <NavHamburger />
+  <NavUl {activeUrl}>
+    <NavLi class="cursor-pointer"
+      >Resources<ChevronDownOutline
+        class="w-6 h-6 ms-2 text-primary-800 dark:text-white inline"
+      />
+    </NavLi>
+    <Dropdown class="w-44 z-20">
+      <DropdownItem
+        href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all"
+        >Version history</DropdownItem
+      >
+    </Dropdown>
+    <NavLi href="#active">Active</NavLi>
+    <NavLi href="#complete">Complete</NavLi>
+    <NavLi href="#failed">Failed</NavLi>
+    <NavLi href="#all">All</NavLi>
+  </NavUl>
+</Navbar>
 
 {#if $view.error && $view.error !== "loading"}
   <!-- note use of me-3 in svg icon to ensure icon actually shows not too stuck to the text -->
