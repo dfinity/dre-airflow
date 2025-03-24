@@ -60,10 +60,10 @@ function setup_airflow_variables_and_connections() {
 if [ "$1" == "setup" ]
 then
     /usr/bin/python3 -m venv "$VENV_DIR"
-    "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
+    "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.10.5" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
-        --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt
+        --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.11.txt
     mkdir -p "$AIRFLOW_HOME"
     if ! test -f "$AIRFLOW_HOME"/airflow.db
     then
