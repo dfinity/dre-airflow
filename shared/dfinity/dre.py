@@ -291,6 +291,7 @@ class AuthenticatedDRE(DRE):
         """
         return self.run(
             "update-unassigned-nodes",
+            "--forum-post-link=omit",
             dry_run=dry_run,
             yes=True,
         )
