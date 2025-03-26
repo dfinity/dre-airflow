@@ -45,8 +45,12 @@
     </NavLi>
     <Dropdown class="w-44 z-20">
       <DropdownItem
-        href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all"
-        >Version history</DropdownItem
+        href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
+        target="_blank">Mainnet versions</DropdownItem
+      >
+      <DropdownItem
+        href="https://grafana.ch1-rel1.dfinity.network/d/release-controller/release-controller?from=now-30m&to=now&timezone=UTC&refresh=30s"
+        target="_blank">Release controller</DropdownItem
       >
     </Dropdown>
     <NavLi href="#active">Active</NavLi>
