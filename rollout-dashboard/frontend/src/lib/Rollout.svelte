@@ -4,9 +4,14 @@
     import { type Rollout, rolloutStateIcon, rolloutStateName } from "./types";
     import Batch from "./Batch.svelte";
     export let rollout: Rollout;
+
+    let rolloutClass: string = rollout.state;
+    if (rolloutClass !== "complete" && rolloutClass !== "failed") {
+        rolloutClass = "active";
+    }
 </script>
 
-<section class="rollout">
+<section class="rollout {rolloutClass}">
     <div class="general_info">
         <a
             rel="external"
@@ -103,6 +108,15 @@
         display: flex;
         flex-direction: column;
         row-gap: 0.6em;
+    }
+    .rollout.active {
+        border-left: 10px solid #4280b3;
+    }
+    .rollout.complete {
+        border-left: 10px solid #7cb342;
+    }
+    .rollout.failed {
+        border-left: 10px solid #b34242;
     }
     .rollout .general_info {
         display: flex;
