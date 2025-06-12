@@ -4,8 +4,8 @@ from datetime import timezone as tz
 
 import yaml
 from dfinity.ic_os_rollout import (
-    RolloutPlan,
-    RolloutPlanWithRevision,
+    SubnetRolloutPlan,
+    SubnetRolloutPlanWithRevision,
     assign_default_revision,
     check_plan,
     rollout_planner,
@@ -38,7 +38,7 @@ class TestWeekPlanner(unittest.TestCase):
 class TestRolloutPlanner(unittest.TestCase):
     def transform_actual(
         self,
-        inp: RolloutPlan,
+        inp: SubnetRolloutPlan,
     ) -> list[tuple[int, datetime.datetime, int]]:
         """
         Convert RolloutPlan into simple list of batch index, date/time, subnet num.
@@ -54,7 +54,7 @@ class TestRolloutPlanner(unittest.TestCase):
 
     def transform_actual_with_git_revision(
         self,
-        inp: RolloutPlan,
+        inp: SubnetRolloutPlan,
     ) -> list[tuple[int, datetime.datetime, int, str]]:
         """
         Convert RolloutPlan into simple list of batch index, date/time, subnet num.
@@ -379,8 +379,7 @@ Monday:
 
 
 class TestPlanChecker(unittest.TestCase):
-
-    def _formulate_plan(self, plan_draft: str) -> RolloutPlanWithRevision:
+    def _formulate_plan(self, plan_draft: str) -> SubnetRolloutPlanWithRevision:
         plan = yaml.safe_load(plan_draft)
 
         def lister() -> list[str]:

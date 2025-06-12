@@ -178,7 +178,8 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         )
 
         def per_status(
-            props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus
+            props: list[ic_types.AbbrevProposal],
+            status: ic_types.ProposalStatus,
         ) -> list[ic_types.AbbrevProposal]:
             return [p for p in props if p["status"] == status]
 

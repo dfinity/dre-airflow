@@ -4,15 +4,20 @@ Rollout IC os to subnets.
 
 import datetime
 import re
+import textwrap
 from typing import Callable, TypeAlias, TypedDict, cast
 
-from dfinity.ic_types import SubnetRolloutInstance, SubnetRolloutInstanceWithRevision
+from dfinity.ic_types import (
+    SubnetRolloutInstance,
+    SubnetRolloutInstanceWithRevision,
+)
 from dfinity.rollout_types import (
-    RolloutPlanSpec,
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
     SubnetNumberWithRevision,
     SubnetOrderSpec,
+    SubnetRolloutPlanSpec,
+    SubnetRolloutPlanSpec_doc,
 )
 
 SLACK_CHANNEL = "#eng-release-bots"
@@ -20,7 +25,7 @@ SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 DR_DRE_SLACK_ID = "S05GPUNS7EX"
 MAX_BATCHES: int = 30
 
-DEFAULT_PLANS: dict[str, str] = {
+DEFAULT_SUBNET_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 Monday:
@@ -44,35 +49,11 @@ Monday next week:
   7:00:
     subnets: [tdb26]
     batch: 30
-# Remarks:
-# * All times are expressed in the UTC time zone.
-# * Days refer to dates relative to your current work week
-#   if starting a rollout during a workday, or next week if
-#   the rollout is started during a weekend.
-# * A day name with " next week" added at the end means
-#   "add one week to this day".
-# * Each date/time can specify a simple list of subnets,
-#   or can specify a dict with two keys:
-#   * batch: an optional integer 1-30 with the batch number
-#            you want to assign to this batch.
-#   * subnets: a list of subnets.
-# * A subnet may be specified:
-#   * as an integer number from 0 to the maximum subnet number,
-#   * as a full or abbreviated subnet principal ID,
-#   * as a dictionary of {
-#        subnet: ID or principal
-#        git_revision: revision to deploy to this subnet
-#     }
-#     with this form being able to override the Git revision
-#     that will be targeted to that specific subnet.
-#     Example of a batch specified this way:
-#       Monday next week:
-#         7:00:
-#           batch: 30
-#           subnets:
-#           - subnet: tdb26
-#             git_revision: 0123456789012345678901234567890123456789
 """
+    + (
+        "# "
+        + "# ".join(textwrap.dedent(SubnetRolloutPlanSpec_doc).strip().splitlines(True))
+    )
 }
 PLAN_FORM = """
     <textarea class="form-control" name="{name}" 
@@ -133,19 +114,19 @@ def subnet_id_and_git_revision_from_args(
 
 
 """Zero-indexed rollout plan with batches of subnet instances to roll out."""
-RolloutPlan: TypeAlias = dict[
+SubnetRolloutPlan: TypeAlias = dict[
     str, tuple[datetime.datetime, list[SubnetRolloutInstance]]
 ]
 
-RolloutPlanWithRevision: TypeAlias = dict[
+SubnetRolloutPlanWithRevision: TypeAlias = dict[
     str, tuple[datetime.datetime, list[SubnetRolloutInstanceWithRevision]]
 ]
 
 
 def assign_default_revision(
-    r: RolloutPlan, fallback_git_revision: str
-) -> RolloutPlanWithRevision:
-    finalplan: RolloutPlanWithRevision = {}
+    r: SubnetRolloutPlan, fallback_git_revision: str
+) -> SubnetRolloutPlanWithRevision:
+    finalplan: SubnetRolloutPlanWithRevision = {}
     for nstr, (start_time, members) in r.items():
         finalmembers: list[SubnetRolloutInstanceWithRevision] = []
         for item in members:
@@ -161,14 +142,28 @@ def assign_default_revision(
     return finalplan
 
 
+def convert_timespec_or_minutes_to_datetime(
+    time_s: str | int,
+) -> datetime.datetime:
+    org_time_s = time_s
+    if isinstance(time_s, int):
+        hour = int(time_s / 60)
+        minute = time_s % 60
+        time_s = f"{hour}:{minute}"
+    try:
+        return datetime.datetime.strptime(time_s, "%H:%M")
+    except Exception as exc:
+        raise ValueError(f"{org_time_s} is not a valid hh:mm time") from exc
+
+
 def rollout_planner(
-    plan: RolloutPlanSpec,
+    plan: SubnetRolloutPlanSpec,
     subnet_list_source: Callable[[], list[str]],
     now: datetime.datetime | None = None,
-) -> RolloutPlan:
+) -> SubnetRolloutPlan:
     subnet_list = subnet_list_source()
     week_plan = week_planner(now)
-    batches: RolloutPlan = {}
+    batches: SubnetRolloutPlan = {}
     current_batch_index: int = 0
     batch_index_for_subnet: dict[int, int] = {}
 
@@ -185,17 +180,10 @@ def rollout_planner(
         ] = {}
 
         for time_s, subnet_numbers_raw in hours.items():
-            org_time_s = time_s
-            if isinstance(time_s, int):
-                hour = int(time_s / 60)
-                minute = time_s % 60
-                time_s = f"{hour}:{minute}"
             try:
-                time = datetime.datetime.strptime(time_s, "%H:%M")
-            except Exception as exc:
-                raise ValueError(
-                    f"{org_time_s} is not a valid hh:mm time on {dayname}"
-                ) from exc
+                time = convert_timespec_or_minutes_to_datetime(time_s)
+            except ValueError as e:
+                raise ValueError(str(e) + f" on {dayname}") from e
             date_and_time = date.replace(hour=time.hour, minute=time.minute)
             realhours[date_and_time] = subnet_numbers_raw
 
@@ -330,7 +318,7 @@ def rollout_planner(
     return batches
 
 
-def check_plan(plan: RolloutPlanWithRevision) -> None:
+def check_plan(plan: SubnetRolloutPlanWithRevision) -> None:
     # Check that uzr34 predates pzp6e by at least 24 hours.
     # https://dfinity.atlassian.net/browse/REL-2675 .
     uzr34_start_time: datetime.datetime | None = None

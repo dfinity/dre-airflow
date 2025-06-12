@@ -11,11 +11,11 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_PLANS,
+    DEFAULT_SUBNET_ROLLOUT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
-    RolloutPlanWithRevision,
     SubnetIdWithRevision,
+    SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
 
@@ -34,7 +34,7 @@ for network_name, network in IC_NETWORKS.items():
         start_date=pendulum.datetime(2020, 1, 1, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=14),
-        tags=["rollout", "DRE", "IC OS"],
+        tags=["rollout", "DRE", "IC OS", "GuestOS"],
         render_template_as_native_obj=True,
         params={
             "git_revision": Param(
@@ -42,12 +42,12 @@ for network_name, network in IC_NETWORKS.items():
                 type="string",
                 pattern="^[a-f0-9]{40}$",
                 title="Main Git revision",
-                description="Git revision of the IC-OS release to roll out to subnets"
-                ", unless specified otherwise directly for a specific subnet; will"
-                " also determine the version of ic-admin used",
+                description="Git revision of the IC OS GuestOS release to roll out to "
+                "subnets, unless specified otherwise directly for a specific subnet;"
+                " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_PLANS[network_name].strip(),
+                default=DEFAULT_SUBNET_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
                 description="A YAML-formatted string describing the rollout schedule",
@@ -79,7 +79,7 @@ for network_name, network in IC_NETWORKS.items():
                 current_batch_index: int, **kwargs: Any
             ) -> list[SubnetIdWithRevision]:
                 batch = cast(
-                    RolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
+                    SubnetRolloutPlanWithRevision, kwargs["ti"].xcom_pull("schedule")
                 ).get(str(current_batch_index))
                 if not batch:
                     print("This batch is empty.")
@@ -120,7 +120,7 @@ for network_name, network in IC_NETWORKS.items():
                     retries=retries,
                     network=network,
                 ).expand(subnet_id=proceed)
-                >> ic_os_rollout.CreateProposalIdempotently.partial(
+                >> ic_os_rollout.CreateSubnetUpdateProposalIdempotently.partial(
                     task_id="create_proposal_if_none_exists",
                     git_revision="{{ params.git_revision }}",
                     simulate_proposal=cast(bool, "{{ params.simulate }}"),
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     try:
         plan = sys.argv[2]
     except Exception:
-        plan = DEFAULT_PLANS["mainnet"]
+        plan = DEFAULT_SUBNET_ROLLOUT_PLANS["mainnet"]
     dag = DAGS["mainnet"]
     dag.test(
         run_conf={

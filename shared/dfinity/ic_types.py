@@ -167,6 +167,11 @@ class ProposalTopic(Enum):
     ## Proposals related to rental of subnets (Utopia).
     ## TODO: verify the int corresponds to the proto.
     TOPIC_SUBNET_RENTAL = 16
+    # All proposals to manage protocol canisters, which are considered part of the
+    # ICP protocol and are essential for its proper functioning.
+    TOPIC_PROTOCOL_CANISTER_MANAGEMENT = 17
+    ## SNS management.
+    TOPIC_SERVICE_NERVOUS_SYSTEM_MANAGEMENT = 18
 
 
 class AbbrevProposal(TypedDict):
@@ -183,9 +188,53 @@ class AbbrevProposal(TypedDict):
                 '[b3b00ba59c366384e3e0cd53a69457e9053ec987](https:##dashboard.internetcomputer.org/release/b3b00ba59c366384e3e0cd53a69457e9053ec987)\n',
     'title': 'Update subnet 4zbus to replica version b3b00ba5',
     'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
+
+    could also be
+
+    {'proposal_id': 102768,
+    'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
+                'node_ids': ['4zbus-z2bmt-ilreg-'
+                    'xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe']},
+    'proposer': '80',
+    'status': 'EXECUTED',
+    'summary': 'Update 9 API boundary node(s) to '
+                'f8131bfbc2d339716a9cff06e04de49a68e5a80b '
+                '\n'nMotivation...',
+    'title': 'Update 9 API boundary node(s) to f8131bf',
+    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
     """
 
     payload: dict[str, str]
+    proposal_id: int
+    proposer: int
+    status: ProposalStatus
+    summary: str
+    title: str
+    topic: ProposalTopic
+
+
+class AbbrevSubnetUpdateProposalPayload(TypedDict):
+    replica_version_id: str
+    subnet_id: str
+
+
+class AbbrevSubnetUpdateProposal(TypedDict):
+    """
+    {'proposal_id': 102768,
+    'payload': {'replica_version_id': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
+                'subnet_id': ('4zbus-z2bmt-ilreg-'
+                    'xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe')},
+    'proposer': '80',
+    'status': 'EXECUTED',
+    'summary': 'Update subnet '
+                '4zbus-z2bmt-ilreg-xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe '
+                'to replica version '
+                '[b3b00ba59c366384e3e0cd53a69457e9053ec987](https:##dashboard.internetcomputer.org/release/b3b00ba59c366384e3e0cd53a69457e9053ec987)\n',
+    'title': 'Update subnet 4zbus to replica version b3b00ba5',
+    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
+    """
+
+    payload: AbbrevSubnetUpdateProposalPayload
     proposal_id: int
     proposer: int
     status: ProposalStatus

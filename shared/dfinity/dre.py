@@ -50,7 +50,6 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 
 class DRE:
-
     def _prep(self) -> None:
         d = self.base_dir
         os.makedirs(d, exist_ok=True)
@@ -140,7 +139,11 @@ class DRE:
                     pem, nid = [], []
                 cmd = [self.dre_path] + nnsurl + nid + pem + list(args)
                 if dry_run:
-                    cmd.append("--dry-run")
+                    try:
+                        pos = cmd.index("propose")
+                        cmd.insert(pos + 1, "--dry-run")
+                    except ValueError:
+                        cmd.append("--dry-run")
                 if yes and not dry_run:
                     # In dry-run mode, this kicks in, but cmd.index raises
                     # ValueError when it cannot find the value.
@@ -224,24 +227,23 @@ class DRE:
         git_revision: str,
         subnet_id: str,
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevProposal]:
+    ) -> list[ic_types.AbbrevSubnetUpdateProposal]:
         return [
             r
-            for r in self.get_proposals(
-                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+            for r in self.get_ic_os_version_deployment_proposals_for_subnet(
+                subnet_id,
                 limit=limit,
             )
-            if r["payload"].get("subnet_id") == subnet_id
-            and r["payload"].get("replica_version_id") == git_revision
+            if r["payload"]["replica_version_id"] == git_revision
         ]
 
     def get_ic_os_version_deployment_proposals_for_subnet(
         self,
         subnet_id: str,
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevProposal]:
+    ) -> list[ic_types.AbbrevSubnetUpdateProposal]:
         return [
-            r
+            cast(ic_types.AbbrevSubnetUpdateProposal, r)
             for r in self.get_proposals(
                 topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
                 limit=limit,
@@ -269,7 +271,6 @@ class DRE:
 
 
 class AuthenticatedDRE(DRE):
-
     network: ic_types.ICNetworkWithPrivateKey
 
     def upgrade_unassigned_nodes(
@@ -369,12 +370,14 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
         subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
         git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
     )
-    p = d.get_proposals(
+    p2 = d.get_proposals(
         limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
     )
 
     pprint.pprint(p)
     print(len(p))
+    pprint.pprint(p2)
+    print(len(p2))
     # p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
     # print("Stdout", p.output)
     # print("Return code:", p.exit_code)

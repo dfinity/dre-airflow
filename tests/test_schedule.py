@@ -25,7 +25,6 @@ def db():
 
 
 class TestSchedule(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         db()
@@ -46,7 +45,9 @@ class TestSchedule(unittest.TestCase):
                     description="Git revision",
                 ),
                 "plan": Param(
-                    default=ic_os_rollout.DEFAULT_PLANS["mainnet"].strip(),
+                    default=ic_os_rollout.DEFAULT_SUBNET_ROLLOUT_PLANS[
+                        "mainnet"
+                    ].strip(),
                     type="string",
                     title="Rollout plan",
                     description="YAML-formatted string describing the rollout schedule",

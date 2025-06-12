@@ -13,8 +13,8 @@ from dfinity.ic_os_rollout import (
     DR_DRE_SLACK_ID,
     SLACK_CHANNEL,
     SLACK_CONNECTION_ID,
-    RolloutPlanWithRevision,
     SubnetIdWithRevision,
+    SubnetRolloutPlanWithRevision,
     assign_default_revision,
     check_plan,
     rollout_planner,
@@ -67,7 +67,7 @@ class ICRolloutBaseOperator(RolloutParams, BaseOperator):
         BaseOperator.__init__(self, task_id=task_id, **kwargs)
 
 
-class CreateProposalIdempotently(ICRolloutBaseOperator):
+class CreateSubnetUpdateProposalIdempotently(ICRolloutBaseOperator):
     template_fields = tuple(
         itertools.chain.from_iterable(
             (ICRolloutBaseOperator.template_fields, ("simulate_proposal",))
@@ -300,7 +300,7 @@ class UpgradeUnassignedNodes(BaseOperator):
 @task
 def schedule(
     network: ic_types.ICNetwork, **context: dict[str, Any]
-) -> RolloutPlanWithRevision:
+) -> SubnetRolloutPlanWithRevision:
     plan_data_structure = yaml.safe_load(
         context["task"].render_template(  # type: ignore
             "{{ params.plan }}",

@@ -9,9 +9,9 @@ import yaml
 from dfinity.rollout_types import (
     Releases,
     RolloutFeatures,
-    RolloutPlanSpec,
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
+    SubnetRolloutPlanSpec,
 )
 
 from airflow.exceptions import DagRunAlreadyExists
@@ -28,7 +28,6 @@ def next_weekday(d: datetime.date, weekday: int) -> datetime.date:
 
 
 class AutoComputeRolloutPlan(BaseOperator):
-
     template_fields = ["max_days_lookbehind", "default_rollout_plan"]
 
     def __init__(
@@ -181,7 +180,7 @@ class AutoComputeRolloutPlan(BaseOperator):
             )
 
         # Now compute rollout map.
-        spec = cast(RolloutPlanSpec, yaml.safe_load(self.default_rollout_plan))
+        spec = cast(SubnetRolloutPlanSpec, yaml.safe_load(self.default_rollout_plan))
 
         for hours in spec.values():
             for subnets in hours.values():
@@ -206,7 +205,6 @@ class AutoComputeRolloutPlan(BaseOperator):
 
 
 class TriggerRollout(TriggerDagRunOperator):
-
     def __init__(
         self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
     ) -> None:
