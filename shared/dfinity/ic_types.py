@@ -241,3 +241,32 @@ class AbbrevSubnetUpdateProposal(TypedDict):
     summary: str
     title: str
     topic: ProposalTopic
+
+
+class AbbrevBoundaryNodesUpdateProposalPayload(TypedDict):
+    version: str
+    boundary_node_ids: str
+
+
+class AbbrevBoundaryNodesUpdateProposal(TypedDict):
+    """
+    {'proposal_id': 102768,
+    'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
+                'node_ids': ['4zbus-z2bmt-ilreg-'
+                    'xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe']},
+    'proposer': '80',
+    'status': 'EXECUTED',
+    'summary': 'Update 9 API boundary node(s) to '
+                'f8131bfbc2d339716a9cff06e04de49a68e5a80b '
+                '\n'nMotivation...',
+    'title': 'Update 9 API boundary node(s) to f8131bf',
+    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
+    """
+
+    payload: AbbrevBoundaryNodesUpdateProposalPayload
+    proposal_id: int
+    proposer: int
+    status: ProposalStatus
+    summary: str
+    title: str
+    topic: ProposalTopic

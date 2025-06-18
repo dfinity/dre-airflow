@@ -8,6 +8,7 @@ from typing import Any, Sequence
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
+import dfinity.rollout_types as rollout_types
 import yaml
 from dfinity.ic_os_rollout import (
     DR_DRE_SLACK_ID,
@@ -342,6 +343,115 @@ def schedule(
         raise AirflowException("Unsafe rollout plan")
 
     return plan
+
+
+def create_boundary_nodes_proposal_if_none_exists(
+    boundary_node_ids: list[str],
+    git_revision: str,
+    network: ic_types.ICNetwork,
+    simulate: bool,
+) -> rollout_types.ProposalInfo:
+    """
+    Creates a proposal for boundary node upgrade if it is necessary.
+
+    Returns the proposal information.
+
+    Intended to be wrapped by an Airflow @task decorator.
+    """
+    runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
+
+    # Get proposals sorted by proposal number.
+    props = sorted(
+        runner.get_ic_os_version_deployment_proposals_for_boundary_nodes(
+            boundary_node_ids=boundary_node_ids,
+        ),
+        key=lambda prop: -prop["proposal_id"],
+    )
+    props_for_git_revision = [
+        p for p in props if p["payload"]["version"] == git_revision
+    ]
+
+    if simulate:
+        print(f"simulate_proposal={simulate}")
+
+    if not props:
+        print("No proposals for the specified boundary nodes.  Will create.")
+    elif not props_for_git_revision:
+        print(
+            f"No proposals with revision {git_revision} for the specified boundary"
+            " nodes.  Will create.",
+            git_revision,
+        )
+    elif props_for_git_revision[0]["proposal_id"] < props[0]["proposal_id"]:
+        print(
+            (
+                "Proposal %s with git revision %s for the specified boundary nodes "
+                "is not the last (%s).  Will create."
+            )
+            % (
+                props_for_git_revision[0]["proposal_id"],
+                git_revision,
+                props[0]["proposal_id"],
+            )
+        )
+    elif props_for_git_revision[0]["status"] not in (
+        ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+        ic_types.ProposalStatus.PROPOSAL_STATUS_ADOPTED,
+        ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED,
+    ):
+        print(
+            (
+                "Proposal %s with git revision %s for the specified boundary nodes "
+                "is in state %s and must be created again.  Will create."
+            )
+            % (
+                props_for_git_revision[0]["proposal_id"],
+                git_revision,
+                props_for_git_revision[0]["status"].name,
+            )
+        )
+    else:
+        prop = props_for_git_revision[0]
+        print(
+            (
+                "Proposal %s with git revision %s for the specified boundary nodes "
+                "is in state %s and does not need to be created."
+            )
+            % (
+                prop["proposal_id"],
+                git_revision,
+                prop["status"].name,
+            )
+        )
+        url = f"{network.proposal_display_url}/{prop['proposal_id']}"
+        print(
+            "Proposal " + url + f" titled {prop['title']}"
+            f" has executed.  No need to do anything."
+        )
+        return {
+            "proposal_id": int(prop["proposal_id"]),
+            "proposal_url": url,
+            "needs_vote": prop["status"]
+            == ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+        }
+
+    print(
+        f"Creating proposal for boundary nodes {boundary_node_ids} to "
+        + f"adopt revision {git_revision} (simulate {simulate})."
+    )
+
+    proposal_number = (
+        runner.authenticated().propose_to_update_subnet_boundary_nodes_version(
+            boundary_node_ids, git_revision, dry_run=simulate
+        )
+    )
+
+    url = f"{network.proposal_display_url}/{proposal_number}"
+    return {
+        "proposal_id": proposal_number,
+        "proposal_url": url,
+        "needs_vote": True,
+    }
 
 
 if __name__ == "__main__":

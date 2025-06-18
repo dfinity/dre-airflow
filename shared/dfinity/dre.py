@@ -252,6 +252,36 @@ class DRE:
             and r["payload"].get("replica_version_id") is not None
         ]
 
+    def get_ic_os_version_deployment_proposals_for_boundary_nodes_and_revision(
+        self,
+        git_revision: str,
+        boundary_node_ids: list[str],
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevBoundaryNodesUpdateProposal]:
+        return [
+            r
+            for r in self.get_ic_os_version_deployment_proposals_for_boundary_nodes(
+                boundary_node_ids,
+                limit=limit,
+            )
+            if r["payload"]["version"] == git_revision
+        ]
+
+    def get_ic_os_version_deployment_proposals_for_boundary_nodes(
+        self,
+        boundary_node_ids: list[str],
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevBoundaryNodesUpdateProposal]:
+        return [
+            cast(ic_types.AbbrevBoundaryNodesUpdateProposal, r)
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if all(x in r["payload"].get("node_ids", []) for x in boundary_node_ids)
+            and r["payload"].get("version") is not None
+        ]
+
     def get_subnet_list(self) -> list[str]:
         r = self.run("get", "subnet-list", "--json", full_stdout=True)
         if r.exit_code != 0:
@@ -335,6 +365,66 @@ class AuthenticatedDRE(DRE):
             proposal_summary,
             subnet_id,
             git_revision,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
+
+    def propose_to_update_subnet_boundary_nodes_version(
+        self,
+        boundary_node_ids: list[str],
+        git_revision: str,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create proposal to update subnet to a blessed version.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        git_revision_short = git_revision[:7]
+        proposal_title = (
+            f"Update {len(boundary_node_ids)} API boundary node(s)"
+            f" to replica version {git_revision_short}"
+        )
+        proposal_summary = (
+            f"""Update API boundary nodes to GuestOS version """
+            f"""[{git_revision}]({self.network.release_display_url}/{git_revision})"""
+            f"""\n\nMotivation: update the API boundary nodes"""
+            f""" {', '.join(boundary_node_ids)}."""
+        )
+        nodesparms: list[str] = []
+        for n in boundary_node_ids:
+            nodesparms.append("--nodes")
+            nodesparms.append(n)
+
+        r = self.run(
+            "propose",
+            "--forum-post-link=omit",
+            "deploy-guestos-to-some-api-boundary-nodes",
+            "--proposal-title",
+            proposal_title,
+            "--summary",
+            proposal_summary,
+            "--version",
+            git_revision,
+            *nodesparms,
             dry_run=dry_run,
             yes=not dry_run,
         )
