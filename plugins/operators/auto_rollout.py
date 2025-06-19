@@ -146,7 +146,7 @@ class AutoComputeRolloutPlan(BaseOperator):
         ) -> SubnetNameOrNumberWithRevision:
             if isinstance(subnet, dict) and subnet.get("git_revision"):
                 # Manually overridden, return the same.
-                return cast(SubnetNameOrNumberWithRevision, subnet)
+                return subnet
 
             if isinstance(subnet, dict):
                 subnet = subnet["subnet"]

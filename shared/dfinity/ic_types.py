@@ -193,7 +193,9 @@ class AbbrevProposal(TypedDict):
 
     {'proposal_id': 102768,
     'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
-                'node_ids': ['4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae']},
+                'node_ids': [
+                '4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae'
+                ]},
     'proposer': '80',
     'status': 'EXECUTED',
     'summary': 'Update 1 API boundary node(s) to '
@@ -251,7 +253,9 @@ class AbbrevBoundaryNodesUpdateProposal(TypedDict):
     """
     {'proposal_id': 102768,
     'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
-                'node_ids': ['4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae']},
+                'node_ids': [
+                '4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae'
+                ]},
     'proposer': '80',
     'status': 'EXECUTED',
     'summary': 'Update 1 API boundary node(s) to '

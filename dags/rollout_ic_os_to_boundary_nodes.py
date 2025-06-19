@@ -188,30 +188,37 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             )
 
         # Begin composition of the flow based on the operators above and imported.
+        # t ype: ignore is frequently necessary here since calling these functions
+        # is a bit magic -- for example, some of these functions have parameters
+        # declared that are automatically added by Airflow during execution, so
+        # they appear on the function signature, but not below.  This is because
+        # the functions being called below *are not at all* the functions you see
+        # above -- they have been wrapped by decorators which do this magic for us.
 
-        timetable = schedule()
+        timetable = schedule()  # type: ignore
 
         batches = []
         for batch_index in range(BATCH_COUNT):
 
             @task_group(group_id=f"batch_{batch_index+1}")
             def batch(batch_index: int) -> None:
-                should_run = prepare(batch_index)
-                nodes_to_rollout = wait_until_start_time(batch_index)
+                should_run = prepare(batch_index)  # type: ignore
+                nodes_to_rollout = wait_until_start_time(batch_index)  # type: ignore
                 chain(should_run, nodes_to_rollout)
-                proposed = create_proposal_if_none_exists(nodes_to_rollout)
+                proposed = create_proposal_if_none_exists(nodes_to_rollout)  # type: ignore
                 announced = ic_os_rollout.RequestProposalVote(
                     task_id="request_proposal_vote",
                     source_task_id=f"batch_{batch_index+1}.create_proposal_if_none_exists",
                     retries=retries,
                 )
-                accepted = wait_until_proposal_is_accepted(
-                    nodes=nodes_to_rollout, proposal_info=proposed
+                accepted = wait_until_proposal_is_accepted(  # type: ignore
+                    nodes=nodes_to_rollout,  # type: ignore
+                    proposal_info=proposed,  # type: ignore
                 )
                 chain(proposed, announced)
-                adopted = wait_for_revision_adoption(nodes=nodes_to_rollout)
+                adopted = wait_for_revision_adoption(nodes=nodes_to_rollout)  # type: ignore
                 chain(accepted, adopted)
-                healthy = wait_until_nodes_healthy(nodes_to_rollout)
+                healthy = wait_until_nodes_healthy(nodes_to_rollout)  # type: ignore
                 chain(adopted, healthy)
                 join = EmptyOperator(
                     task_id="join",
@@ -226,7 +233,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             simulate_elected=typing.cast(bool, "{{ params.simulate }}"),
             network=network,
             retries=retries,
-            git_revision=typing.cast(str, "{{ params.git_revision }}"),
+            git_revision="{{ params.git_revision }}",
         )
 
         wait_for_other_rollouts = ic_os_sensor.WaitForOtherDAGs(
