@@ -724,7 +724,7 @@ def has_proposal_executed(
             f" titled {executeds[0]['title']}"
             " has executed.  We can proceed."
         )
-        return False
+        return True
 
     # There is an open proposal, but not yet voted to execution.
     if simulate:
