@@ -90,7 +90,7 @@ nodes:
 start_day: Wednesday
 resume_at: 9:00
 suspend_at: 17:00
-minimum_minutes_per_batch: 60
+minimum_minutes_per_batch: 15
 """
     + (
         "# "
