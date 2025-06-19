@@ -12,7 +12,7 @@ from dfinity.ic_types import (
     SubnetRolloutInstanceWithRevision,
 )
 from dfinity.rollout_types import (
-    BoundaryNodeRolloutPlanSpec,
+    ApiBoundaryNodeRolloutPlanSpec,
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
     SubnetNumberWithRevision,
@@ -62,8 +62,8 @@ PLAN_FORM = """
            type="text"
            required="" rows="24">{value}</textarea>
 """
-# Corresponds to type BoundaryNodeRolloutPlanSpec.
-DEFAULT_BOUNDARY_NODE_ROLLOUT_PLANS: dict[str, str] = {
+# Corresponds to type ApiBoundaryNodeRolloutPlanSpec.
+DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 nodes:
@@ -95,7 +95,7 @@ minimum_minutes_per_batch: 60
     + (
         "# "
         + "# ".join(
-            textwrap.dedent(cast(str, BoundaryNodeRolloutPlanSpec.__doc__))
+            textwrap.dedent(cast(str, ApiBoundaryNodeRolloutPlanSpec.__doc__))
             .strip()
             .splitlines(True)
         )
@@ -303,17 +303,17 @@ def rollout_planner(
 
             if str(batch_index) in batches:
                 raise ValueError(
-                    f"batch {batch_index+1} requested by {date_and_time} has"
+                    f"batch {batch_index + 1} requested by {date_and_time} has"
                     f" already been assigned to a prior batch"
                 )
             if batch_index >= MAX_BATCHES:
                 raise ValueError(
-                    f"batch {batch_index+1} requested by {date_and_time} exceeds"
+                    f"batch {batch_index + 1} requested by {date_and_time} exceeds"
                     f" the maximum batch count of {MAX_BATCHES}"
                 )
             if batch_index < current_batch_index:
                 raise ValueError(
-                    f"batch {batch_index+1} requested by {date_and_time} is"
+                    f"batch {batch_index + 1} requested by {date_and_time} is"
                     f" lower than already-assigned batch {current_batch_index}"
                 )
 
@@ -368,7 +368,7 @@ def rollout_planner(
                 if bsn is not None:
                     raise ValueError(
                         f"subnet number {principal} requested by {date_and_time} is"
-                        f" already being rolled out as part of batch {bsn+1}"
+                        f" already being rolled out as part of batch {bsn + 1}"
                     )
                 batch_index_for_subnet[subnet_number] = batch_index
                 git_revision = subnet.get("git_revision")
@@ -417,8 +417,8 @@ def check_plan(plan: SubnetRolloutPlanWithRevision) -> None:
             )
 
 
-def boundary_node_batch_timetable(
-    spec: BoundaryNodeRolloutPlanSpec,
+def api_boundary_node_batch_timetable(
+    spec: ApiBoundaryNodeRolloutPlanSpec,
     batch_count: int,
     now: datetime.datetime | None = None,
 ) -> list[datetime.datetime]:
@@ -563,7 +563,7 @@ def exponential_increase(
     return [a + b for a, b in zip(batches, rounded)]
 
 
-def boundary_node_batch_create(
+def api_boundary_node_batch_create(
     nodes: list[str], batch_count: int, increase_factor: float = 0.2
 ) -> list[list[str]]:
     """
@@ -592,7 +592,7 @@ if __name__ == "__main__":
     import pprint
 
     pprint.pprint(
-        boundary_node_batch_timetable(
+        api_boundary_node_batch_timetable(
             {
                 "nodes": ["abc"],
                 "start_day": "Monday",

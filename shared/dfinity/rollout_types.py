@@ -92,7 +92,7 @@ SubnetRolloutPlanSpec = dict[
 ]
 
 
-class BoundaryNodeRolloutPlanSpec(TypedDict):
+class ApiBoundaryNodeRolloutPlanSpec(TypedDict):
     """
     Represents the shape of the rollout plan for boundary nodes input into Airflow
     by the operator.
@@ -124,7 +124,7 @@ class BoundaryNodeRolloutPlanSpec(TypedDict):
     minimum_minutes_per_batch: int
 
 
-def yaml_to_BoundaryNodeRolloutPlanSpec(s: str) -> BoundaryNodeRolloutPlanSpec:
+def yaml_to_ApiBoundaryNodeRolloutPlanSpec(s: str) -> ApiBoundaryNodeRolloutPlanSpec:
     try:
         d = yaml.safe_load(s)
     except Exception as e:
@@ -134,18 +134,18 @@ def yaml_to_BoundaryNodeRolloutPlanSpec(s: str) -> BoundaryNodeRolloutPlanSpec:
         assert "nodes" in d, "expected a nodes key"
         assert "resume_at" in d, "expected a resume_at key"
         assert "suspend_at" in d, "expected a suspend_at key"
-        assert (
-            "minimum_minutes_per_batch" in d
-        ), "expected a minimum_minutes_per_batch key"
+        assert "minimum_minutes_per_batch" in d, (
+            "expected a minimum_minutes_per_batch key"
+        )
         assert d["nodes"], "nodes cannot be empty"
         for node in d["nodes"]:
             assert isinstance(node, str), "node principal %r is not a string" % node
-        assert isinstance(d["resume_at"], str) or isinstance(
-            d["resume_at"], int
-        ), "resume_at must be an HH:MM string or a number of minutes"
-        assert isinstance(d["suspend_at"], str) or isinstance(
-            d["suspend_at"], int
-        ), "suspend_at must be an HH:MM string or a number of minutes"
+        assert isinstance(d["resume_at"], str) or isinstance(d["resume_at"], int), (
+            "resume_at must be an HH:MM string or a number of minutes"
+        )
+        assert isinstance(d["suspend_at"], str) or isinstance(d["suspend_at"], int), (
+            "suspend_at must be an HH:MM string or a number of minutes"
+        )
         assert (
             isinstance(d["minimum_minutes_per_batch"], int)
             and d["minimum_minutes_per_batch"] > 0
@@ -160,7 +160,7 @@ def yaml_to_BoundaryNodeRolloutPlanSpec(s: str) -> BoundaryNodeRolloutPlanSpec:
                 datetime.datetime.strptime(d["start_day"], "%A next week")
             except ValueError:
                 raise ValueError("invalid start_day value: %s" % d["start_day"]) from e
-    return cast(BoundaryNodeRolloutPlanSpec, d)
+    return cast(ApiBoundaryNodeRolloutPlanSpec, d)
 
 
 class ProposalInfo(TypedDict):

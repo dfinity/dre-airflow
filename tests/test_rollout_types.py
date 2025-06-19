@@ -4,7 +4,7 @@ import unittest
 import dfinity.rollout_types as rollout_types
 
 
-class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
+class TestApiBoundaryNodeRolloutPlanSpec(unittest.TestCase):
     def test_valid(self) -> None:
         """Tests that a valid rollout plan spec works."""
         inp = textwrap.dedent("""\
@@ -15,7 +15,7 @@ class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
         suspend_at: 18:59
         minimum_minutes_per_batch: 60
         """)
-        rollout_types.yaml_to_BoundaryNodeRolloutPlanSpec(inp)
+        rollout_types.yaml_to_ApiBoundaryNodeRolloutPlanSpec(inp)
 
     def test_bad_weekday(self) -> None:
         inp = textwrap.dedent("""\
@@ -27,7 +27,8 @@ class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
         minimum_minutes_per_batch: 60
         """)
         self.assertRaises(
-            ValueError, lambda: rollout_types.yaml_to_BoundaryNodeRolloutPlanSpec(inp)
+            ValueError,
+            lambda: rollout_types.yaml_to_ApiBoundaryNodeRolloutPlanSpec(inp),
         )
 
     def test_no_nodes(self) -> None:
@@ -39,7 +40,8 @@ class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
         minimum_minutes_per_batch: 60
         """)
         self.assertRaises(
-            ValueError, lambda: rollout_types.yaml_to_BoundaryNodeRolloutPlanSpec(inp)
+            ValueError,
+            lambda: rollout_types.yaml_to_ApiBoundaryNodeRolloutPlanSpec(inp),
         )
 
     def test_zero_minimum_minutes(self) -> None:
@@ -51,7 +53,8 @@ class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
         minimum_minutes_per_batch: 0
         """)
         self.assertRaises(
-            ValueError, lambda: rollout_types.yaml_to_BoundaryNodeRolloutPlanSpec(inp)
+            ValueError,
+            lambda: rollout_types.yaml_to_ApiBoundaryNodeRolloutPlanSpec(inp),
         )
 
     def test_wrong_resume_at_time(self) -> None:
@@ -63,5 +66,6 @@ class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
         minimum_minutes_per_batch: 60
         """)
         self.assertRaises(
-            ValueError, lambda: rollout_types.yaml_to_BoundaryNodeRolloutPlanSpec(inp)
+            ValueError,
+            lambda: rollout_types.yaml_to_ApiBoundaryNodeRolloutPlanSpec(inp),
         )

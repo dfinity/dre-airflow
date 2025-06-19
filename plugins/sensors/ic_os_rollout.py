@@ -727,7 +727,7 @@ def has_proposal_executed(
 
     # There is an open proposal, but not yet voted to execution.
     if simulate:
-        print("Simulating that the open proposal" " has been created and accepted.")
+        print("Simulating that the open proposal has been created and accepted.")
         return True
 
     print(
@@ -739,17 +739,16 @@ def has_proposal_executed(
     return False
 
 
-def have_boundary_nodes_adopted_revision(
-    boundary_node_ids: list[str],
+def have_api_boundary_nodes_adopted_revision(
+    api_boundary_node_ids: list[str],
     git_revision: str,
     network: ic_types.ICNetwork,
 ) -> bool:
     print(
-        "Waiting for specified boundary nodes to have"
-        f" adopted revision {git_revision}."
+        f"Waiting for specified boundary nodes to have adopted revision {git_revision}."
     )
 
-    joined = "|".join(boundary_node_ids)
+    joined = "|".join(api_boundary_node_ids)
     query = (
         "sum(ic_orchestrator_info{"
         + f'ic_node=~"{joined}"'
@@ -761,7 +760,7 @@ def have_boundary_nodes_adopted_revision(
     res = prom.query_prometheus_servers(network.prometheus_urls, query)
     if len(res) == 1 and res[0]["metric"]["ic_active_version"] == git_revision:
         current_replica_count = int(res[0]["value"])
-        if current_replica_count >= len(boundary_node_ids):
+        if current_replica_count >= len(api_boundary_node_ids):
             print(
                 "All %s boundary nodes have updated to revision %s."
                 % (
@@ -775,7 +774,7 @@ def have_boundary_nodes_adopted_revision(
                 "The updated boundary node count is %d but %d is expected; waiting."
                 % (
                     current_replica_count,
-                    len(boundary_node_ids),
+                    len(api_boundary_node_ids),
                 )
             )
     if res:
@@ -788,13 +787,13 @@ def have_boundary_nodes_adopted_revision(
     else:
         print(
             f"Upgrade has not begun yet -- Prometheus show no results for the"
-            f" specified boundary nodes {boundary_node_ids}."
+            f" specified boundary nodes {api_boundary_node_ids}."
         )
     return False
 
 
-def have_boundary_nodes_stopped_alerting(
-    boundary_node_ids: list[str],
+def have_api_boundary_nodes_stopped_alerting(
+    api_boundary_node_ids: list[str],
     network: ic_types.ICNetwork,
 ) -> bool:
     """
@@ -802,7 +801,7 @@ def have_boundary_nodes_stopped_alerting(
 
     Return True if no alerts, False otherwise.
     """
-    joineds = "|".join(boundary_node_ids)
+    joineds = "|".join(api_boundary_node_ids)
 
     print("Waiting for alerts on boundary nodes to subside.")
     query = """

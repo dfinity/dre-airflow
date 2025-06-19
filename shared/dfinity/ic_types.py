@@ -244,12 +244,12 @@ class AbbrevSubnetUpdateProposal(TypedDict):
     topic: ProposalTopic
 
 
-class AbbrevBoundaryNodesUpdateProposalPayload(TypedDict):
+class AbbrevApiBoundaryNodesUpdateProposalPayload(TypedDict):
     version: str
-    boundary_node_ids: str
+    api_boundary_node_ids: str
 
 
-class AbbrevBoundaryNodesUpdateProposal(TypedDict):
+class AbbrevApiBoundaryNodesUpdateProposal(TypedDict):
     """
     {'proposal_id': 102768,
     'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
@@ -265,7 +265,7 @@ class AbbrevBoundaryNodesUpdateProposal(TypedDict):
     'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
     """
 
-    payload: AbbrevBoundaryNodesUpdateProposalPayload
+    payload: AbbrevApiBoundaryNodesUpdateProposalPayload
     proposal_id: int
     proposer: int
     status: ProposalStatus

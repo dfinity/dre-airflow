@@ -120,9 +120,7 @@ class CreateSubnetUpdateProposalIdempotently(ICRolloutBaseOperator):
             res = int(
                 prom.query_prometheus_servers(
                     self.network.prometheus_urls,
-                    "sum(ic_replica_info{"
-                    f'ic_subnet="{subnet_id}"'
-                    "}) by (ic_subnet)",
+                    f'sum(ic_replica_info{{ic_subnet="{subnet_id}"}}) by (ic_subnet)',
                 )[0]["value"]
             )
             self.log.info("Remembering current replica count (%s)...", res)
@@ -328,7 +326,7 @@ def schedule(
     )
 
     for nstr, (_, members) in plan.items():
-        print(f"Batch {int(nstr)+1}:")
+        print(f"Batch {int(nstr) + 1}:")
         for item in members:
             print(
                 f"    Subnet {item.subnet_id} ({item.subnet_num}) will start"
@@ -345,8 +343,8 @@ def schedule(
     return plan
 
 
-def create_boundary_nodes_proposal_if_none_exists(
-    boundary_node_ids: list[str],
+def create_api_boundary_nodes_proposal_if_none_exists(
+    api_boundary_node_ids: list[str],
     git_revision: str,
     network: ic_types.ICNetwork,
     simulate: bool,
@@ -362,8 +360,8 @@ def create_boundary_nodes_proposal_if_none_exists(
 
     # Get proposals sorted by proposal number.
     props = sorted(
-        runner.get_ic_os_version_deployment_proposals_for_boundary_nodes(
-            boundary_node_ids=boundary_node_ids,
+        runner.get_ic_os_version_deployment_proposals_for_api_boundary_nodes(
+            api_boundary_node_ids=api_boundary_node_ids,
         ),
         key=lambda prop: -prop["proposal_id"],
     )
@@ -436,13 +434,13 @@ def create_boundary_nodes_proposal_if_none_exists(
         }
 
     print(
-        f"Creating proposal for boundary nodes {boundary_node_ids} to "
+        f"Creating proposal for boundary nodes {api_boundary_node_ids} to "
         + f"adopt revision {git_revision} (simulate {simulate})."
     )
 
     proposal_number = (
-        runner.authenticated().propose_to_update_subnet_boundary_nodes_version(
-            boundary_node_ids, git_revision, dry_run=simulate
+        runner.authenticated().propose_to_update_api_boundary_nodes_version(
+            api_boundary_node_ids, git_revision, dry_run=simulate
         )
     )
 

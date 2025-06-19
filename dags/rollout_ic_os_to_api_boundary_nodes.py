@@ -11,12 +11,12 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_BOUNDARY_NODE_ROLLOUT_PLANS,
+    DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS,
     PLAN_FORM,
-    boundary_node_batch_create,
-    boundary_node_batch_timetable,
+    api_boundary_node_batch_create,
+    api_boundary_node_batch_timetable,
 )
-from dfinity.rollout_types import ProposalInfo, yaml_to_BoundaryNodeRolloutPlanSpec
+from dfinity.rollout_types import ProposalInfo, yaml_to_ApiBoundaryNodeRolloutPlanSpec
 
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
@@ -41,12 +41,12 @@ BATCH_COUNT: int = 20
 for network_name, network in ic_types.IC_NETWORKS.items():
 
     @dag(
-        dag_id=f"rollout_ic_os_to_{network_name}_boundary_nodes",
+        dag_id=f"rollout_ic_os_to_{network_name}_api_boundary_nodes",
         schedule=None,
         start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
         catchup=False,
         dagrun_timeout=datetime.timedelta(days=14),
-        tags=["rollout", "DRE", "IC OS", "boundary nodes"],
+        tags=["rollout", "DRE", "IC OS", "API boundary nodes"],
         render_template_as_native_obj=True,
         params={
             "git_revision": Param(
@@ -59,7 +59,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_BOUNDARY_NODE_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
                 description="A YAML-formatted string describing the rollout schedule",
@@ -74,18 +74,18 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             ),
         },
     )
-    def rollout_ic_os_to_boundary_nodes() -> None:
+    def rollout_ic_os_to_api_boundary_nodes() -> None:
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
         @task()
         def schedule(
             params: DagParams,
         ) -> list[BatchSpec]:
-            spec = yaml_to_BoundaryNodeRolloutPlanSpec(params["plan"])
-            timetable: list[datetime.datetime] = boundary_node_batch_timetable(
+            spec = yaml_to_ApiBoundaryNodeRolloutPlanSpec(params["plan"])
+            timetable: list[datetime.datetime] = api_boundary_node_batch_timetable(
                 spec, batch_count=BATCH_COUNT
             )
-            batches: list[list[str]] = boundary_node_batch_create(
+            batches: list[list[str]] = api_boundary_node_batch_create(
                 spec["nodes"], batch_count=BATCH_COUNT
             )
             assert len(timetable) == len(batches), (
@@ -113,9 +113,9 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             else:
                 print("No nodes for this run, we will skip.")
             return (
-                [f"batch_{batch_num+1}.wait_until_start_time"]
+                [f"batch_{batch_num + 1}.wait_until_start_time"]
                 if run
-                else [f"batch_{batch_num+1}.join"]
+                else [f"batch_{batch_num + 1}.join"]
             )
 
         @task.sensor(poke_interval=60, timeout=86400 * 7, mode="reschedule")
@@ -143,7 +143,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             nodes: list[str], params: DagParams
         ) -> ProposalInfo:
             git_revision = params["git_revision"]
-            return ic_os_rollout.create_boundary_nodes_proposal_if_none_exists(
+            return ic_os_rollout.create_api_boundary_nodes_proposal_if_none_exists(
                 nodes, git_revision, network, simulate=params["simulate"]
             )
 
@@ -169,7 +169,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             nodes: list[str], params: DagParams
         ) -> PokeReturnValue:
             return PokeReturnValue(
-                is_done=ic_os_sensor.have_boundary_nodes_adopted_revision(
+                is_done=ic_os_sensor.have_api_boundary_nodes_adopted_revision(
                     nodes, params["git_revision"], network
                 ),
                 xcom_value=nodes,
@@ -182,7 +182,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             nodes: list[str], params: DagParams
         ) -> PokeReturnValue:
             return PokeReturnValue(
-                is_done=ic_os_sensor.have_boundary_nodes_stopped_alerting(
+                is_done=ic_os_sensor.have_api_boundary_nodes_stopped_alerting(
                     nodes, network
                 )
             )
@@ -200,7 +200,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
         batches = []
         for batch_index in range(BATCH_COUNT):
 
-            @task_group(group_id=f"batch_{batch_index+1}")
+            @task_group(group_id=f"batch_{batch_index + 1}")
             def batch(batch_index: int) -> None:
                 should_run = prepare(batch_index)  # type: ignore
                 nodes_to_rollout = wait_until_start_time(batch_index)  # type: ignore
@@ -208,7 +208,8 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 proposed = create_proposal_if_none_exists(nodes_to_rollout)  # type: ignore
                 announced = ic_os_rollout.RequestProposalVote(
                     task_id="request_proposal_vote",
-                    source_task_id=f"batch_{batch_index+1}.create_proposal_if_none_exists",
+                    source_task_id=f"batch_{batch_index + 1}"
+                    ".create_proposal_if_none_exists",
                     retries=retries,
                 )
                 accepted = wait_until_proposal_is_accepted(  # type: ignore
@@ -242,4 +243,4 @@ for network_name, network in ic_types.IC_NETWORKS.items():
 
         chain([timetable, wait_for_election, wait_for_other_rollouts], *batches)
 
-    rollout_ic_os_to_boundary_nodes()
+    rollout_ic_os_to_api_boundary_nodes()

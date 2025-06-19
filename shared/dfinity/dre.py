@@ -255,30 +255,30 @@ class DRE:
     def get_ic_os_version_deployment_proposals_for_boundary_nodes_and_revision(
         self,
         git_revision: str,
-        boundary_node_ids: list[str],
+        api_boundary_node_ids: list[str],
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevBoundaryNodesUpdateProposal]:
+    ) -> list[ic_types.AbbrevApiBoundaryNodesUpdateProposal]:
         return [
             r
-            for r in self.get_ic_os_version_deployment_proposals_for_boundary_nodes(
-                boundary_node_ids,
+            for r in self.get_ic_os_version_deployment_proposals_for_api_boundary_nodes(
+                api_boundary_node_ids,
                 limit=limit,
             )
             if r["payload"]["version"] == git_revision
         ]
 
-    def get_ic_os_version_deployment_proposals_for_boundary_nodes(
+    def get_ic_os_version_deployment_proposals_for_api_boundary_nodes(
         self,
-        boundary_node_ids: list[str],
+        api_boundary_node_ids: list[str],
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevBoundaryNodesUpdateProposal]:
+    ) -> list[ic_types.AbbrevApiBoundaryNodesUpdateProposal]:
         return [
-            cast(ic_types.AbbrevBoundaryNodesUpdateProposal, r)
+            cast(ic_types.AbbrevApiBoundaryNodesUpdateProposal, r)
             for r in self.get_proposals(
                 topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
                 limit=limit,
             )
-            if all(x in r["payload"].get("node_ids", []) for x in boundary_node_ids)
+            if all(x in r["payload"].get("node_ids", []) for x in api_boundary_node_ids)
             and r["payload"].get("version") is not None
         ]
 
@@ -380,14 +380,14 @@ class AuthenticatedDRE(DRE):
                 f"its standard output: {r.output.rstrip()}"
             )
 
-    def propose_to_update_subnet_boundary_nodes_version(
+    def propose_to_update_api_boundary_nodes_version(
         self,
-        boundary_node_ids: list[str],
+        api_boundary_node_ids: list[str],
         git_revision: str,
         dry_run: bool = False,
     ) -> int:
         """
-        Create proposal to update subnet to a blessed version.
+        Create proposal to update some API boundary nodes.
 
         Args:
         * dry_run: if true, tell ic-admin to only simulate the proposal.
@@ -400,17 +400,17 @@ class AuthenticatedDRE(DRE):
         """
         git_revision_short = git_revision[:7]
         proposal_title = (
-            f"Update {len(boundary_node_ids)} API boundary node(s)"
+            f"Update {len(api_boundary_node_ids)} API boundary node(s)"
             f" to replica version {git_revision_short}"
         )
         proposal_summary = (
             f"""Update API boundary nodes to GuestOS version """
             f"""[{git_revision}]({self.network.release_display_url}/{git_revision})"""
             f"""\n\nMotivation: update the API boundary nodes"""
-            f""" {', '.join(boundary_node_ids)}."""
+            f""" {", ".join(api_boundary_node_ids)}."""
         )
         nodesparms: list[str] = []
-        for n in boundary_node_ids:
+        for n in api_boundary_node_ids:
             nodesparms.append("--nodes")
             nodesparms.append(n)
 

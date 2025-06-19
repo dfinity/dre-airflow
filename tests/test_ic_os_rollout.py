@@ -3,14 +3,14 @@ import typing
 import unittest
 
 from dfinity.ic_os_rollout import (
-    boundary_node_batch_create,
-    boundary_node_batch_timetable,
+    api_boundary_node_batch_create,
+    api_boundary_node_batch_timetable,
     exponential_increase,
     next_day_of_the_week,
 )
 
 
-class TestBoundaryNodeRolloutPlanSpec(unittest.TestCase):
+class TestApiBoundaryNodeRolloutPlanSpec(unittest.TestCase):
     def test_various_days(self) -> None:
         """Tests that a valid rollout plan spec works."""
         now = datetime.datetime(2025, 6, 12, 11, 59, 10)  # This is a Thursday
@@ -37,7 +37,7 @@ def fmtdate(d: datetime.datetime, day: bool = False) -> str:
     return d.strftime("%A %H:%M")
 
 
-class TestBoundaryNodeBatchTimetable(unittest.TestCase):
+class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
     maxDiff = None
 
     def test_simple_case(self) -> None:
@@ -71,7 +71,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Saturday 09:00",
             "Saturday 10:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 20, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 20, now=now)]
         self.assertListEqual(exp, res)
 
     def test_tight_night_case(self) -> None:
@@ -105,7 +105,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Saturday 21:00",
             "Saturday 22:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 20, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 20, now=now)]
         self.assertListEqual(exp, res)
 
     def test_night_case(self) -> None:
@@ -127,7 +127,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Friday 23:00",
             "Saturday 00:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 8, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 8, now=now)]
         self.assertListEqual(exp, res)
 
     def test_barely_fits_in_window(self) -> None:
@@ -144,7 +144,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Friday 21:00",
             "Saturday 21:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 3, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 3, now=now)]
         self.assertListEqual(exp, res)
 
     def test_does_not_fit_in_window(self) -> None:
@@ -157,7 +157,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "minimum_minutes_per_batch": 121,
         }
         self.assertRaises(
-            ValueError, lambda: boundary_node_batch_timetable(plan, 3, now=now)
+            ValueError, lambda: api_boundary_node_batch_timetable(plan, 3, now=now)
         )
 
     def test_absent_start_day(self) -> None:
@@ -173,7 +173,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Thursday 21:00",
             "Friday 21:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 3, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 3, now=now)]
         self.assertListEqual(exp, res)
 
     def test_starts_tomorrow(self) -> None:
@@ -190,7 +190,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
             "Friday 21:00",
             "Saturday 21:00",
         ]
-        res = [fmtdate(d) for d in boundary_node_batch_timetable(plan, 3, now=now)]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 3, now=now)]
         self.assertListEqual(exp, res)
 
     def test_starts_next_week_tomorrow(self) -> None:
@@ -212,7 +212,7 @@ class TestBoundaryNodeBatchTimetable(unittest.TestCase):
         ]
         res = [
             fmtdate(d, day=True)
-            for d in boundary_node_batch_timetable(plan, 3, now=now)
+            for d in api_boundary_node_batch_timetable(plan, 3, now=now)
         ]
         self.assertListEqual(exp, res)
 
@@ -249,7 +249,7 @@ class TestExponentialIncrease(unittest.TestCase):
         )
 
 
-class TestBoundaryNodeBatchCreate(unittest.TestCase):
+class TestApiBoundaryNodeBatchCreate(unittest.TestCase):
     def expect(
         self,
         expected: list[str],
@@ -261,7 +261,7 @@ class TestBoundaryNodeBatchCreate(unittest.TestCase):
             expected,
             [
                 "".join(x)
-                for x in boundary_node_batch_create(nodes, batch_count, **kwargs)
+                for x in api_boundary_node_batch_create(nodes, batch_count, **kwargs)
             ],
         )
 
