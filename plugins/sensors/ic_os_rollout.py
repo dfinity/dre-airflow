@@ -10,6 +10,7 @@ from typing import Any, TypedDict, cast
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
+import dfinity.rollout_types as rollout_types
 from dfinity.ic_os_rollout import (
     SLACK_CHANNEL,
     SLACK_CONNECTION_ID,
@@ -178,8 +179,9 @@ class WaitForProposalAcceptance(ICRolloutSensorBaseOperator):
         )
 
         def per_status(
-            props: list[ic_types.AbbrevProposal], status: ic_types.ProposalStatus
-        ) -> list[ic_types.AbbrevProposal]:
+            props: list[ic_types.AbbrevSubnetUpdateProposal],
+            status: ic_types.ProposalStatus,
+        ) -> list[ic_types.AbbrevSubnetUpdateProposal]:
             return [p for p in props if p["status"] == status]
 
         executeds = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
@@ -663,6 +665,168 @@ class WaitForPreconditions(ICRolloutSensorBaseOperator):
                 )
 
             self.log.info(f"It is now safe to continue with the update of {subnet_id}.")
+
+
+def has_proposal_executed(
+    proposal_info: rollout_types.ProposalInfo,
+    network: ic_types.ICNetwork,
+    simulate: bool,
+) -> bool:
+    """
+    Waits until a proposal matching the input parameters has been adopted.
+
+    Returns PokeReturnValue(is_done=bool) indicating whether that has happened or not.
+
+    Intended to be wrapped by an Airflow @task.sensor decorator.
+    """
+    props = dre.DRE(network=network, subprocess_hook=SubprocessHook()).get_proposals()
+
+    props = [p for p in props if p["proposal_id"] == proposal_info["proposal_id"]]
+
+    def per_status(
+        props: list[ic_types.AbbrevProposal],
+        status: ic_types.ProposalStatus,
+    ) -> list[ic_types.AbbrevProposal]:
+        return [p for p in props if p["status"] == status]
+
+    executeds = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED)
+    opens = per_status(props, ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN)
+
+    if not opens and not executeds:
+        # No proposal exists.
+        if simulate:
+            # Ah, so this is why the proposal does not exist.
+            print(
+                "Simulating that the nonexistent proposal"
+                " has been created and accepted."
+                f" (simulate={simulate})"
+            )
+            return True
+
+        for p in props:
+            print(
+                "Matching proposal not open and not executed:"
+                f" {network.proposal_display_url}/{p}"
+            )
+
+        print(
+            "No matching proposal is either open or executed."
+            "  Waiting one minute until a proposal appears executed."
+        )
+        return False
+
+    if executeds:
+        for p in executeds:
+            print(f"Proposal: {p}")
+        print(
+            "Proposal"
+            f" {network.proposal_display_url}/{executeds[0]['proposal_id']}"
+            f" titled {executeds[0]['title']}"
+            " has executed.  We can proceed."
+        )
+        return False
+
+    # There is an open proposal, but not yet voted to execution.
+    if simulate:
+        print("Simulating that the open proposal has been created and accepted.")
+        return True
+
+    print(
+        "Proposal"
+        f" {network.proposal_display_url}/{opens[0]['proposal_id']}"
+        f" titled {opens[0]['title']}"
+        " is still open.  Waiting until it has executed."
+    )
+    return False
+
+
+def have_api_boundary_nodes_adopted_revision(
+    api_boundary_node_ids: list[str],
+    git_revision: str,
+    network: ic_types.ICNetwork,
+) -> bool:
+    print(
+        f"Waiting for specified boundary nodes to have adopted revision {git_revision}."
+    )
+
+    joined = "|".join(api_boundary_node_ids)
+    query = (
+        "sum(ic_orchestrator_info{"
+        + f'ic_node=~"{joined}"'
+        + "}) by (ic_active_version)"
+    )
+    print("::group::Querying Prometheus servers")
+    print(query)
+    print("::endgroup::")
+    res = prom.query_prometheus_servers(network.prometheus_urls, query)
+    if len(res) == 1 and res[0]["metric"]["ic_active_version"] == git_revision:
+        current_replica_count = int(res[0]["value"])
+        if current_replica_count >= len(api_boundary_node_ids):
+            print(
+                "All %s boundary nodes have updated to revision %s."
+                % (
+                    current_replica_count,
+                    git_revision,
+                )
+            )
+            return True
+        else:
+            print(
+                "The updated boundary node count is %d but %d is expected; waiting."
+                % (
+                    current_replica_count,
+                    len(api_boundary_node_ids),
+                )
+            )
+    if res:
+        print(
+            f"Upgrade of boundary nodes to {git_revision}"
+            " is not complete yet.  From Prometheus:"
+        )
+        for r in res:
+            print(r)
+    else:
+        print(
+            f"Upgrade has not begun yet -- Prometheus show no results for the"
+            f" specified boundary nodes {api_boundary_node_ids}."
+        )
+    return False
+
+
+def have_api_boundary_nodes_stopped_alerting(
+    api_boundary_node_ids: list[str],
+    network: ic_types.ICNetwork,
+) -> bool:
+    """
+    Check for 15 minutes of no alerts (pending or firing) on any of the BNs.
+
+    Return True if no alerts, False otherwise.
+    """
+    joineds = "|".join(api_boundary_node_ids)
+
+    print("Waiting for alerts on boundary nodes to subside.")
+    query = """
+        sum_over_time(
+            ALERTS{
+                ic_node=~"%(joineds)s",
+                severity="page"
+            }[15m]
+        )""" % (
+        {
+            "joineds": joineds,
+        }
+    )
+    print("::group::Querying Prometheus servers")
+    print(query)
+    print("::endgroup::")
+    res = prom.query_prometheus_servers(network.prometheus_urls, query)
+    if len(res) > 0:
+        print("There are still Prometheus alerts on the subnet:")
+        for r in res:
+            print(r)
+        return False
+    print("There are no more alerts on boundary nodes.")
+    return True
 
 
 if __name__ == "__main__":

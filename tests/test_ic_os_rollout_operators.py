@@ -2,15 +2,20 @@ import contextlib
 import unittest
 
 import mock
-from dfinity.ic_types import IC_NETWORKS, AbbrevProposal, ProposalStatus, ProposalTopic
-from operators.ic_os_rollout import CreateProposalIdempotently
+from dfinity.ic_types import (
+    IC_NETWORKS,
+    AbbrevProposal,
+    ProposalStatus,
+    ProposalTopic,
+)
+from operators.ic_os_rollout import CreateSubnetUpdateProposalIdempotently
 
 
 class TestOperators(unittest.TestCase):
     def test_instantiation(self) -> None:
         sid = "qn2sv-gibnj-5jrdq-3irkq-ozzdo-ri5dn-dynlb-xgk6d-kiq7w-cvop5-uae"
         gitr = "a1f503d20b7846375c74ce5f7d0f8f6620ab7511"
-        CreateProposalIdempotently(
+        CreateSubnetUpdateProposalIdempotently(
             task_id="xxx",
             subnet_id=sid,
             git_revision=gitr,
@@ -22,11 +27,11 @@ class TestOperators(unittest.TestCase):
 class TestCreateProposal(unittest.TestCase):
     network = IC_NETWORKS["mainnet"]
 
-    def _exercise(self) -> CreateProposalIdempotently:
+    def _exercise(self) -> CreateSubnetUpdateProposalIdempotently:
         def fake_xcom_push(key, value, context=None):  # type:ignore
             return
 
-        k = CreateProposalIdempotently(
+        k = CreateSubnetUpdateProposalIdempotently(
             task_id="x",
             subnet_id="yinp6-35cfo-wgcd2",
             git_revision="d5eb7683e144acb0f8850fedb29011f34bfbe4ac",
@@ -66,9 +71,7 @@ class TestCreateProposal(unittest.TestCase):
             "dfinity.prom_api.query_prometheus_servers"
         ) as n, mock.patch(
             "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
-        ) as p, mock.patch(
-            "airflow.models.variable.Variable.get"
-        ) as v:
+        ) as p, mock.patch("airflow.models.variable.Variable.get") as v:
             n.return_value = [{"value": 13}]
             v.return_value = "FAKE CERT"
             yield m, p

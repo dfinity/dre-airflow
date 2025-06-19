@@ -9,7 +9,7 @@ import operators.auto_rollout as auto_rollout
 import operators.github_rollout as github_rollout
 import operators.gsheets_rollout as gsheets_rollout
 import pendulum
-from dfinity.ic_os_rollout import DEFAULT_PLANS, PLAN_FORM
+from dfinity.ic_os_rollout import DEFAULT_SUBNET_ROLLOUT_PLANS, PLAN_FORM
 from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
@@ -62,7 +62,7 @@ for network_name, network in IC_NETWORKS.items():
                 description="How many days to look back for releases in release index.",
             ),
             "plan": Param(
-                default=DEFAULT_PLANS[network_name].strip(),
+                default=DEFAULT_SUBNET_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
                 description="A YAML-formatted string describing the rollout schedule.",
@@ -128,6 +128,5 @@ for network_name, network in IC_NETWORKS.items():
 
 
 if __name__ == "__main__":
-
     dag = DAGS["mainnet"]
     dag.test(run_conf={})

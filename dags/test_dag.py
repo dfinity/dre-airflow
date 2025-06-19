@@ -31,10 +31,10 @@ with DAG(
         >> test_operator.TestTask(
             task_id="task_2",
         )
-        >> TimeDeltaSensorAsync(
+        >> TimeDeltaSensorAsync(  # type: ignore
             task_id="wait_2_minutes",
             delta=datetime.timedelta(minutes=2),
-        )  # type: ignore
+        )
         >> test_operator.TestTask(
             task_id="task_3",
         )

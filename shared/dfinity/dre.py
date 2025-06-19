@@ -50,7 +50,6 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
 
 
 class DRE:
-
     def _prep(self) -> None:
         d = self.base_dir
         os.makedirs(d, exist_ok=True)
@@ -140,7 +139,11 @@ class DRE:
                     pem, nid = [], []
                 cmd = [self.dre_path] + nnsurl + nid + pem + list(args)
                 if dry_run:
-                    cmd.append("--dry-run")
+                    try:
+                        pos = cmd.index("propose")
+                        cmd.insert(pos + 1, "--dry-run")
+                    except ValueError:
+                        cmd.append("--dry-run")
                 if yes and not dry_run:
                     # In dry-run mode, this kicks in, but cmd.index raises
                     # ValueError when it cannot find the value.
@@ -224,30 +227,59 @@ class DRE:
         git_revision: str,
         subnet_id: str,
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevProposal]:
+    ) -> list[ic_types.AbbrevSubnetUpdateProposal]:
         return [
             r
-            for r in self.get_proposals(
-                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+            for r in self.get_ic_os_version_deployment_proposals_for_subnet(
+                subnet_id,
                 limit=limit,
             )
-            if r["payload"].get("subnet_id") == subnet_id
-            and r["payload"].get("replica_version_id") == git_revision
+            if r["payload"]["replica_version_id"] == git_revision
         ]
 
     def get_ic_os_version_deployment_proposals_for_subnet(
         self,
         subnet_id: str,
         limit: int = 1000,
-    ) -> list[ic_types.AbbrevProposal]:
+    ) -> list[ic_types.AbbrevSubnetUpdateProposal]:
         return [
-            r
+            cast(ic_types.AbbrevSubnetUpdateProposal, r)
             for r in self.get_proposals(
                 topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
                 limit=limit,
             )
             if r["payload"].get("subnet_id") == subnet_id
             and r["payload"].get("replica_version_id") is not None
+        ]
+
+    def get_ic_os_version_deployment_proposals_for_boundary_nodes_and_revision(
+        self,
+        git_revision: str,
+        api_boundary_node_ids: list[str],
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevApiBoundaryNodesUpdateProposal]:
+        return [
+            r
+            for r in self.get_ic_os_version_deployment_proposals_for_api_boundary_nodes(
+                api_boundary_node_ids,
+                limit=limit,
+            )
+            if r["payload"]["version"] == git_revision
+        ]
+
+    def get_ic_os_version_deployment_proposals_for_api_boundary_nodes(
+        self,
+        api_boundary_node_ids: list[str],
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevApiBoundaryNodesUpdateProposal]:
+        return [
+            cast(ic_types.AbbrevApiBoundaryNodesUpdateProposal, r)
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if all(x in r["payload"].get("node_ids", []) for x in api_boundary_node_ids)
+            and r["payload"].get("version") is not None
         ]
 
     def get_subnet_list(self) -> list[str]:
@@ -269,7 +301,6 @@ class DRE:
 
 
 class AuthenticatedDRE(DRE):
-
     network: ic_types.ICNetworkWithPrivateKey
 
     def upgrade_unassigned_nodes(
@@ -349,6 +380,66 @@ class AuthenticatedDRE(DRE):
                 f"its standard output: {r.output.rstrip()}"
             )
 
+    def propose_to_update_api_boundary_nodes_version(
+        self,
+        api_boundary_node_ids: list[str],
+        git_revision: str,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create proposal to update some API boundary nodes.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        git_revision_short = git_revision[:7]
+        proposal_title = (
+            f"Update {len(api_boundary_node_ids)} API boundary node(s)"
+            f" to replica version {git_revision_short}"
+        )
+        proposal_summary = (
+            f"""Update API boundary nodes to GuestOS version """
+            f"""[{git_revision}]({self.network.release_display_url}/{git_revision})"""
+            f"""\n\nMotivation: update the API boundary nodes"""
+            f""" {", ".join(api_boundary_node_ids)}."""
+        )
+        nodesparms: list[str] = []
+        for n in api_boundary_node_ids:
+            nodesparms.append("--nodes")
+            nodesparms.append(n)
+
+        r = self.run(
+            "propose",
+            "--forum-post-link=omit",
+            "deploy-guestos-to-some-api-boundary-nodes",
+            "--proposal-title",
+            proposal_title,
+            "--summary",
+            proposal_summary,
+            "--version",
+            git_revision,
+            *nodesparms,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
+
 
 if __name__ == "__main__":
     network = ic_types.ICNetworkWithPrivateKey(
@@ -369,12 +460,14 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
         subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
         git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
     )
-    p = d.get_proposals(
+    p2 = d.get_proposals(
         limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
     )
 
     pprint.pprint(p)
     print(len(p))
+    pprint.pprint(p2)
+    print(len(p2))
     # p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
     # print("Stdout", p.output)
     # print("Return code:", p.exit_code)
