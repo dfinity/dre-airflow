@@ -199,7 +199,7 @@ class AbbrevProposal(TypedDict):
     'summary': 'Update 9 API boundary node(s) to '
                 'f8131bfbc2d339716a9cff06e04de49a68e5a80b '
                 '\n'nMotivation...',
-    'title': 'Update 9 API boundary node(s) to f8131bf',
+    'title': 'Update 1 API boundary node(s) to f8131bf',
     'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
     """
 
