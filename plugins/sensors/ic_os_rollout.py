@@ -753,7 +753,7 @@ def have_boundary_nodes_adopted_revision(
     query = (
         "sum(ic_orchestrator_info{"
         + f'ic_node=~"{joined}"'
-        + "}) by (ic_active_version, ic_subnet)"
+        + "}) by (ic_active_version)"
     )
     print("::group::Querying Prometheus servers")
     print(query)
