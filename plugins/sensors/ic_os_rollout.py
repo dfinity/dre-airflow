@@ -803,12 +803,12 @@ def have_api_boundary_nodes_stopped_alerting(
     """
     joineds = "|".join(api_boundary_node_ids)
 
-    print("Waiting for alerts on boundary nodes to subside.")
+    print("Waiting for alerts on API boundary nodes to subside.")
     query = """
         sum_over_time(
             ALERTS{
                 ic_node=~"%(joineds)s",
-                severity="page"
+                severity=~"page|notify"
             }[15m]
         )""" % (
         {
