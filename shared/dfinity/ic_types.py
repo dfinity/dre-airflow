@@ -193,8 +193,7 @@ class AbbrevProposal(TypedDict):
 
     {'proposal_id': 102768,
     'payload': {'version': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
-                'node_ids': ['4zbus-z2bmt-ilreg-'
-                    'xakz4-6tyre-hsqj4-slb4g-zjwqo-snjcc-iqphi-3qe']},
+                'node_ids': ['4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae']},
     'proposer': '80',
     'status': 'EXECUTED',
     'summary': 'Update 9 API boundary node(s) to '
