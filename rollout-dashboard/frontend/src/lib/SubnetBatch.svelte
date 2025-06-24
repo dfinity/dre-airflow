@@ -2,9 +2,13 @@
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
-    import { type Batch, batchStateComment, batchStateIcon } from "./types";
+    import {
+        type SubnetBatch,
+        subnetStateComment,
+        subnetStateIcon,
+    } from "./types";
     export let batch_num: String;
-    export let batch: Batch;
+    export let batch: SubnetBatch;
 
     function selectTextOnFocus(node: HTMLDivElement | HTMLAnchorElement) {
         const handleFocus = (event: Event) => {
@@ -55,10 +59,10 @@
                     target="_blank"
                     class="subnet_state"
                     data-sveltekit-preload-data="off"
-                    title={batchStateComment(subnet)}
+                    title={subnetStateComment(subnet)}
                 >
                     <div class="subnet_state_icon">
-                        {batchStateIcon(subnet.state)}
+                        {subnetStateIcon(subnet)}
                     </div></a
                 >
                 <a

@@ -1,5 +1,6 @@
 use async_recursion::async_recursion;
 use chrono::{DateTime, TimeDelta, Utc};
+use indexmap::IndexMap;
 use log::{debug, trace, warn};
 use regex::Regex;
 use reqwest::cookie::Jar;
@@ -168,7 +169,7 @@ pub enum DagRunState {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DagRunsResponseItem {
-    pub conf: HashMap<String, serde_json::Value>,
+    pub conf: IndexMap<String, serde_json::Value>,
     /// dag_run_id is unique, enforced by Airflow.
     pub dag_run_id: String,
     pub dag_id: String,
@@ -1046,7 +1047,7 @@ impl AirflowClient {
         limit: usize,
         offset: usize,
         filter: &DagsQueryFilter<'_>,
-        order_by: Option<String>, // FIXME: use structural typing here.
+        order_by: Option<String>,
     ) -> Result<DagsResponse, AirflowError> {
         let qpairs = filter.as_queryparams();
         let qparams: querystring::QueryParams =
@@ -1245,7 +1246,7 @@ impl AirflowClient {
         limit: usize,
         offset: usize,
         filters: &EventLogsResponseFilters<'_>,
-        order_by: Option<String>, // FIXME: use structural typing here.
+        order_by: Option<String>,
     ) -> Result<EventLogsResponse, AirflowError> {
         let qpairs = filters.as_queryparams();
         let qparams: querystring::QueryParams =

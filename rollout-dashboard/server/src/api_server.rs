@@ -1,4 +1,4 @@
-use crate::live_state::{AirflowStateSyncer, Live, RolloutInfoCacheResponse, RolloutsView};
+use crate::live_state::{AirflowStateSyncer, CurrentState, Live};
 use async_stream::try_stream;
 use axum::extract::Query;
 use axum::http::StatusCode;
@@ -8,9 +8,11 @@ use axum::routing::get;
 use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
-use rollout_dashboard::types::Rollout;
-use rollout_dashboard::types::RolloutEngineState;
-use rollout_dashboard::types::RolloutsViewDelta;
+use rollout_dashboard::types::v2::StateResponse;
+use rollout_dashboard::types::{
+    unstable, v1,
+    v2::{sse as SSE, DeletedRollout, Error as SError, Rollout, State as SOK},
+};
 use serde::{de, Deserialize, Deserializer};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
@@ -41,6 +43,21 @@ struct SseHandlerParameters {
     incremental: Option<bool>,
 }
 
+struct DisconnectionGuard {}
+
+impl Default for DisconnectionGuard {
+    fn default() -> Self {
+        debug!(target: "server::sse", "New client connected.");
+        Self {}
+    }
+}
+
+impl Drop for DisconnectionGuard {
+    fn drop(&mut self) {
+        debug!(target: "server::sse", "Client disconnected.");
+    }
+}
+
 pub(crate) struct ApiServer {
     state_syncer: Arc<AirflowStateSyncer<Live>>,
 }
@@ -51,113 +68,277 @@ impl ApiServer {
     }
 
     // #[debug_handler]
-    async fn get_rollout_data(&self) -> Result<Json<VecDeque<Rollout>>, (StatusCode, String)> {
-        match self.state_syncer.get_current_rollout_status().await {
-            Ok((_, rollouts)) => Ok(Json(rollouts)),
-            Err(e) => Err(e),
+    async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
+        match self.state_syncer.get_current_state().await {
+            StateResponse::State(s) => Ok(Json(
+                s.rollouts
+                    .into_iter()
+                    .filter_map(|r| r.try_into().ok())
+                    .collect(),
+            )),
+            StateResponse::Error(SError { code, message }) => Err((code, message)),
         }
     }
 
     // #[debug_handler]
-    async fn get_engine_state(&self) -> Result<Json<RolloutEngineState>, (StatusCode, String)> {
-        match self.state_syncer.get_current_rollout_status().await {
-            Ok((state, _)) => Ok(Json(state)),
-            Err(e) => Err(e),
+    async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
+        match self.state_syncer.get_current_state().await {
+            StateResponse::State(s) => Ok(Json(s.rollout_engine_states.into())),
+            StateResponse::Error(SError { code, message }) => Err((code, message)),
         }
     }
 
     // #[debug_handler]
-    async fn get_cache(&self) -> Result<Json<Vec<RolloutInfoCacheResponse>>, (StatusCode, String)> {
+    async fn get_cache(
+        &self,
+    ) -> Result<Json<Vec<unstable::FlowCacheResponse>>, (StatusCode, String)> {
         Ok(Json(self.state_syncer.get_cache().await))
     }
 
-    /// Produce an SSE stream structured as a dictionary:
-    /// * rollouts: appears and contains a list of Rollout when rollouts have been updated and
-    ///             the caller did not indicate delta_support.  If the caller indicated
-    ///             delta_support, then this appears only on initial connection, or after a
-    ///             backend error has been reported in a prior message.
-    /// * error: always appears, but only contains an error (is non-null) when there was an
-    ///          error polling Airflow.
-    /// * updated: when the caller indicates delta_support, this appears and updated rollouts
-    ///            are listed here.
-    /// * deleted: when the caller indicates delta_support, this appears and lists the names
-    ///            of the rollouts that have disappeared.
-    /// * engine_state: explains the state of the rollout engine.  Only present if no error
-    ///                 is present.
-    pub fn produce_rollouts_sse_stream(
-        &self,
+    async fn get_state(&self) -> Result<Json<SOK>, (StatusCode, String)> {
+        match self.state_syncer.get_current_state().await {
+            StateResponse::State(s) => Ok(Json(s)),
+            StateResponse::Error(SError { code, message }) => Err((code, message)),
+        }
+    }
+
+    /// Given an initial state and a final state, produce
+    /// zero or more SSE messages representing the state changes.
+    ///
+    /// When rollout engine states change, and delta support
+    /// is enabled, all rollout states are returned in the delta
+    /// message, not just one.
+    fn produce_sse_messages(
+        self: Arc<Self>,
+        current_rollout_data: &StateResponse,
+        last_rollout_data: &Option<StateResponse>,
+        delta_support: bool,
+    ) -> Vec<SSE::Message> {
+        match (&current_rollout_data, &last_rollout_data, delta_support) {
+            // First sync or error before.  Send full sync.
+            (StateResponse::State(state), None | Some(StateResponse::Error(_)), _) => {
+                vec![SSE::Message::CompleteState(state.clone())]
+            }
+            // Error after a good update.  Send error.
+            (StateResponse::Error(e), None | Some(StateResponse::State(_)), _) => {
+                vec![SSE::Message::Error(e.clone())]
+            }
+            // Error after an error.  Only send update if errors differ.
+            (StateResponse::Error(e), Some(StateResponse::Error(olde)), _) => {
+                if e == olde {
+                    vec![]
+                } else {
+                    vec![SSE::Message::Error(e.clone())]
+                }
+            }
+            // Last time was a good update, but delta support is not requested.  Send full sync.
+            (
+                StateResponse::State(SOK {
+                    rollouts: new_rollouts,
+                    rollout_engine_states: new_rollout_engine_states,
+                }),
+                Some(StateResponse::State(SOK { .. })),
+                false,
+            ) => vec![
+                (SSE::Message::CompleteState(SOK {
+                    rollouts: new_rollouts.clone(),
+                    rollout_engine_states: new_rollout_engine_states.clone(),
+                })),
+            ],
+            // Last time was a good update and sync is enabled.  Send differential sync.
+            (
+                StateResponse::State(SOK {
+                    rollouts: new_rollouts,
+                    rollout_engine_states: new_rollout_engine_states,
+                }),
+                Some(StateResponse::State(SOK {
+                    rollouts: old_rollouts,
+                    rollout_engine_states: old_rollout_engine_states,
+                })),
+                true,
+            ) => {
+                let new_names = new_rollouts
+                    .iter()
+                    .map(|r| r.key())
+                    .collect::<HashSet<String>>();
+                let old_rollouts_map = old_rollouts.iter().map(|r| (r.key(), r)).collect::<HashMap<
+                    String,
+                    &Rollout,
+                >>(
+                );
+                let updated = new_rollouts
+                    .iter()
+                    .filter_map(|r| match old_rollouts_map.get(&r.key()) {
+                        None => Some(r.clone()),
+                        Some(old_rollout) => match r.update_count() != old_rollout.update_count() {
+                            true => Some(r.clone()),
+                            false => None,
+                        },
+                    })
+                    .collect::<VecDeque<Rollout>>();
+                let deleted = old_rollouts
+                    .iter()
+                    .filter_map(|r| match new_names.contains(&r.key()) {
+                        true => None,
+                        false => Some(DeletedRollout {
+                            kind: r.kind(),
+                            name: r.name(),
+                        }),
+                    })
+                    .collect::<VecDeque<DeletedRollout>>();
+                let mut ret = vec![];
+                if !updated.is_empty() || !deleted.is_empty() {
+                    ret.push(SSE::Message::RolloutsDelta(SSE::RolloutsDelta {
+                        updated,
+                        deleted,
+                    }))
+                }
+                if new_rollout_engine_states != old_rollout_engine_states {
+                    ret.push(SSE::Message::RolloutEngineStatesUpdate(
+                        new_rollout_engine_states.clone(),
+                    ))
+                }
+                ret
+            }
+        }
+    }
+
+    pub fn compat_convert_v2_sse_state_to_v1(
+        self: &Arc<Self>,
+        message: SSE::Message,
+        last_engine_state: &mut v1::RolloutEngineState,
+    ) -> v1::DeltaState {
+        match message {
+            SSE::Message::CompleteState(SOK {
+                rollouts,
+                rollout_engine_states,
+            }) => {
+                let rollouts: VecDeque<v1::Rollout> = rollouts
+                    .into_iter()
+                    .filter_map(|r| v1::Rollout::try_from(r).ok())
+                    .collect();
+                let engine_state = v1::RolloutEngineState::from(rollout_engine_states);
+                *last_engine_state = engine_state.clone();
+                v1::DeltaState::full(&engine_state, &rollouts)
+            }
+            SSE::Message::Error(SError { code, message }) => {
+                v1::DeltaState::error(&(code, message))
+            }
+            SSE::Message::RolloutsDelta(SSE::RolloutsDelta { updated, deleted }) => {
+                let updated: VecDeque<v1::Rollout> = updated
+                    .into_iter()
+                    .filter_map(|r| v1::Rollout::try_from(r).ok())
+                    .collect();
+                let deleted: VecDeque<String> = deleted
+                    .into_iter()
+                    .filter(|r| r.kind == "rollout_ic_os_to_mainnet_subnets")
+                    .map(|r| r.name)
+                    .collect();
+                v1::DeltaState::partial(&last_engine_state.clone(), &updated, &deleted)
+            }
+            SSE::Message::RolloutEngineStatesUpdate(rollout_engine_states) => {
+                let engine_state = match rollout_engine_states.is_empty() {
+                    true => last_engine_state.clone(),
+                    false => {
+                        // This depends on the delta message
+                        // returning all rollout engine states,
+                        // not just a few.  Thankfully, the
+                        // function which computes this message
+                        // does just that.
+                        let x = v1::RolloutEngineState::from(rollout_engine_states);
+                        *last_engine_state = x.clone();
+                        x
+                    }
+                };
+                let updated = VecDeque::new();
+                let deleted = VecDeque::new();
+                v1::DeltaState::partial(&engine_state, &updated, &deleted)
+            }
+        }
+    }
+
+    pub fn compat_stream_state(
+        self: Arc<Self>,
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
-        struct DisconnectionGuard {}
+        let mut subscription = self.state_syncer.subscribe_to_state_updates();
 
-        impl Default for DisconnectionGuard {
-            fn default() -> Self {
-                debug!(target: "server::sse", "New client connected.");
-                Self {}
-            }
-        }
+        let stream = {
+            try_stream! {
+                // Set up something that will be dropped (thus log) when SSE is disconnected.
+                let disconnection_guard = DisconnectionGuard::default();
 
-        impl Drop for DisconnectionGuard {
-            fn drop(&mut self) {
-                debug!(target: "server::sse", "Client disconnected.");
-            }
-        }
+                // Set an initial message to diff the first broadcast message against.
+                let mut last_rollout_data: Option<CurrentState> = None;
+                let mut last_engine_state: v1::RolloutEngineState = v1::RolloutEngineState::Active;
 
-        let mut stream_rx = self.state_syncer.subscribe_to_state_updates();
-
-        let stream = try_stream! {
-            // Set up something that will be dropped (thus log) when SSE is disconnected.
-            let disconnection_guard = DisconnectionGuard::default();
-
-            // Set an initial message to diff the first broadcast message against.
-            let mut last_rollout_data: RolloutsView = Err((StatusCode::OK, "initial, ignored, nothing matches this".to_string()));
-
-            loop {
-                let current_rollout_data = stream_rx.borrow_and_update().clone();
-
-                let message = match (&current_rollout_data, &last_rollout_data) {
-                    // Error before.  Send full sync.
-                    (Ok((engine_state, new_rollouts)), Err(_)) => Some(RolloutsViewDelta::full(engine_state, new_rollouts)),
-                    // Last time was a good update.  Send differential sync.
-                    (Ok((engine_state, new_rollouts)), Ok((_, old_rollouts))) => {
-                        let new_names = new_rollouts.iter().map(|r| r.name.clone()).collect::<HashSet<String>>();
-                        let old_rollouts_map = old_rollouts.iter().map(|r| (r.name.clone(), r)).collect::<HashMap<String, &Rollout>>();
-                            let updated = new_rollouts.iter().filter_map(|r| match old_rollouts_map.get(&r.name) { None => Some(r.clone()), Some(old_rollout) => match r.update_count != old_rollout.update_count {true => Some(r.clone()), false => None}}).collect::<VecDeque<Rollout>>();
-                            let deleted = old_rollouts.iter().filter_map(|r| match new_names.contains(&r.name) { true => None, false => Some(r.name.clone())}).collect::<VecDeque<String>>();
-                            match updated.is_empty() && deleted.is_empty() {
-                                true => None,
-                                false => match delta_support {
-                                    false => Some(RolloutsViewDelta::full(engine_state, new_rollouts)),
-                                    true => Some(RolloutsViewDelta::partial(
-                                        engine_state,
-                                        &updated,
-                                        &deleted,
-                                    )),
-                                }
-                            }
+                loop {
+                    let current_rollout_data: CurrentState = subscription.borrow_and_update().clone();
+                    let messages: Vec<SSE::Message> = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
+                    for message in messages.into_iter() {
+                        let mm = self.compat_convert_v2_sse_state_to_v1(message, &mut last_engine_state);
+                        yield sse::Event::default().json_data(&mm).unwrap()
                     }
-                    // Error after a good update.  Send error.
-                    (Err(e), Ok(_)) => Some(RolloutsViewDelta::error(e)),
-                    // Error after an error.  Only send update if errors differ.
-                    (Err(e), Err(olde)) => match e == olde {
-                        true => None,
-                        false => Some(RolloutsViewDelta::error(e)),
-                    },
-                };
-
-                match &message {
-                    Some(m) => yield sse::Event::default().data(serde_json::to_string(m).unwrap()),
-                    None => ()
+                    last_rollout_data = Some(current_rollout_data);
+                    if subscription.changed().await.is_err() {
+                        break;
+                    }
                 }
 
-                last_rollout_data = current_rollout_data;
-                if stream_rx.changed().await.is_err() {
-                    break;
-                }
+                // Drop the disconnection guard to log the message that the client disconnected.
+                drop(disconnection_guard);
             }
+        };
 
-            // Drop the disconnection guard to log the message that the client disconnected.
-            drop(disconnection_guard);
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keepalive"),
+        )
+    }
+
+    pub fn stream_state(
+        self: Arc<Self>,
+        delta_support: bool,
+    ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
+        let mut subscription = self.state_syncer.subscribe_to_state_updates();
+
+        let stream = {
+            try_stream! {
+                // Set up something that will be dropped (thus log) when SSE is disconnected.
+                let disconnection_guard = DisconnectionGuard::default();
+
+                // Set an initial message to diff the first broadcast message against.
+                let mut last_rollout_data: Option<CurrentState> = None;
+
+                loop {
+                    let current_rollout_data: CurrentState = subscription.borrow_and_update().clone();
+                    let messages = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
+                    for message in messages.iter() {
+                        match message {
+                            SSE::Message::CompleteState(sok) => {
+                                yield sse::Event::default().event("State").json_data(sok).unwrap();
+                            }
+                            SSE::Message::Error(serr) => {
+                                yield sse::Event::default().event("Error").json_data(serr).unwrap();
+                            }
+                            SSE::Message::RolloutsDelta(sdelta) => {
+                                yield sse::Event::default().event("RolloutsDelta").json_data(sdelta).unwrap();
+                            }
+                            SSE::Message::RolloutEngineStatesUpdate(sdelta) => {
+                                yield sse::Event::default().event("RolloutEngineStates").json_data(sdelta).unwrap();
+                            }
+                        }
+                    }
+                    last_rollout_data = Some(current_rollout_data);
+                    if subscription.changed().await.is_err() {
+                        break;
+                    }
+                }
+
+                // Drop the disconnection guard to log the message that the client disconnected.
+                drop(disconnection_guard);
+            }
         };
 
         Sse::new(stream).keep_alive(
@@ -187,13 +368,30 @@ impl ApiServer {
                     let options: SseHandlerParameters = options.0;
                     async move {
                         compat_sse_handler_ref
-                            .produce_rollouts_sse_stream(options.incremental.unwrap_or_default())
+                            .compat_stream_state(options.incremental.unwrap_or_default())
                     }
                 }),
             )
             .route(
                 "/sse/rollouts_view",
-                get(move || async move { sse_handler_ref.produce_rollouts_sse_stream(true) }),
+                get(move || async move { sse_handler_ref.compat_stream_state(true) }),
+            )
+    }
+
+    fn v2_api(self: Arc<Self>) -> Router {
+        let state_handler_ref = self.clone();
+        let sse_handler_ref = self.clone();
+        Router::new()
+            .route(
+                "/state",
+                get(move || async move { state_handler_ref.get_state().await }),
+            )
+            .route(
+                "/sse",
+                get(move |options: Query<SseHandlerParameters>| {
+                    let options: SseHandlerParameters = options.0;
+                    async move { sse_handler_ref.stream_state(options.incremental.unwrap_or(true)) }
+                }),
             )
     }
 
@@ -208,6 +406,7 @@ impl ApiServer {
     pub fn routes(self: Arc<Self>) -> Router {
         Router::new()
             .nest("/api/v1", self.clone().v1_api())
+            .nest("/api/v2", self.clone().v2_api())
             .nest("/api/unstable", self.unstable_api())
     }
 }
