@@ -55,7 +55,6 @@ pub mod v1 {
         /// A list of subnets to be upgraded as part of this batch.
         pub subnets: Vec<Subnet>,
     }
-    impl Batch {}
 
     #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Deserialize)]
     #[serde(rename_all = "snake_case")]
