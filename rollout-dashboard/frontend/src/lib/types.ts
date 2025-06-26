@@ -83,14 +83,14 @@ export type DAGInfo = {
 export type RolloutKind = "rollout_ic_os_to_mainnet_subnets" | "rollout_ic_os_to_mainnet_api_boundary_nodes";
 const RolloutKindName = {
     rollout_ic_os_to_mainnet_subnets: "GuestOS rollout",
-    rollout_ic_os_to_mainnet_api_boundary_nodes: "APIBoundaryNodeRollout",
+    rollout_ic_os_to_mainnet_api_boundary_nodes: "API boundary node rollout",
 };
 export function rolloutKindName(rollout: Rollout | keyof typeof RolloutKindName): String {
     var state: keyof typeof RolloutKindName;
-    if (rollout instanceof String) {
-        state = rollout as keyof typeof RolloutKindName;
-    } else {
+    if (typeof rollout === "object") {
         state = (rollout as Rollout).kind;
+    } else {
+        state = rollout as keyof typeof RolloutKindName;
     }
     return RolloutKindName[state];
 }

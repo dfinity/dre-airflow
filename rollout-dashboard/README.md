@@ -37,7 +37,9 @@ set to the correct value (though sometimes the defaults are OK):
 4. `RUST_LOG` set to `info` ideally to observe at least log
    messages of info level and above.
 5. `MAX_ROLLOUTS` optionally set to a nonzero positive integer
-   to limit the number of rollouts (default 15).
+   to limit the number of rollouts (default 10).  This determines
+   the number of rollouts *per rollout kind* fetched during each
+   update.
 6. `REFRESH_INTERVAL` optionally set to a nonzero positive integer
    as the number of seconds to wait between queries to Airflow.
 

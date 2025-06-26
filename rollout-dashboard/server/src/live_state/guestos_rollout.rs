@@ -1,30 +1,25 @@
-use super::{
-    max_option_date, python, DagRunUpdateType, FlowCacheViewable, RolloutDataGatherError,
-    TaskInstanceTopologicalSorter, TASK_INSTANCE_LIST_LIMIT,
-};
+use super::{RolloutDataGatherError, python};
 use chrono::{DateTime, Utc};
-use futures::future::join_all;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use log::{debug, info, trace, warn};
+use log::{info, trace, warn};
 use regex::Regex;
 use rollout_dashboard::airflow_client::{
-    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, TaskInstanceRequestFilters,
-    TaskInstanceState, TaskInstancesResponseItem,
+    AirflowClient, AirflowError, DagRunState, DagRunsResponseItem, TaskInstanceState,
+    TaskInstancesResponseItem,
 };
 use rollout_dashboard::types::v2::{
-    Batch, DAGInfo, RolloutIcOsToMainnetSubnets, RolloutIcOsToMainnetSubnetsState as State, Subnet,
-    SubnetRolloutState as SubnetState,
+    Batch, RolloutIcOsToMainnetSubnets, RolloutIcOsToMainnetSubnetsState as State, RolloutKind,
+    Subnet, SubnetRolloutState as SubnetState,
 };
 use std::cmp::min;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
 use std::fmt::{self, Display};
-use std::future::Future;
 use std::num::ParseIntError;
-use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{vec, vec::Vec};
+
+const LOG_TARGET: &str = "live_state::guestos_rollout";
 
 lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
@@ -80,7 +75,7 @@ impl Schedule {
                         ScheduleStateForTask::Valid {
                             batch_map: cached_schedule,
                         } => ScheduleFreshness::UpToDate(cached_schedule.clone()),
-                        ScheduleStateForTask::Missing | ScheduleStateForTask::Invalid { .. } => {
+                        ScheduleStateForTask::Missing | ScheduleStateForTask::Invalid => {
                             ScheduleFreshness::Invalid
                         }
                     }
@@ -113,42 +108,6 @@ impl Schedule {
                 Some(_) => ScheduleStateForTask::Invalid,
             },
         }
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct RolloutInfoCache {
-    task_instances: HashMap<String, HashMap<Option<usize>, TaskInstancesResponseItem>>,
-    dispatch_time: DateTime<Utc>,
-    note: Option<String>,
-    schedule: Schedule,
-    last_update_time: Option<DateTime<Utc>>,
-    update_count: usize,
-}
-
-impl From<&DagRunsResponseItem> for RolloutInfoCache {
-    fn from(dag_run: &DagRunsResponseItem) -> Self {
-        Self {
-            task_instances: HashMap::new(),
-            dispatch_time: dag_run.logical_date,
-            note: dag_run.note.clone(),
-            schedule: Schedule::default(),
-            last_update_time: None,
-            update_count: 0,
-        }
-    }
-}
-
-impl FlowCacheViewable for RolloutInfoCache {
-    fn get_task_instances(&self) -> Vec<TaskInstancesResponseItem> {
-        self.task_instances
-            .iter()
-            .flat_map(|(_, tasks)| tasks.iter().map(|(_, task)| task.clone()))
-            .collect()
-    }
-
-    fn get_flow_info(&self) -> (DateTime<Utc>, Option<DateTime<Utc>>, usize) {
-        (self.dispatch_time, self.last_update_time, self.update_count)
     }
 }
 
@@ -256,14 +215,15 @@ fn annotate_subnet_state(
         None => batch.subnets.iter_mut(),
         Some(index) => batch.subnets[index..=index].iter_mut(),
     } {
+        let tgt = &(LOG_TARGET.to_owned() + "::annotate_subnet_state");
         let new_state = state.clone();
         if (only_decrease && new_state < subnet.state)
             || (!only_decrease && new_state != subnet.state)
         {
-            trace!(target: "rollout_data::annotate_subnet_state", "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
+            trace!(target: tgt, "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
             subnet.state = new_state.clone();
         } else {
-            trace!(target: "rollout_data::annotate_subnet_state", "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
+            trace!(target: tgt, "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
         }
         if new_state == subnet.state {
             subnet.comment = format!(
@@ -296,253 +256,35 @@ fn annotate_subnet_state(
     state
 }
 
-pub(super) struct RolloutUpdater<'a> {
-    dag_run: &'a DagRunsResponseItem,
-    cache_entry: RolloutInfoCache,
+#[derive(Clone, Default)]
+pub(super) struct Parser {
+    schedule: Schedule,
 }
 
-impl<'a> RolloutUpdater<'_> {
-    pub(super) fn new(
-        dag_run: &'a DagRunsResponseItem,
-        cache_entry: RolloutInfoCache,
-    ) -> RolloutUpdater<'a> {
-        RolloutUpdater {
-            dag_run,
-            cache_entry,
-        }
+impl Parser {
+    pub(super) fn new() -> Self {
+        Self::default()
     }
-}
 
-impl<'a> RolloutUpdater<'a> {
-    pub(super) async fn update(
+    pub(super) async fn reparse(
         &mut self,
-        airflow_api: &AirflowClient,
-        sorter: TaskInstanceTopologicalSorter,
-        last_event_log_update: Option<DateTime<Utc>>,
-        dag_run_update_type: &DagRunUpdateType,
-    ) -> Result<(RolloutIcOsToMainnetSubnets, RolloutInfoCache), RolloutDataGatherError> {
-        // If the note of the rollout has changed,
-        // note that this has been updated.
-        let cache_entry = &mut self.cache_entry;
-        let dag_run = &self.dag_run;
-
-        // Same for the dispatch time.
-        // In this case, the rollout was restarted completely.
-        // We must evict the task cache.
-        if cache_entry.dispatch_time != dag_run.logical_date {
-            cache_entry.dispatch_time = dag_run.logical_date;
-            cache_entry.schedule = Schedule::default();
-            cache_entry.task_instances = HashMap::new();
-            cache_entry.update_count += 1;
-        }
-
-        if cache_entry.note != dag_run.note {
-            cache_entry.note.clone_from(&dag_run.note);
-            cache_entry.update_count += 1;
-        }
-
-        type TaskInstanceResponse = Result<Vec<TaskInstancesResponseItem>, AirflowError>;
-
-        let last_update_time = cache_entry.last_update_time;
-        let dag_id = dag_run.dag_id.as_str();
-        let dag_run_id = dag_run.dag_run_id.as_str();
-
-        let requests: Vec<Pin<Box<dyn Future<Output = TaskInstanceResponse> + Send>>> = match (
-            dag_run_update_type,
-            cache_entry.task_instances.is_empty(),
-        ) {
-            (_, true) | (DagRunUpdateType::AllTaskInstances, _) => {
-                debug!(target:"rollout_data::get_rollout_data", "{}: collecting data about all task instances", dag_run.dag_run_id);
-                vec![Box::pin(async move {
-                    match airflow_api
-                        .task_instances(
-                            dag_id,
-                            dag_run.dag_run_id.as_str(),
-                            TASK_INSTANCE_LIST_LIMIT,
-                            0,
-                            TaskInstanceRequestFilters::default(),
-                        )
-                        .await
-                    {
-                        Ok(r) => Ok(r.task_instances),
-                        Err(e) => Err(e),
-                    }
-                })]
-            }
-            (DagRunUpdateType::SomeTaskInstances(updated_task_instances), false) => {
-                let updated_task_instances =
-                    updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                debug!(target:"rollout_data::get_rollout_data", "{}: collecting data about task instances updated since {:?} and a specific set of tasks too: {:?}", dag_run_id, last_update_time, updated_task_instances);
-                vec![
-                    Box::pin(async move {
-                        match airflow_api
-                            .task_instances_batch(
-                                Some(vec![dag_id.to_string()]),
-                                Some(vec![dag_run_id.to_string()]),
-                                Some(updated_task_instances),
-                            )
-                            .await
-                        {
-                            Ok(r) => Ok(r.task_instances),
-                            Err(e) => Err(e),
-                        }
-                    }),
-                    Box::pin(async move {
-                        match airflow_api
-                            .task_instances(
-                                dag_id,
-                                dag_run_id,
-                                TASK_INSTANCE_LIST_LIMIT,
-                                0,
-                                TaskInstanceRequestFilters::default()
-                                    .executed_on_or_after(last_update_time),
-                            )
-                            .await
-                        {
-                            Ok(r) => Ok(r.task_instances),
-                            Err(e) => Err(e),
-                        }
-                    }),
-                    Box::pin(async move {
-                        match last_update_time {
-                            None => Ok(vec![]),
-                            Some(_) => {
-                                match airflow_api
-                                    .task_instances(
-                                        dag_id,
-                                        dag_run_id,
-                                        TASK_INSTANCE_LIST_LIMIT,
-                                        0,
-                                        TaskInstanceRequestFilters::default()
-                                            .updated_on_or_after(last_update_time),
-                                    )
-                                    .await
-                                {
-                                    Ok(r) => Ok(r.task_instances),
-                                    Err(e) => Err(e),
-                                }
-                            }
-                        }
-                    }),
-                    Box::pin(async move {
-                        match last_update_time {
-                            None => Ok(vec![]),
-                            Some(_) => {
-                                match airflow_api
-                                    .task_instances(
-                                        dag_id,
-                                        dag_run_id,
-                                        TASK_INSTANCE_LIST_LIMIT,
-                                        0,
-                                        TaskInstanceRequestFilters::default()
-                                            .ended_on_or_after(last_update_time),
-                                    )
-                                    .await
-                                {
-                                    Ok(r) => Ok(r.task_instances),
-                                    Err(e) => Err(e),
-                                }
-                            }
-                        }
-                    }),
-                ]
-            }
-        };
-
-        let mut retrieved_task_instances: Vec<TaskInstancesResponseItem> = vec![];
-        for r in join_all(requests).await.into_iter() {
-            retrieved_task_instances.append(&mut r?)
-        }
-
-        debug!(
-            target: "rollout_data::get_rollout_data", "{}: retrieved {} tasks",
-            dag_run_id, retrieved_task_instances.len()
-        );
-
+        dag_run: &DagRunsResponseItem,
+        airflow_api: Arc<AirflowClient>,
+        linearized_tasks: Vec<TaskInstancesResponseItem>,
+    ) -> Result<RolloutKind, RolloutDataGatherError> {
         let mut rollout = RolloutIcOsToMainnetSubnets {
-            dag_info: DAGInfo {
-                name: dag_run.dag_run_id.to_string(),
-                display_url: {
-                    let mut display_url = airflow_api
-                        .url
-                        .join(format!("/dags/{}/grid", dag_run.dag_id).as_str())
-                        .unwrap();
-                    display_url
-                        .query_pairs_mut()
-                        .append_pair("dag_run_id", dag_run.dag_run_id.as_str());
-                    display_url.to_string()
-                },
-                // Use recently-updated cache values here.
-                // See function documentation about meaningful changes.
-                note: cache_entry.note.clone(),
-                dispatch_time: cache_entry.dispatch_time,
-                last_scheduling_decision: dag_run.last_scheduling_decision,
-                update_count: cache_entry.update_count,
-            },
             state: State::Complete,
             batches: IndexMap::new(),
             conf: dag_run.conf.clone(),
         };
 
-        // Let's update the cache to incorporate the most up-to-date task instances.
-        let mut new_last_update_time = max_option_date(last_update_time, last_event_log_update);
-        for task_instance in retrieved_task_instances.into_iter() {
-            let task_instance_id = task_instance.task_id.clone();
-            new_last_update_time =
-                max_option_date(new_last_update_time, Some(task_instance.latest_date()));
-
-            let by_name = cache_entry
-                .task_instances
-                .entry(task_instance_id)
-                .or_default();
-
-            match by_name.entry(task_instance.map_index) {
-                Vacant(entry) => {
-                    entry.insert(task_instance);
-                    rollout.updated();
-                }
-                Occupied(mut entry) => {
-                    if task_instance.latest_date() > entry.get().latest_date()
-                        || task_instance.state != entry.get().state
-                        || task_instance.note != entry.get().note
-                    {
-                        entry.insert(task_instance.clone());
-                        rollout.updated();
-                    }
-                }
-            };
-        }
-
-        for (task_instance_id, tasks) in cache_entry.task_instances.iter_mut() {
-            // Delete data on all unmapped tasks if a mapped task sibling is present.
-            if tasks.len() > 1 {
-                if let Occupied(_) = tasks.entry(None) {
-                    debug!(
-                        target: "rollout_data::get_rollout_data", "formerly unmapped task {} is now mapped",
-                        task_instance_id
-                    );
-                    tasks.remove(&None);
-                    rollout.updated();
-                }
-            }
-        }
-
-        let linearized_tasks: Vec<TaskInstancesResponseItem> = cache_entry
-            .task_instances
-            .iter()
-            .flat_map(|(_, tasks)| tasks.iter().map(|(_, task)| task.clone()))
-            .collect();
-
-        debug!(
-            target: "rollout_data::get_rollout_data", "{}: total disambiguated tasks including locally cached ones: {}",
-            dag_run.dag_run_id, linearized_tasks.len(),
-        );
-
         // Now update rollout and batch state based on the obtained data.
         // What this process does is fairly straightforward:
         // * for each and every known up-to-date Airflow task in the cache
         //   (always processed in topological order),
-        for task_instance in sorter.sort_instances(linearized_tasks.into_iter()) {
+        for task_instance in linearized_tasks.into_iter() {
+            let tgt = &format!("{}::subnet_state", LOG_TARGET);
+
             // * deduce the rollout plan, if available,
             // * mark the rollout as having problems or errors depending on what
             //   the task state is, or as one of the various running states, if
@@ -550,7 +292,7 @@ impl<'a> RolloutUpdater<'a> {
             // * handle tasks corresponding to a batch/subnet in a special way
             //   (commented below in its pertinent section).
             trace!(
-                target: "rollout_data::get_rollout_data", "Processing task {}.{:?} in state {:?}",
+                target: LOG_TARGET, "Processing task {}.{:?} in state {:?}",
                 task_instance.task_id, task_instance.map_index, task_instance.state,
             );
             if task_instance.task_id == "schedule" {
@@ -569,7 +311,7 @@ impl<'a> RolloutUpdater<'a> {
                     | Some(TaskInstanceState::Scheduled)
                     | None => rollout.state = min(rollout.state, State::Preparing),
                     Some(TaskInstanceState::Success) => {
-                        rollout.batches = match cache_entry.schedule.freshness(&task_instance) {
+                        rollout.batches = match self.schedule.freshness(&task_instance) {
                             ScheduleFreshness::UpToDate(cache) => cache,
                             ScheduleFreshness::Invalid => {
                                 // Nothing has changed.  Stop processing this task.
@@ -577,10 +319,10 @@ impl<'a> RolloutUpdater<'a> {
                             }
                             ScheduleFreshness::Stale => {
                                 // Same schedule task has been updated.  Data may not be missing anymore.
-                                info!(target: "rollout_data::get_rollout_data", "{}: schedule task is outdated; requerying", dag_run.dag_run_id);
+                                info!(target: LOG_TARGET, "{}: schedule task is outdated; requerying", dag_run.dag_run_id);
                                 match airflow_api
                                     .xcom_entry(
-                                        dag_id,
+                                        dag_run.dag_id.as_str(),
                                         dag_run.dag_run_id.as_str(),
                                         task_instance.task_id.as_str(),
                                         task_instance.map_index,
@@ -591,15 +333,13 @@ impl<'a> RolloutUpdater<'a> {
                                     Ok(schedule) => {
                                         match &Plan::from_python_string(&schedule.value) {
                                             Ok(plan) => {
-                                                info!(target: "rollout_data::get_rollout_data", "{}: saving schedule cache", dag_run.dag_run_id);
-                                                cache_entry
-                                                    .schedule
-                                                    .update(&task_instance, &plan.batches);
+                                                info!(target: LOG_TARGET, "{}: saving schedule cache", dag_run.dag_run_id);
+                                                self.schedule.update(&task_instance, &plan.batches);
                                                 plan.batches.clone()
                                             }
                                             Err(e) => {
-                                                warn!(target: "rollout_data::get_rollout_data", "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
-                                                cache_entry.schedule.invalidate(
+                                                warn!(target: LOG_TARGET, "{}: could not parse schedule data: {}", dag_run.dag_run_id, e);
+                                                self.schedule.invalidate(
                                                     &task_instance,
                                                     Some(schedule.value),
                                                 );
@@ -613,8 +353,8 @@ impl<'a> RolloutUpdater<'a> {
                                         // There is no schedule to be found.
                                         // Or there was no schedule to be found last time
                                         // it was queried.
-                                        warn!(target: "rollout_data::get_rollout_data", "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
-                                        cache_entry.schedule.invalidate(&task_instance, None);
+                                        warn!(target: LOG_TARGET, "{}: no schedule despite schedule task finished", dag_run.dag_run_id);
+                                        self.schedule.invalidate(&task_instance, None);
                                         continue;
                                     }
                                     Err(e) => {
@@ -657,7 +397,8 @@ impl<'a> RolloutUpdater<'a> {
                 // * update the subnet link to the corresponding Airflow task if the
                 //   state of the task (after update) corresponds to the expected state,
                 // * update rollout state to problem / error depending on the task state.
-                trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+
+                trace!(target: tgt, "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                 let (batch, task_name) = (
                     // We get away with unwrap() here because we know we captured an integer.
                     match rollout
@@ -666,7 +407,7 @@ impl<'a> RolloutUpdater<'a> {
                     {
                         Some(batch) => batch,
                         None => {
-                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no corresponding batch, continuing", task_instance.dag_run_id);
+                            trace!(target: tgt, "{}: no corresponding batch, continuing", task_instance.dag_run_id);
                             continue;
                         }
                     },
@@ -695,7 +436,7 @@ impl<'a> RolloutUpdater<'a> {
                         if task_name == "collect_batch_subnets" {
                             trans_exact!(SubnetState::Pending);
                         } else {
-                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
+                            trace!(target: tgt, "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
                         }
                     }
                     Some(state) => match state {
@@ -705,7 +446,7 @@ impl<'a> RolloutUpdater<'a> {
                         // If a task is skipped, the next task (in state Running / Deferred)
                         // will pick up the slack for changing subnet state.
                         TaskInstanceState::Removed | TaskInstanceState::Skipped => {
-                            trace!(target: "rollout_data::get_rollout_data::subnet_state", "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                            trace!(target: tgt, "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                         }
                         TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
                             trans_min!(SubnetState::Error);
@@ -753,7 +494,7 @@ impl<'a> RolloutUpdater<'a> {
                                     trans_min!(SubnetState::Complete);
                                 }
                                 &_ => {
-                                    warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                    warn!(target: tgt, "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             }
                             rollout.state = min(rollout.state, State::UpgradingSubnets)
@@ -827,7 +568,7 @@ impl<'a> RolloutUpdater<'a> {
                                 batch.end_time = task_instance.end_date;
                             }
                             &_ => {
-                                warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                warn!(target: tgt, "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                             }
                         },
                     },
@@ -850,7 +591,7 @@ impl<'a> RolloutUpdater<'a> {
                     | None => rollout.state = min(rollout.state, State::UpgradingUnassignedNodes),
                 }
             } else {
-                warn!(target: "rollout_data::get_rollout_data::subnet_state", "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
+                warn!(target: tgt, "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
             }
         }
 
@@ -862,14 +603,6 @@ impl<'a> RolloutUpdater<'a> {
             }
         }
 
-        // We bump the cache entry's last update time, to only retrieve
-        // tasks from this point in time on during subsequent retrievals.
-        // We only do this at the end, in case any code above returns
-        // early, to force a full state recalculation if there was a
-        // failure or an early return.
-        cache_entry.last_update_time = new_last_update_time;
-        cache_entry.update_count = rollout.dag_info.update_count;
-
-        Ok((rollout, cache_entry.clone()))
+        Ok(RolloutKind::RolloutIcOsToMainnetSubnets(rollout))
     }
 }

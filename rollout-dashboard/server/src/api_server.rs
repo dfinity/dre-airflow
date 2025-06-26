@@ -2,8 +2,8 @@ use crate::live_state::{AirflowStateSyncer, CurrentState, Live};
 use async_stream::try_stream;
 use axum::extract::Query;
 use axum::http::StatusCode;
-use axum::response::sse;
 use axum::response::Sse;
+use axum::response::sse;
 use axum::routing::get;
 use axum::{Json, Router};
 use futures::stream::Stream;
@@ -11,9 +11,9 @@ use log::debug;
 use rollout_dashboard::types::v2::StateResponse;
 use rollout_dashboard::types::{
     unstable, v1,
-    v2::{sse as SSE, DeletedRollout, Error as SError, Rollout, State as SOK},
+    v2::{DeletedRollout, Error as SError, Rollout, State as SOK, sse as SSE},
 };
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt;
@@ -170,7 +170,7 @@ impl ApiServer {
                     .iter()
                     .filter_map(|r| match old_rollouts_map.get(&r.key()) {
                         None => Some(r.clone()),
-                        Some(old_rollout) => match r.update_count() != old_rollout.update_count() {
+                        Some(old_rollout) => match r.update_count != old_rollout.update_count {
                             true => Some(r.clone()),
                             false => None,
                         },
@@ -182,7 +182,7 @@ impl ApiServer {
                         true => None,
                         false => Some(DeletedRollout {
                             kind: r.kind(),
-                            name: r.name(),
+                            name: r.name.clone(),
                         }),
                     })
                     .collect::<VecDeque<DeletedRollout>>();

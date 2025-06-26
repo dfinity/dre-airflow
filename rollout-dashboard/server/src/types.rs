@@ -56,12 +56,13 @@ pub mod v1 {
         pub subnets: Vec<Subnet>,
     }
 
-    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Deserialize)]
+    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Deserialize, Default)] // FIXME remove default
     #[serde(rename_all = "snake_case")]
     /// Represents the rollout state.
     // Ordering matters here.
     pub enum RolloutState {
         /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
+        #[default] // FIXME remove default
         Failed,
         /// The rollout is experiencing a retryable issue.  It continues to execute.
         Problem,
@@ -126,21 +127,21 @@ pub mod v1 {
 
     impl From<super::v1::Rollout> for super::v2::Rollout {
         fn from(rollout: super::v1::Rollout) -> super::v2::Rollout {
-            super::v2::Rollout::RolloutIcOsToMainnetSubnets(
-                super::v2::RolloutIcOsToMainnetSubnets {
-                    dag_info: super::v2::DAGInfo {
-                        name: rollout.name,
-                        display_url: rollout.display_url,
-                        dispatch_time: rollout.dispatch_time,
-                        last_scheduling_decision: rollout.last_scheduling_decision,
-                        note: rollout.note,
-                        update_count: rollout.update_count,
+            super::v2::Rollout {
+                kind: super::v2::RolloutKind::RolloutIcOsToMainnetSubnets(
+                    super::v2::RolloutIcOsToMainnetSubnets {
+                        state: rollout.state,
+                        batches: rollout.batches,
+                        conf: rollout.conf,
                     },
-                    state: rollout.state,
-                    batches: rollout.batches,
-                    conf: rollout.conf,
-                },
-            )
+                ),
+                display_url: rollout.display_url,
+                dispatch_time: rollout.dispatch_time,
+                last_scheduling_decision: rollout.last_scheduling_decision,
+                note: rollout.note,
+                update_count: rollout.update_count,
+                name: rollout.name,
+            }
         }
     }
 
@@ -263,30 +264,9 @@ pub mod v2 {
     use serde::Serializer;
     use std::collections::VecDeque;
 
-    #[derive(Debug, Serialize, Clone)]
-    /// Represents the common fields that all rollouts carry.
-    pub struct DAGInfo {
-        /// Unique, enforced by Airflow, corresponds to DAG run ID.
-        pub name: String,
-        /// Link to the rollout screen in Airflow.
-        pub display_url: String,
-        /// Note set on the rollout by the operator.
-        pub note: Option<String>,
-        pub dispatch_time: DateTime<Utc>,
-        /// Last scheduling decision.
-        /// Due to the way the central rollout cache is updated, clients may not see
-        /// an up-to-date value that corresponds to Airflow's last update time for
-        /// the DAG run.  See documentation in function `get_rollout_data`.
-        pub last_scheduling_decision: Option<DateTime<Utc>>,
-        /// Associative array of `{batch ID -> Batch}` planned for the rollout.
-        pub update_count: usize,
-    }
-
     /// Represents a rollout of GuestOS to mainnet subnets.
-    #[derive(Debug, Serialize, Clone)]
+    #[derive(Debug, Serialize, Clone, Default)] // FIXME remove default
     pub struct RolloutIcOsToMainnetSubnets {
-        #[serde(flatten)]
-        pub dag_info: DAGInfo,
         pub state: RolloutIcOsToMainnetSubnetsState,
         /// Associative array of `{batch ID -> Batch}` planned for the rollout.
         pub batches: IndexMap<usize, Batch>,
@@ -294,75 +274,133 @@ pub mod v2 {
         pub conf: IndexMap<String, serde_json::Value>,
     }
 
-    impl RolloutIcOsToMainnetSubnets {
-        pub fn updated(&mut self) {
-            self.dag_info.update_count += 1
-        }
+    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+    #[serde(rename_all = "snake_case")]
+    /// Represents the state of the rollout using this struct.
+    // Ordering matters here.
+    pub enum RolloutIcOsToMainnetApiBoundaryNodesState {
+        /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
+        Failed,
+        /// The rollout is experiencing a retryable issue.  It continues to execute.
+        Problem,
+        /// The rollout is in the planning stage.
+        /// This is true if the rollout is still executing task
+        /// schedule.
+        Preparing,
+        /// The rollout is waiting until all preconditions have been met.
+        /// This is true if the task schedule is done, but the tasks
+        /// wait_for_other_rollouts and wait_for_revision_to_be_elected
+        /// are not finished yet.
+        Waiting,
+        /// The rollout is upgrading API boundary nodes batch by batch.
+        UpgradingApiBoundaryNodes,
+        /// The rollout has finished successfully or was marked as such by the operator.
+        Complete,
     }
 
-    /// Represents a generic rollout of any kind.
+    /// Represents an API boundary node being targeted by the rollout.
+    #[derive(Serialize, Debug, Clone)]
+    pub struct ApiBoundaryNode {
+        /// This is the node ID.
+        node_id: String,
+        /// This is the target git revision for the API boundary node.
+        git_revision: String,
+    }
+
+    #[derive(Serialize, Debug, Clone)]
+    /// Represents a batch of subnets to upgrade.
+    pub struct APIBoundaryNodesBatch {
+        /// The time the batch was programmed to start at.
+        pub planned_start_time: DateTime<Utc>,
+        /// The actual observed start time of the batch.
+        pub actual_start_time: Option<DateTime<Utc>>,
+        /// The time of the last action associated with this batch, if any.
+        pub end_time: Option<DateTime<Utc>>,
+        pub state: SubnetRolloutState,
+        /// Shows a comment for the batch if it is available; else it contains an empty string.
+        pub comment: String,
+        /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
+        pub display_url: String,
+        /// A list of API boundary nodes to be upgraded as part of this batch.
+        pub api_boundary_nodes: Vec<ApiBoundaryNode>,
+    }
+
+    /// Represents a rollout of GuestOS to mainnet API boundary nodes.
+    #[derive(Debug, Serialize, Clone)]
+    pub struct RolloutIcOsToMainnetApiBoundaryNodes {
+        #[serde(flatten)]
+        pub state: RolloutIcOsToMainnetApiBoundaryNodesState,
+        /// Associative array of `{batch ID -> Batch}` planned for the rollout.
+        pub batches: IndexMap<usize, APIBoundaryNodesBatch>,
+        /// Configuration associated to the rollout.
+        pub conf: IndexMap<String, serde_json::Value>,
+    }
+
     #[derive(Debug, Serialize, Clone)]
     #[serde(tag = "kind")]
     #[serde(rename_all = "snake_case")]
-    pub enum Rollout {
+    pub enum RolloutKind {
         RolloutIcOsToMainnetSubnets(RolloutIcOsToMainnetSubnets),
+        RolloutIcOsToMainnetApiBoundaryNodes(RolloutIcOsToMainnetApiBoundaryNodes),
+    }
+    /// Represents a generic rollout of any kind.
+    #[derive(Debug, Serialize, Clone)]
+    pub struct Rollout {
+        /// Unique, enforced by Airflow, corresponds to DAG run ID.
+        pub name: String,
+        /// Link to the rollout screen in Airflow.
+        pub display_url: String,
+        /// Optional note a rollout can have added by the administrator.
+        pub note: Option<String>,
+        /// Time that the rollout was dispatched.
+        pub dispatch_time: DateTime<Utc>,
+        /// Last scheduling decision.
+        /// Due to the way the central rollout cache is updated, clients may not see
+        /// an up-to-date value that corresponds to Airflow's last update time for
+        /// the DAG run.  See documentation in function `get_rollout_data`.
+        pub last_scheduling_decision: Option<DateTime<Utc>>,
+        /// Whenever a rollout has changed, this field is incremented.  This is used
+        /// to determine which rollouts have changed in the SSE API.
+        pub update_count: usize,
+        #[serde(flatten)]
+        /// Data about the specific type of rollout this is.  Tagged "kind" before
+        /// serializing the specific data in question.
+        pub kind: RolloutKind,
     }
 
     impl Rollout {
-        pub fn name(&self) -> String {
-            match self {
-                Self::RolloutIcOsToMainnetSubnets(s) => s.dag_info.name.clone(),
-            }
-        }
-        pub fn display_url(&self) -> String {
-            match self {
-                Self::RolloutIcOsToMainnetSubnets(s) => s.dag_info.display_url.clone(),
-            }
-        }
         pub fn kind(&self) -> String {
-            match self {
-                Self::RolloutIcOsToMainnetSubnets(_) => {
+            match self.kind {
+                RolloutKind::RolloutIcOsToMainnetSubnets(_) => {
                     "rollout_ic_os_to_mainnet_subnets".to_string()
+                }
+                RolloutKind::RolloutIcOsToMainnetApiBoundaryNodes(_) => {
+                    "rollout_ic_os_to_mainnet_api_boundary_nodes".to_string()
                 }
             }
         }
-        pub fn update_count(&self) -> usize {
-            match self {
-                Self::RolloutIcOsToMainnetSubnets(s) => s.dag_info.update_count,
-            }
-        }
         pub fn key(&self) -> String {
-            self.kind() + &self.name()
-        }
-    }
-
-    impl From<RolloutIcOsToMainnetSubnets> for Rollout {
-        fn from(f: RolloutIcOsToMainnetSubnets) -> Self {
-            Rollout::RolloutIcOsToMainnetSubnets(f)
+            self.kind() + &self.name
         }
     }
 
     impl TryFrom<super::v2::Rollout> for super::v1::Rollout {
         type Error = &'static str;
         fn try_from(rollout: super::v2::Rollout) -> Result<super::v1::Rollout, Self::Error> {
-            let (state, batches, conf, dag_info, update_count) = match &rollout {
-                Rollout::RolloutIcOsToMainnetSubnets(s) => (
-                    s.state.clone(),
-                    s.batches.clone(),
-                    s.conf.clone(),
-                    s.dag_info.clone(),
-                    s.dag_info.update_count,
-                ),
+            let (state, batches, conf) = match &rollout.kind {
+                RolloutKind::RolloutIcOsToMainnetSubnets(s) => {
+                    (s.state.clone(), s.batches.clone(), s.conf.clone())
+                }
                 _ => Err("this rollout is incompatible with conversion")?,
             };
 
             Ok(super::v1::Rollout {
-                name: rollout.name(),
-                display_url: rollout.display_url(),
-                update_count,
-                note: dag_info.note,
-                dispatch_time: dag_info.dispatch_time,
-                last_scheduling_decision: dag_info.last_scheduling_decision,
+                name: rollout.name,
+                display_url: rollout.display_url,
+                update_count: rollout.update_count,
+                note: rollout.note,
+                dispatch_time: rollout.dispatch_time,
+                last_scheduling_decision: rollout.last_scheduling_decision,
                 state: state.clone(),
                 batches: batches.clone(),
                 conf: conf.clone(),
@@ -543,6 +581,7 @@ pub mod unstable {
 
     #[derive(Serialize)]
     pub struct FlowCacheResponse {
+        pub dag_id: String,
         pub rollout_id: String,
         pub dispatch_time: DateTime<Utc>,
         pub last_update_time: Option<DateTime<Utc>>,

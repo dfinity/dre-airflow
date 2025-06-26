@@ -975,7 +975,7 @@ impl AirflowClient {
                         return Err(AirflowError::Other(format!(
                             "Error retrieving text that contains CSRF token: {}",
                             err
-                        )))
+                        )));
                     }
                 },
                 _ => {
@@ -1021,7 +1021,7 @@ impl AirflowClient {
                         return Err(AirflowError::Other(format!(
                             "Error retrieving logged-in cookie: {}",
                             err
-                        )))
+                        )));
                     }
                 },
                 _ => {
