@@ -1,4 +1,13 @@
-// GuestOS rollout to mainnet types.
+// Generic rollout variant and helpers / support structures.
+export type DAGInfo = {
+    name: String;
+    display_url: string;
+    note?: String;
+    dispatch_time: Date;
+    last_scheduling_decision?: Date;
+}
+
+// GuestOS rollout to mainnet subnet types.
 const SubnetRolloutState = {
     pending: { icon: "🕐", name: "pending" },
     waiting: { icon: "⌛", name: "waiting" },
@@ -62,24 +71,55 @@ export function rolloutIcOsToMainnetSubnetsStateIcon(rollout: RolloutIcOsToMainn
 export function rolloutIcOsToMainnetSubnetsStateName(rollout: RolloutIcOsToMainnetSubnets): string {
     return RolloutIcOsToMainnetSubnetsState[rollout.state].name;
 }
-export type RolloutIcOsToMainnetConfiguration = {
+export type RolloutIcOsToMainnetSubnetsConfiguration = {
     simulate: boolean;
 };
+export type SubnetBatches = {
+    String: SubnetBatch
+}
 export type RolloutIcOsToMainnetSubnets = {
-    kind: RolloutKind;
-    conf: RolloutIcOsToMainnetConfiguration;
+    kind: "rollout_ic_os_to_mainnet_subnets";
+    conf: RolloutIcOsToMainnetSubnetsConfiguration;
     state: keyof typeof RolloutIcOsToMainnetSubnetsState;
-    batches: SubnetBatch[];
+    batches: SubnetBatches;
 } & DAGInfo;
 
-// Generic rollout variant and helpers / support structures.
-export type DAGInfo = {
-    name: String;
+// GuestOS rollout to API boundary nodes types.
+const RolloutIcOsToMainnetApiBoundaryNodesState = {
+    complete: { icon: "✅", name: "complete" },
+    failed: { icon: "❌", name: "failed" },
+    preparing: { icon: "🔁", name: "preparing" },
+    upgrading_api_boundary_nodes: { icon: "▶️", name: "upgrading API boundary nodes" },
+    waiting: { icon: "⌛", name: "waiting" },
+    problem: { icon: "⚠️", name: "problem" },
+};
+export type RolloutIcOsToMainnetApiBoundaryNodesConfiguration = {
+    simulate: boolean;
+};
+export type ApiBoundaryNode = {
+    node_id: string;
+    git_revision: string;
+};
+export type ApiBoundaryNodesBatch = {
+    planned_start_time: Date;
+    actual_start_time?: Date;
+    end_time?: Date;
+    state: keyof typeof SubnetRolloutState;
+    comment: String;
     display_url: string;
-    note?: String;
-    dispatch_time: Date;
-    last_scheduling_decision?: Date;
+    api_boundary_nodes: ApiBoundaryNode[];
+};
+export type ApiBoundaryNodesBatches = {
+    String: ApiBoundaryNodesBatch
 }
+export type RolloutIcOsToMainnetApiBoundaryNodes = {
+    kind: "rollout_ic_os_to_mainnet_api_boundary_nodes";
+    conf: RolloutIcOsToMainnetApiBoundaryNodesConfiguration;
+    state: keyof typeof RolloutIcOsToMainnetApiBoundaryNodesState;
+    batches: ApiBoundaryNodesBatches;
+} & DAGInfo;
+
+// Combination structures.
 export type RolloutKind = "rollout_ic_os_to_mainnet_subnets" | "rollout_ic_os_to_mainnet_api_boundary_nodes";
 const RolloutKindName = {
     rollout_ic_os_to_mainnet_subnets: "GuestOS rollout",
@@ -94,7 +134,7 @@ export function rolloutKindName(rollout: Rollout | keyof typeof RolloutKindName)
     }
     return RolloutKindName[state];
 }
-export type Rollout = RolloutIcOsToMainnetSubnets;
+export type Rollout = RolloutIcOsToMainnetSubnets | RolloutIcOsToMainnetApiBoundaryNodes;
 
 // Type for deleted rollout.
 export type DeletedRollout = {
