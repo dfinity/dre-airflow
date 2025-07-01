@@ -7,46 +7,9 @@
         apiBoundaryNodesBatchRolloutStateComment,
         apiBoundaryNodesBatchRolloutStateIcon,
     } from "./types";
+    import { selectTextOnFocus } from "./lib";
     export let batch_num: String;
     export let batch: ApiBoundaryNodesBatch;
-
-    function selectTextOnFocus(node: HTMLDivElement | HTMLAnchorElement) {
-        const handleFocus = (event: Event) => {
-            function selectText(element: HTMLDivElement | HTMLAnchorElement) {
-                if (window.getSelection != null) {
-                    var range = document.createRange();
-                    range.selectNode(element);
-                    var selection = window.getSelection();
-                    if (selection != null) {
-                        selection.removeAllRanges();
-                        selection.addRange(range);
-                    }
-                }
-            }
-            node && selectText(node);
-        };
-        const handleDeFocus = (event: Event) => {
-            function clearSelection() {
-                if (window.getSelection != null) {
-                    var selection = window.getSelection();
-                    if (selection !== null) {
-                        selection.removeAllRanges();
-                    }
-                }
-            }
-            node && clearSelection();
-        };
-
-        node.addEventListener("focus", handleFocus);
-        node.addEventListener("focusout", handleDeFocus);
-
-        return {
-            destroy() {
-                node.removeEventListener("focus", handleFocus);
-                node.removeEventListener("focusout", handleDeFocus);
-            },
-        };
-    }
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">

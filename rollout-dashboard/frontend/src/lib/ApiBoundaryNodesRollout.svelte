@@ -7,16 +7,11 @@
         rolloutIcOsToMainnetApiBoundaryNodesStateIcon,
         rolloutKindName,
     } from "./types";
+    import { cap, activeClass } from "./lib";
     import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
     export let rollout: RolloutIcOsToMainnetApiBoundaryNodes;
 
-    let rolloutClass: string = rollout.state;
-    if (rolloutClass !== "complete" && rolloutClass !== "failed") {
-        rolloutClass = "active";
-    }
-    function cap(val: String) {
-        return String(val).charAt(0).toUpperCase() + String(val).slice(1);
-    }
+    let rolloutClass: String = activeClass(rollout.state);
 </script>
 
 <section class="rollout {rolloutClass} {rollout.kind}">
