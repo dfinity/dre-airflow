@@ -161,8 +161,8 @@ export type RolloutIcOsToMainnetApiBoundaryNodes = {
 // Combination structures.
 export type RolloutKind = "rollout_ic_os_to_mainnet_subnets" | "rollout_ic_os_to_mainnet_api_boundary_nodes";
 const RolloutKindName = {
-    rollout_ic_os_to_mainnet_subnets: "GuestOS rollout",
-    rollout_ic_os_to_mainnet_api_boundary_nodes: "API boundary node rollout",
+    rollout_ic_os_to_mainnet_subnets: "GuestOS rollout to subnets",
+    rollout_ic_os_to_mainnet_api_boundary_nodes: "GuestOS rollout to API boundary nodes",
 };
 export function rolloutKindName(rollout: Rollout | keyof typeof RolloutKindName): String {
     var state: keyof typeof RolloutKindName;
