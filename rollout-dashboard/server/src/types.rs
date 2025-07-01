@@ -263,6 +263,7 @@ pub mod v2 {
     use serde::Serialize;
     use serde::Serializer;
     use std::collections::VecDeque;
+    use strum::Display;
 
     /// Represents a rollout of GuestOS to mainnet subnets.
     #[derive(Debug, Serialize, Clone, Default)] // FIXME remove default
@@ -307,6 +308,23 @@ pub mod v2 {
         git_revision: String,
     }
 
+    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
+    #[serde(rename_all = "snake_case")]
+    /// Represents the rollout state of a subnet.
+    // Ordering matters here.
+    pub enum ApiBoundaryNodesBatchState {
+        Error,
+        PredecessorFailed,
+        Pending,
+        Waiting,
+        Proposing,
+        WaitingForElection,
+        WaitingForAdoption,
+        WaitingUntilNodesHealthy,
+        Complete,
+        Unknown,
+    }
+
     #[derive(Serialize, Debug, Clone)]
     /// Represents a batch of subnets to upgrade.
     pub struct APIBoundaryNodesBatch {
@@ -316,7 +334,7 @@ pub mod v2 {
         pub actual_start_time: Option<DateTime<Utc>>,
         /// The time of the last action associated with this batch, if any.
         pub end_time: Option<DateTime<Utc>>,
-        pub state: SubnetRolloutState,
+        pub state: ApiBoundaryNodesBatchState,
         /// Shows a comment for the batch if it is available; else it contains an empty string.
         pub comment: String,
         /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.

@@ -3,6 +3,7 @@
   import { rollouts_view } from "./lib/stores";
   import { rolloutKindName, getRolloutEngineStates } from "./lib/types.js";
   import GuestOSRollout from "./lib/GuestOSRollout.svelte";
+  import ApiBoundaryNodesRollout from "./lib/ApiBoundaryNodesRollout.svelte";
   import { FooterCopyright } from "flowbite-svelte";
   import {
     Footer,
@@ -223,6 +224,9 @@
   {#if (($url.hash === "" || $url.hash === "#active") && rollout.state !== "complete" && rollout.state !== "failed") || ($url.hash === "#complete" && rollout.state === "complete") || ($url.hash === "#failed" && rollout.state === "failed") || $url.hash === "#all"}
     {#if rollout.kind === "rollout_ic_os_to_mainnet_subnets"}
       <GuestOSRollout {rollout} />
+    {/if}
+    {#if rollout.kind === "rollout_ic_os_to_mainnet_api_boundary_nodes"}
+      <ApiBoundaryNodesRollout {rollout} />
     {/if}
   {/if}
 {/each}

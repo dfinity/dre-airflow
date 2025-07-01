@@ -93,6 +93,13 @@ const RolloutIcOsToMainnetApiBoundaryNodesState = {
     waiting: { icon: "⌛", name: "waiting" },
     problem: { icon: "⚠️", name: "problem" },
 };
+export function rolloutIcOsToMainnetApiBoundaryNodesStateIcon(rollout: RolloutIcOsToMainnetApiBoundaryNodes): String {
+    return RolloutIcOsToMainnetApiBoundaryNodesState[rollout.state].icon;
+}
+export function rolloutIcOsToMainnetApiBoundaryNodesStateName(rollout: RolloutIcOsToMainnetApiBoundaryNodes): string {
+    return RolloutIcOsToMainnetApiBoundaryNodesState[rollout.state].name;
+}
+
 export type RolloutIcOsToMainnetApiBoundaryNodesConfiguration = {
     simulate: boolean;
 };
@@ -100,11 +107,43 @@ export type ApiBoundaryNode = {
     node_id: string;
     git_revision: string;
 };
+const ApiBoundaryNodesBatchRolloutState = {
+    pending: { icon: "🕐", name: "pending" },
+    waiting: { icon: "⌛", name: "waiting" },
+    proposing: { icon: "📝", name: "proposing update to new revision" },
+    waiting_for_election: {
+        icon: "🗳️",
+        name: "waiting for revision election",
+    },
+    waiting_for_adoption: {
+        icon: "⚡",
+        name: "waiting for revision adoption",
+    },
+    waiting_until_nodes_healthy: {
+        icon: "📢",
+        name: "waiting until all upgraded API boundary nodes are healthy",
+    },
+    complete: { icon: "✅", name: "complete" },
+    skipped: { icon: "⏩", name: "skipped" },
+    error: { icon: "❌", name: "error" },
+    predecessor_failed: { icon: "❌", name: "predecessor failed" },
+    unknown: { icon: "❓", name: "does not appear in Airflow" },
+};
+export function apiBoundaryNodesBatchRolloutStateIcon(batch: ApiBoundaryNodesBatch): String {
+    return ApiBoundaryNodesBatchRolloutState[batch.state].icon;
+}
+export function apiBoundaryNodesBatchRolloutStateComment(subnet: ApiBoundaryNodesBatch): string {
+    let s = ApiBoundaryNodesBatchRolloutState[subnet.state].name;
+    if (subnet.comment) {
+        s = s + ": " + subnet.comment
+    }
+    return s
+}
 export type ApiBoundaryNodesBatch = {
     planned_start_time: Date;
     actual_start_time?: Date;
     end_time?: Date;
-    state: keyof typeof SubnetRolloutState;
+    state: keyof typeof ApiBoundaryNodesBatchRolloutState;
     comment: String;
     display_url: string;
     api_boundary_nodes: ApiBoundaryNode[];
