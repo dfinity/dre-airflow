@@ -273,7 +273,7 @@ impl Parser {
 
                 match &task_instance.state {
                     None => {
-                        if task_name == "schedule" {
+                        if task_name == "prepare" {
                             trans_exact!(BatchState::Pending);
                         } else {
                             trace!(target: tgt, "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
