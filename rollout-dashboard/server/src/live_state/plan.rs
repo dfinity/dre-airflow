@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use futures::Future;
 use log::{info, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use std::{fmt::Display, str::FromStr, sync::Arc};
