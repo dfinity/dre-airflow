@@ -11,7 +11,11 @@
     import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
     export let rollout: RolloutIcOsToMainnetApiBoundaryNodes;
 
-    let rolloutClass: String = activeClass(rollout.state);
+    let rolloutClass: string = rollout.state;
+    if (rolloutClass !== "complete" && rolloutClass !== "failed") {
+        rolloutClass = "active";
+    }
+    let git_revision = rollout.conf.git_revision;
 </script>
 
 <section class="rollout {rolloutClass} {rollout.kind}">
@@ -73,7 +77,7 @@
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
         <ul>
             {#each Object.entries(rollout.batches) as [batch_num, batch]}
-                <ApiBoundaryNodesBatch {batch_num} {batch} />
+                <ApiBoundaryNodesBatch {batch_num} {batch} {git_revision} />
             {/each}
         </ul>
     {:else}

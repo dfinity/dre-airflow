@@ -43,13 +43,10 @@ async fn main() -> ExitCode {
 
     let (end_tx, end_rx) = watch::channel(());
 
-    let syncer = AirflowStateSyncer::new(
-        AirflowClient::new(airflow_url).unwrap(),
-        max_rollouts,
-        refresh_interval,
-    );
+    let airflow_client = Arc::new(AirflowClient::new(airflow_url).unwrap());
+    let syncer = AirflowStateSyncer::new(airflow_client.clone(), max_rollouts, refresh_interval);
     let (syncing_syncer, background_loop_fut) = syncer.start_syncing(end_rx.clone());
-    let server = Arc::new(api_server::ApiServer::new(syncing_syncer));
+    let server = Arc::new(api_server::ApiServer::new(syncing_syncer, airflow_client));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 

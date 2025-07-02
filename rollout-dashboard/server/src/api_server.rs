@@ -1,5 +1,6 @@
 use crate::live_state::{AirflowStateSyncer, CurrentState, Live};
 use async_stream::try_stream;
+use axum::extract::Path;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::Sse;
@@ -8,6 +9,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
+use rollout_dashboard::airflow_client::AirflowClient;
+use rollout_dashboard::airflow_client::AirflowError;
+use rollout_dashboard::airflow_client::DagRunsResponseItem;
 use rollout_dashboard::types::v2::StateResponse;
 use rollout_dashboard::types::{
     unstable, v1,
@@ -16,6 +20,7 @@ use rollout_dashboard::types::{
 use serde::{Deserialize, Deserializer, de};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
+use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -60,11 +65,18 @@ impl Drop for DisconnectionGuard {
 
 pub(crate) struct ApiServer {
     state_syncer: Arc<AirflowStateSyncer<Live>>,
+    airflow_api: Arc<AirflowClient>,
 }
 
 impl ApiServer {
-    pub fn new(state_syncer: Arc<AirflowStateSyncer<Live>>) -> Self {
-        Self { state_syncer }
+    pub fn new(
+        state_syncer: Arc<AirflowStateSyncer<Live>>,
+        airflow_api: Arc<AirflowClient>,
+    ) -> Self {
+        Self {
+            state_syncer,
+            airflow_api,
+        }
     }
 
     // #[debug_handler]
@@ -100,6 +112,38 @@ impl ApiServer {
             StateResponse::State(s) => Ok(Json(s)),
             StateResponse::Error(SError { code, message }) => Err((code, message)),
         }
+    }
+
+    async fn get_dag_run(
+        &self,
+        dag_id: &str,
+        dag_run_id: &str,
+    ) -> Result<Json<DagRunsResponseItem>, (StatusCode, String)> {
+        Ok(Json(
+            match self.airflow_api.dag_run(dag_id, dag_run_id).await {
+                Ok(val) => val,
+                Err(e) => {
+                    return Err(match e {
+                        AirflowError::StatusCode(c) => (c, "Internal server error".to_string()),
+                        AirflowError::ReqwestError(err) => {
+                            let mut explanation = format!("Cannot contact Airflow: {}", err);
+                            let mut err = err.source();
+                            loop {
+                                match err {
+                                    None => break,
+                                    Some(e) => {
+                                        explanation = format!("{} -> {}", explanation.as_str(), e);
+                                        err = e.source();
+                                    }
+                                }
+                            }
+                            (StatusCode::BAD_GATEWAY, explanation)
+                        }
+                        AirflowError::Other(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                    });
+                }
+            },
+        ))
     }
 
     /// Given an initial state and a final state, produce
@@ -397,10 +441,27 @@ impl ApiServer {
 
     fn unstable_api(self: Arc<Self>) -> Router {
         let cached_data_handler_ref = self.clone();
-        Router::new().route(
-            "/cache",
-            get(move || async move { cached_data_handler_ref.get_cache().await }),
-        )
+        let get_dag_run_handler_ref = self.clone();
+
+        Router::new()
+            .route(
+                "/cache",
+                get(move || async move { cached_data_handler_ref.get_cache().await }),
+            )
+            .route(
+                "/dags",
+                get(move || async move { "Result is great".to_string() }),
+            )
+            .route(
+                "/dags/:dag_id/dag_runs/:dag_run_id",
+                get(
+                    move |Path((dag_id, dag_run_id)): Path<(String, String)>| async move {
+                        get_dag_run_handler_ref
+                            .get_dag_run(dag_id.as_str(), dag_run_id.as_str())
+                            .await
+                    },
+                ),
+            )
     }
 
     pub fn routes(self: Arc<Self>) -> Router {

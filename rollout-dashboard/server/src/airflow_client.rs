@@ -158,7 +158,7 @@ impl<'a> DagsQueryFilter<'a> {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum DagRunState {
     Queued,
@@ -167,7 +167,7 @@ pub enum DagRunState {
     Failed,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DagRunsResponseItem {
     pub conf: IndexMap<String, serde_json::Value>,
     /// dag_run_id is unique, enforced by Airflow.
@@ -1092,6 +1092,27 @@ impl AirflowClient {
             |x| self._get_logged_in(x),
         )
         .await
+    }
+
+    /// Return DAG runs from newest to oldest.
+    /// Optionally only return DAG runs updated between a certain time frame.
+    pub async fn dag_run(
+        &self,
+        dag_id: &str,
+        dag_run_id: &str,
+    ) -> Result<DagRunsResponseItem, AirflowError> {
+        let url = format!("dags/{}/dagRuns/{}", dag_id, dag_run_id);
+        let json_value = self._get_logged_in(url).await?;
+        match <DagRunsResponseItem>::deserialize(json_value.clone()) {
+            Ok(deserialized) => Ok(deserialized),
+            Err(e) => {
+                warn!(target: "airflow_client" ,"Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
+                Err(AirflowError::Other(format!(
+                    "Could not deserialize structure: {}",
+                    e
+                )))
+            }
+        }
     }
 
     /// Return TaskInstances for a DAG run.

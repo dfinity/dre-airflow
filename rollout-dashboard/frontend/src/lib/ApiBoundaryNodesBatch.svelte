@@ -10,35 +10,38 @@
     import { selectTextOnFocus } from "./lib";
     export let batch_num: String;
     export let batch: ApiBoundaryNodesBatch;
+    export let git_revision: string;
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">
-    <a
-        rel="external"
-        href={batch.display_url || ""}
-        target="_blank"
-        class="api_boundary_node_batch_state"
-        data-sveltekit-preload-data="off"
-        title={apiBoundaryNodesBatchRolloutStateComment(batch)}
-    >
-        <div class="api_boundary_node_batch_state_icon">
-            {apiBoundaryNodesBatchRolloutStateIcon(batch)}
-        </div></a
-    >
     {#each batch.api_boundary_nodes as node}
         <ul>
             <li class="node">
                 <a
-                    class="node_id"
-                    use:selectTextOnFocus
-                    href="https://dashboard.internetcomputer.org/network/nodes/{node.node_id}"
-                    target="_blank">{node.node_id}</a
+                    rel="external"
+                    href={batch.display_url || ""}
+                    target="_blank"
+                    class="api_boundary_node_batch_state"
+                    data-sveltekit-preload-data="off"
+                    title={apiBoundaryNodesBatchRolloutStateComment(batch)}
                 >
+                    <div class="api_boundary_node_batch_state_icon">
+                        {apiBoundaryNodesBatchRolloutStateIcon(batch)}
+                    </div></a
+                >
+                {#if node === batch.api_boundary_nodes[0]}
+                    <a
+                        class="node_id"
+                        use:selectTextOnFocus
+                        href="https://dashboard.internetcomputer.org/network/nodes/{node.node_id}"
+                        target="_blank">{node.node_id}</a
+                    >
+                {/if}
                 <div
                     class="git_revision"
                     role="link"
                     tabindex="0"
-                    use:copy={node.git_revision}
+                    use:copy={git_revision}
                     use:selectTextOnFocus
                     on:svelte-copy={(event) =>
                         toast.push("Copied git revision to clipboard")}
@@ -53,7 +56,7 @@
                         <path
                             d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
                         />
-                    </svg>{node.git_revision}
+                    </svg>{git_revision}
                 </div>
             </li>
         </ul>

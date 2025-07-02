@@ -102,10 +102,10 @@ export function rolloutIcOsToMainnetApiBoundaryNodesStateName(rollout: RolloutIc
 
 export type RolloutIcOsToMainnetApiBoundaryNodesConfiguration = {
     simulate: boolean;
+    git_revision: String;
 };
 export type ApiBoundaryNode = {
     node_id: string;
-    git_revision: string;
 };
 const ApiBoundaryNodesBatchRolloutState = {
     pending: { icon: "🕐", name: "pending" },

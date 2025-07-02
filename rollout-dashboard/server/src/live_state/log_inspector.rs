@@ -13,8 +13,6 @@ const LOG_TARGET: &str = "live_state::log_inspector";
 
 lazy_static! {
     static ref confirmed_or_true_regex: Regex = Regex::new(r".*.confirmed.: .true.*").unwrap();
-    static ref dag_ids: Vec<DagID> =
-        vec![DagID::from_str("rollout_ic_os_to_mainnet_subnets").unwrap()];
 }
 
 #[derive(Debug, Clone)]

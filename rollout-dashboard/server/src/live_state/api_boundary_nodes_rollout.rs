@@ -1,5 +1,6 @@
-use super::plan::{PlanQueryResult, fetch_xcom};
-use super::{RolloutDataGatherError, plan::PlanCache, python};
+use super::{
+    RolloutDataGatherError, plan::PlanCache, plan::PlanQueryResult, plan::fetch_xcom, python,
+};
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -9,111 +10,21 @@ use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
 use rollout_dashboard::types::v2::{
-    RolloutIcOsToMainnetSubnets, RolloutIcOsToMainnetSubnetsState as State, RolloutKind, Subnet,
-    SubnetRolloutState as SubnetState, SubnetsBatch,
+    ApiBoundaryNode, ApiBoundaryNodesBatch, ApiBoundaryNodesBatchState as BatchState,
+    RolloutIcOsToMainnetApiBoundaryNodes, RolloutIcOsToMainnetApiBoundaryNodesState as State,
+    RolloutKind,
 };
 use std::cmp::min;
-use std::fmt::{self, Display};
-use std::num::ParseIntError;
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{vec, vec::Vec};
+use std::vec::Vec;
 
-const LOG_TARGET: &str = "live_state::guestos_rollout";
+const LOG_TARGET: &str = "live_state::api_boundary_nodes_rollout";
 
 lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
-    static ref SubnetGitRevisionRe: Regex = Regex::new("dfinity.ic_types.SubnetRolloutInstance.*@version=0[(]start_at=.*,subnet_id=([0-9-a-z-]+),git_revision=([0-9a-f]+)[)]").unwrap();
     static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
-}
-
-type PythonFormattedPlan = IndexMap<String, (String, Vec<String>)>;
-
-#[derive(Debug)]
-pub enum PlanParseError {
-    UndecipherablePython(python::ErrorImpl),
-    BadBatchNumber(ParseIntError),
-    BadDateTime(chrono::format::ParseError),
-    InvalidSubnet(String),
-}
-
-impl Display for PlanParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::UndecipherablePython(e) => {
-                write!(f, "Invalid Python in rollout plan: {}", e)
-            }
-            Self::BadBatchNumber(e) => {
-                write!(f, "Could not parse batch number in rollout plan: {}", e)
-            }
-            Self::BadDateTime(e) => {
-                write!(f, "Could not parse date/time in rollout plan: {}", e)
-            }
-            Self::InvalidSubnet(e) => {
-                write!(f, "Could not regex find subnets in {}", e)
-            }
-        }
-    }
-}
-
-type BatchMap = IndexMap<usize, SubnetsBatch>;
-
-#[derive(Debug, Clone)]
-struct Plan {
-    batches: BatchMap,
-}
-
-impl FromStr for Plan {
-    type Err = PlanParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let mut res = Plan {
-            batches: IndexMap::new(),
-        };
-        let python_string_plan: PythonFormattedPlan = match python::from_str(value) {
-            Ok(s) => s,
-            Err(e) => return Err(PlanParseError::UndecipherablePython(e)),
-        };
-        for (batch_number_str, (start_time_str, subnets)) in python_string_plan.iter() {
-            let batch_number: usize =
-                usize::from_str(batch_number_str).map_err(PlanParseError::BadBatchNumber)? + 1;
-            let start_time: DateTime<Utc> = match DateTime::parse_from_str(
-                start_time_str.as_str(),
-                "datetime.datetime@version=1(timestamp=%s%.f,tz=UTC)",
-            ) {
-                Ok(s) => Ok(s.with_timezone(&Utc)),
-                Err(_e) => match DateTime::parse_from_str(
-                    start_time_str.as_str(),
-                    "datetime.datetime@version=2(timestamp=%s%.f,tz=(UTC,pendulum.tz.timezone.FixedTimezone,1,True))",
-                ) {
-                    Err(e) => Err(PlanParseError::BadDateTime(e)),
-                    Ok(s) => Ok(s.with_timezone(&Utc)),
-                },
-            }?;
-
-            let mut final_subnets: Vec<Subnet> = vec![];
-            for subnet in subnets.iter() {
-                final_subnets.push(match SubnetGitRevisionRe.captures(subnet) {
-                    Some(capped) => Subnet {
-                        subnet_id: capped[1].to_string(),
-                        git_revision: capped[2].to_string(),
-                        state: SubnetState::Unknown,
-                        comment: "".to_string(),
-                        display_url: "".to_string(),
-                    },
-                    None => return Err(PlanParseError::InvalidSubnet(subnet.clone())),
-                });
-            }
-            let batch = SubnetsBatch {
-                planned_start_time: start_time,
-                actual_start_time: None,
-                end_time: None,
-                subnets: final_subnets,
-            };
-            res.batches.insert(batch_number, batch);
-        }
-        Ok(res)
-    }
 }
 
 fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
@@ -126,57 +37,102 @@ where
     }
 }
 
-fn annotate_subnet_state(
-    batch: &mut SubnetsBatch,
-    state: SubnetState,
+fn annotate_batch_state(
+    batch: &mut ApiBoundaryNodesBatch,
+    state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
     only_decrease: bool,
-) -> SubnetState {
-    for subnet in match task_instance.map_index {
-        None => batch.subnets.iter_mut(),
-        Some(index) => batch.subnets[index..=index].iter_mut(),
-    } {
-        let tgt = &(LOG_TARGET.to_owned() + "::annotate_subnet_state");
-        let new_state = state.clone();
-        if (only_decrease && new_state < subnet.state)
-            || (!only_decrease && new_state != subnet.state)
-        {
-            trace!(target: tgt, "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state, subnet.comment);
-            subnet.state = new_state.clone();
-        } else {
-            trace!(target: tgt, "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, subnet.state, new_state);
-        }
-        if new_state == subnet.state {
-            subnet.comment = format!(
-                "Task {}{} {}",
-                task_instance.task_id,
-                format_some(task_instance.map_index, ".", ""),
-                format_some(
-                    task_instance.state.clone(),
-                    "in state ",
-                    "has no known state"
-                ),
-            );
-            subnet.display_url = {
-                let mut url = base_url
-                    .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
-                    .unwrap();
-                url.query_pairs_mut()
-                    .append_pair("dag_run_id", &task_instance.dag_run_id);
-                url.query_pairs_mut()
-                    .append_pair("task_id", &task_instance.task_id);
-                url.query_pairs_mut().append_pair("tab", "logs");
-                if let Some(idx) = task_instance.map_index {
-                    url.query_pairs_mut()
-                        .append_pair("map_index", format!("{}", idx).as_str());
-                };
-                url.to_string()
-            };
-        };
+) -> BatchState {
+    let tgt = &(LOG_TARGET.to_owned() + "::annotate_batch_state");
+    let new_state = state.clone();
+    if (only_decrease && new_state < batch.state) || (!only_decrease && new_state != batch.state) {
+        trace!(target: tgt, "{}: {} {:?} transition {} => {}   note: {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, batch.state, new_state, batch.comment);
+        batch.state = new_state.clone();
+    } else {
+        trace!(target: tgt, "{}: {} {:?} NO transition {} => {}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, batch.state, new_state);
     }
+    if new_state == batch.state {
+        batch.comment = format!(
+            "Task {} {}",
+            task_instance.task_id,
+            format_some(
+                task_instance.state.clone(),
+                "in state ",
+                "has no known state"
+            ),
+        );
+        batch.display_url = {
+            let mut url = base_url
+                .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
+                .unwrap();
+            url.query_pairs_mut()
+                .append_pair("dag_run_id", &task_instance.dag_run_id);
+            url.query_pairs_mut()
+                .append_pair("task_id", &task_instance.task_id);
+            url.query_pairs_mut().append_pair("tab", "logs");
+            if let Some(idx) = task_instance.map_index {
+                url.query_pairs_mut()
+                    .append_pair("map_index", format!("{}", idx).as_str());
+            };
+            url.to_string()
+        };
+    };
     state
 }
+
+#[derive(Debug, Clone)]
+struct Plan {
+    batches: BatchMap,
+}
+
+type PythonFormattedPlan = Vec<(String, Vec<String>)>;
+
+impl FromStr for Plan {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let mut res = Plan {
+            batches: IndexMap::new(),
+        };
+        let python_string_plan: PythonFormattedPlan = match python::from_str(value) {
+            Ok(s) => s,
+            Err(e) => return Err(format!("Could not decipher the Python string: {}", e)),
+        };
+        for (batch_number, (start_time_str, api_boundary_nodes)) in
+            python_string_plan.into_iter().enumerate()
+        {
+            let start_time: DateTime<Utc> = match DateTime::parse_from_str(
+                start_time_str.as_str(),
+                "datetime.datetime@version=2(timestamp=%s%.f,tz=None)",
+            ) {
+                Ok(s) => s.with_timezone(&Utc),
+                Err(e) => {
+                    return Err(format!(
+                        "Could not parse date/time {}: {}",
+                        start_time_str, e
+                    ));
+                }
+            };
+            let batch = ApiBoundaryNodesBatch {
+                planned_start_time: start_time,
+                actual_start_time: None,
+                end_time: None,
+                api_boundary_nodes: api_boundary_nodes
+                    .into_iter()
+                    .map(|i| ApiBoundaryNode { node_id: i })
+                    .collect(),
+                state: BatchState::Unknown,
+                comment: "".into(),
+                display_url: "".into(),
+            };
+            res.batches.insert(batch_number + 1, batch);
+        }
+        Ok(res)
+    }
+}
+
+type BatchMap = IndexMap<usize, ApiBoundaryNodesBatch>;
 
 #[derive(Clone, Default)]
 pub(super) struct Parser {
@@ -194,7 +150,7 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        let mut rollout = RolloutIcOsToMainnetSubnets {
+        let mut rollout = RolloutIcOsToMainnetApiBoundaryNodes {
             state: State::Complete,
             batches: IndexMap::new(),
             conf: dag_run.conf.clone(),
@@ -205,7 +161,7 @@ impl Parser {
         // * for each and every known up-to-date Airflow task in the cache
         //   (always processed in topological order),
         for task_instance in linearized_tasks.into_iter() {
-            let tgt = &format!("{}::subnet_state", LOG_TARGET);
+            let tgt = &format!("{}::batch_state", LOG_TARGET);
 
             // * deduce the rollout plan, if available,
             // * mark the rollout as having problems or errors depending on what
@@ -259,7 +215,6 @@ impl Parser {
                 }
             } else if task_instance.task_id == "wait_for_other_rollouts"
                 || task_instance.task_id == "wait_for_revision_to_be_elected"
-                || task_instance.task_id == "revisions"
             {
                 match task_instance.state {
                     Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
@@ -307,25 +262,19 @@ impl Parser {
 
                 macro_rules! trans_min {
                     ($input:expr) => {
-                        annotate_subnet_state(batch, $input, &task_instance, &airflow_api.url, true)
+                        annotate_batch_state(batch, $input, &task_instance, &airflow_api.url, true)
                     };
                 }
                 macro_rules! trans_exact {
                     ($input:expr) => {
-                        annotate_subnet_state(
-                            batch,
-                            $input,
-                            &task_instance,
-                            &airflow_api.url,
-                            false,
-                        )
+                        annotate_batch_state(batch, $input, &task_instance, &airflow_api.url, false)
                     };
                 }
 
                 match &task_instance.state {
                     None => {
-                        if task_name == "collect_batch_subnets" {
-                            trans_exact!(SubnetState::Pending);
+                        if task_name == "schedule" {
+                            trans_exact!(BatchState::Pending);
                         } else {
                             trace!(target: tgt, "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
                         }
@@ -340,15 +289,15 @@ impl Parser {
                             trace!(target: tgt, "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                         }
                         TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
-                            trans_min!(SubnetState::Error);
+                            trans_min!(BatchState::Error);
                             rollout.state = min(rollout.state, State::Problem)
                         }
                         TaskInstanceState::Failed => {
-                            trans_min!(SubnetState::Error);
+                            trans_min!(BatchState::Error);
                             rollout.state = min(rollout.state, State::Failed)
                         }
                         TaskInstanceState::UpstreamFailed => {
-                            trans_min!(SubnetState::PredecessorFailed);
+                            trans_min!(BatchState::PredecessorFailed);
                             rollout.state = min(rollout.state, State::Failed)
                         }
                         TaskInstanceState::UpForReschedule
@@ -357,38 +306,35 @@ impl Parser {
                         | TaskInstanceState::Queued
                         | TaskInstanceState::Scheduled => {
                             match task_name {
-                                "collect_batch_subnets" => {
-                                    trans_min!(SubnetState::Pending);
+                                "prepare" => {
+                                    trans_min!(BatchState::Pending);
                                 }
                                 "wait_until_start_time" => {
-                                    trans_min!(SubnetState::Waiting);
-                                }
-                                "wait_for_preconditions" => {
-                                    trans_min!(SubnetState::Waiting);
+                                    trans_min!(BatchState::Waiting);
                                 }
                                 "create_proposal_if_none_exists" => {
-                                    trans_min!(SubnetState::Proposing);
+                                    trans_min!(BatchState::Proposing);
                                 }
                                 "request_proposal_vote" => {
                                     // We ignore this one for the purposes of rollout state setup.
                                 }
                                 "wait_until_proposal_is_accepted" => {
-                                    trans_min!(SubnetState::WaitingForElection);
+                                    trans_min!(BatchState::WaitingForElection);
                                 }
-                                "wait_for_replica_revision" => {
-                                    trans_min!(SubnetState::WaitingForAdoption);
+                                "wait_for_revision_adoption" => {
+                                    trans_min!(BatchState::WaitingForAdoption);
                                 }
-                                "wait_until_no_alerts" => {
-                                    trans_min!(SubnetState::WaitingForAlertsGone);
+                                "wait_until_nodes_healthy" => {
+                                    trans_min!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {
-                                    trans_min!(SubnetState::Complete);
+                                    trans_min!(BatchState::Complete);
                                 }
                                 &_ => {
                                     warn!(target: tgt, "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             }
-                            rollout.state = min(rollout.state, State::UpgradingSubnets)
+                            rollout.state = min(rollout.state, State::UpgradingApiBoundaryNodes)
                         }
                         TaskInstanceState::Success => match task_name {
                             // Tasks corresponding to a subnet that are in state Success
@@ -419,8 +365,8 @@ impl Parser {
                             // it will require extra tests to ensure that invariants have
                             // been preserved between this code (which works well) and
                             // the future rewrite.
-                            "collect_batch_subnets" => {
-                                trans_min!(SubnetState::Waiting);
+                            "prepare" => {
+                                trans_min!(BatchState::Waiting);
                             }
                             "wait_until_start_time" => {
                                 batch.actual_start_time = match task_instance.end_date {
@@ -434,28 +380,25 @@ impl Parser {
                                         }
                                     }
                                 };
-                                trans_exact!(SubnetState::Waiting);
-                            }
-                            "wait_for_preconditions" => {
-                                trans_exact!(SubnetState::Proposing);
+                                trans_exact!(BatchState::Waiting);
                             }
                             "create_proposal_if_none_exists" => {
-                                trans_exact!(SubnetState::WaitingForElection);
+                                trans_exact!(BatchState::WaitingForElection);
                             }
                             "request_proposal_vote" => {
                                 // We ignore this one for the purposes of rollout state setup.
                             }
                             "wait_until_proposal_is_accepted" => {
-                                trans_exact!(SubnetState::WaitingForAdoption);
+                                trans_exact!(BatchState::WaitingForAdoption);
                             }
-                            "wait_for_replica_revision" => {
-                                trans_exact!(SubnetState::WaitingForAlertsGone);
+                            "wait_for_revision_adoption" => {
+                                trans_exact!(BatchState::WaitingUntilNodesHealthy);
                             }
-                            "wait_until_no_alerts" => {
-                                trans_exact!(SubnetState::Complete);
+                            "wait_until_nodes_healthy" => {
+                                trans_exact!(BatchState::Complete);
                             }
                             "join" => {
-                                trans_exact!(SubnetState::Complete);
+                                trans_exact!(BatchState::Complete);
                                 batch.end_time = task_instance.end_date;
                             }
                             &_ => {
@@ -463,23 +406,6 @@ impl Parser {
                             }
                         },
                     },
-                }
-            } else if task_instance.task_id == "upgrade_unassigned_nodes" {
-                match task_instance.state {
-                    Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
-                    Some(TaskInstanceState::UpForRetry) | Some(TaskInstanceState::Restarting) => {
-                        rollout.state = State::Problem
-                    }
-                    Some(TaskInstanceState::Failed) | Some(TaskInstanceState::UpstreamFailed) => {
-                        rollout.state = State::Failed
-                    }
-                    Some(TaskInstanceState::UpForReschedule)
-                    | Some(TaskInstanceState::Running)
-                    | Some(TaskInstanceState::Deferred)
-                    | Some(TaskInstanceState::Queued)
-                    | Some(TaskInstanceState::Scheduled)
-                    | Some(TaskInstanceState::Success)
-                    | None => rollout.state = min(rollout.state, State::UpgradingUnassignedNodes),
                 }
             } else {
                 warn!(target: tgt, "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
@@ -494,6 +420,6 @@ impl Parser {
             }
         }
 
-        Ok(RolloutKind::RolloutIcOsToMainnetSubnets(rollout))
+        Ok(RolloutKind::RolloutIcOsToMainnetApiBoundaryNodes(rollout))
     }
 }

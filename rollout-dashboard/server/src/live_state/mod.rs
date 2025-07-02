@@ -25,8 +25,10 @@ use tokio::task::JoinHandle;
 use tokio::time::{Duration, sleep};
 use tokio::{select, spawn};
 
+mod api_boundary_nodes_rollout;
 mod guestos_rollout;
 mod log_inspector;
+mod plan;
 mod python;
 mod task_sorter;
 
@@ -120,6 +122,7 @@ impl FromStr for DagRunID {
 #[derive(Clone)]
 enum Parser {
     RolloutIcOsToMainnetSubnets(guestos_rollout::Parser),
+    RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes_rollout::Parser),
 }
 
 impl Parser {
@@ -128,6 +131,11 @@ impl Parser {
             "rollout_ic_os_to_mainnet_subnets" => Ok(Parser::RolloutIcOsToMainnetSubnets(
                 guestos_rollout::Parser::new(),
             )),
+            "rollout_ic_os_to_mainnet_api_boundary_nodes" => {
+                Ok(Parser::RolloutIcOsToMainnetApiBoundaryNodes(
+                    api_boundary_nodes_rollout::Parser::new(),
+                ))
+            }
             _ => Err(InvalidDagID {
                 dag_id: dag_id.to_string(),
             }),
@@ -137,6 +145,8 @@ impl Parser {
     fn valid_dag_ids() -> Vec<DagID> {
         vec![
             DagID::from_str("rollout_ic_os_to_mainnet_subnets")
+                .expect("Should be convertable to DAG ID"),
+            DagID::from_str("rollout_ic_os_to_mainnet_api_boundary_nodes")
                 .expect("Should be convertable to DAG ID"),
         ]
     }
@@ -149,6 +159,9 @@ impl Parser {
     ) -> Result<RolloutKind, RolloutDataGatherError> {
         match self {
             Self::RolloutIcOsToMainnetSubnets(r) => {
+                r.reparse(dag_run, airflow_api, linearized_tasks).await
+            }
+            Self::RolloutIcOsToMainnetApiBoundaryNodes(r) => {
                 r.reparse(dag_run, airflow_api, linearized_tasks).await
             }
         }
@@ -351,14 +364,18 @@ pub(crate) struct AirflowStateSyncer<S> {
 }
 
 impl AirflowStateSyncer<Initial> {
-    pub fn new(airflow_api: AirflowClient, max_rollouts: usize, refresh_interval: u64) -> Self {
+    pub fn new(
+        airflow_api: Arc<AirflowClient>,
+        max_rollouts: usize,
+        refresh_interval: u64,
+    ) -> Self {
         let init: CurrentState = v2::StateResponse::Error(v2::Error {
             code: StatusCode::NO_CONTENT,
             message: "".to_string(),
         });
         let (stream_tx, _stream_rx) = watch::channel::<CurrentState>(init.clone());
         Self {
-            airflow_api: Arc::new(airflow_api),
+            airflow_api,
             syncer_state: Arc::new(Mutex::new(SyncerState {
                 rollout_states: RolloutStates(HashMap::new()),
                 log_inspectors: HashMap::new(),

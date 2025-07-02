@@ -254,7 +254,8 @@ pub mod v1 {
 
 pub mod v2 {
     pub use super::v1::{
-        Batch, RolloutState as RolloutIcOsToMainnetSubnetsState, Subnet, SubnetRolloutState,
+        Batch as SubnetsBatch, RolloutState as RolloutIcOsToMainnetSubnetsState, Subnet,
+        SubnetRolloutState,
     };
     use crate::airflow_client::{DagsResponse, DagsResponseItem};
     use chrono::{DateTime, Utc};
@@ -270,7 +271,7 @@ pub mod v2 {
     pub struct RolloutIcOsToMainnetSubnets {
         pub state: RolloutIcOsToMainnetSubnetsState,
         /// Associative array of `{batch ID -> Batch}` planned for the rollout.
-        pub batches: IndexMap<usize, Batch>,
+        pub batches: IndexMap<usize, SubnetsBatch>,
         /// Configuration associated to the rollout.
         pub conf: IndexMap<String, serde_json::Value>,
     }
@@ -303,9 +304,7 @@ pub mod v2 {
     #[derive(Serialize, Debug, Clone)]
     pub struct ApiBoundaryNode {
         /// This is the node ID.
-        node_id: String,
-        /// This is the target git revision for the API boundary node.
-        git_revision: String,
+        pub node_id: String,
     }
 
     #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
@@ -327,7 +326,7 @@ pub mod v2 {
 
     #[derive(Serialize, Debug, Clone)]
     /// Represents a batch of subnets to upgrade.
-    pub struct APIBoundaryNodesBatch {
+    pub struct ApiBoundaryNodesBatch {
         /// The time the batch was programmed to start at.
         pub planned_start_time: DateTime<Utc>,
         /// The actual observed start time of the batch.
@@ -346,10 +345,9 @@ pub mod v2 {
     /// Represents a rollout of GuestOS to mainnet API boundary nodes.
     #[derive(Debug, Serialize, Clone)]
     pub struct RolloutIcOsToMainnetApiBoundaryNodes {
-        #[serde(flatten)]
         pub state: RolloutIcOsToMainnetApiBoundaryNodesState,
         /// Associative array of `{batch ID -> Batch}` planned for the rollout.
-        pub batches: IndexMap<usize, APIBoundaryNodesBatch>,
+        pub batches: IndexMap<usize, ApiBoundaryNodesBatch>,
         /// Configuration associated to the rollout.
         pub conf: IndexMap<String, serde_json::Value>,
     }
