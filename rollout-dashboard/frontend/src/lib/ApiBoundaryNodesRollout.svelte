@@ -15,7 +15,7 @@
     if (rolloutClass !== "complete" && rolloutClass !== "failed") {
         rolloutClass = "active";
     }
-    let git_revision = rollout.conf.git_revision;
+    let git_revision: string = rollout.conf.git_revision.toString();
 </script>
 
 <section class="rollout {rolloutClass} {rollout.kind}">
