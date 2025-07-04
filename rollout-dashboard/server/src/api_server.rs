@@ -1,4 +1,4 @@
-use crate::live_state::{AirflowStateSyncer, CurrentState, Live};
+use crate::live_state::{AirflowStateSyncer, Live, SyncCycleState};
 use async_stream::try_stream;
 use axum::extract::Path;
 use axum::extract::Query;
@@ -10,9 +10,7 @@ use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
 use rollout_dashboard::airflow_client::AirflowClient;
-use rollout_dashboard::airflow_client::AirflowError;
 use rollout_dashboard::airflow_client::DagRunsResponseItem;
-use rollout_dashboard::types::v2::StateResponse;
 use rollout_dashboard::types::{
     unstable, v1,
     v2::{DeletedRollout, Error as SError, Rollout, State as SOK, sse as SSE},
@@ -20,7 +18,6 @@ use rollout_dashboard::types::{
 use serde::{Deserialize, Deserializer, de};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
-use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -82,35 +79,31 @@ impl ApiServer {
     // #[debug_handler]
     async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
         match self.state_syncer.get_current_state().await {
-            StateResponse::State(s) => Ok(Json(
+            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
+            SyncCycleState::State(s) => Ok(Json(
                 s.rollouts
                     .into_iter()
                     .filter_map(|r| r.try_into().ok())
                     .collect(),
             )),
-            StateResponse::Error(SError { code, message }) => Err((code, message)),
+            SyncCycleState::Error(err) => Err(err.into()),
         }
     }
 
     // #[debug_handler]
     async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
         match self.state_syncer.get_current_state().await {
-            StateResponse::State(s) => Ok(Json(s.rollout_engine_states.into())),
-            StateResponse::Error(SError { code, message }) => Err((code, message)),
+            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
+            SyncCycleState::State(s) => Ok(Json(s.rollout_engine_states.into())),
+            SyncCycleState::Error(err) => Err(err.into()),
         }
-    }
-
-    // #[debug_handler]
-    async fn get_cache(
-        &self,
-    ) -> Result<Json<Vec<unstable::FlowCacheResponse>>, (StatusCode, String)> {
-        Ok(Json(self.state_syncer.get_cache().await))
     }
 
     async fn get_state(&self) -> Result<Json<SOK>, (StatusCode, String)> {
         match self.state_syncer.get_current_state().await {
-            StateResponse::State(s) => Ok(Json(s)),
-            StateResponse::Error(SError { code, message }) => Err((code, message)),
+            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
+            SyncCycleState::State(s) => Ok(Json(s)),
+            SyncCycleState::Error(e) => Err(e.into()),
         }
     }
 
@@ -122,26 +115,7 @@ impl ApiServer {
         Ok(Json(
             match self.airflow_api.dag_run(dag_id, dag_run_id).await {
                 Ok(val) => val,
-                Err(e) => {
-                    return Err(match e {
-                        AirflowError::StatusCode(c) => (c, "Internal server error".to_string()),
-                        AirflowError::ReqwestError(err) => {
-                            let mut explanation = format!("Cannot contact Airflow: {}", err);
-                            let mut err = err.source();
-                            loop {
-                                match err {
-                                    None => break,
-                                    Some(e) => {
-                                        explanation = format!("{} -> {}", explanation.as_str(), e);
-                                        err = e.source();
-                                    }
-                                }
-                            }
-                            (StatusCode::BAD_GATEWAY, explanation)
-                        }
-                        AirflowError::Other(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                    });
-                }
+                Err(e) => return Err(e.into()),
             },
         ))
     }
@@ -154,34 +128,43 @@ impl ApiServer {
     /// message, not just one.
     fn produce_sse_messages(
         self: Arc<Self>,
-        current_rollout_data: &StateResponse,
-        last_rollout_data: &Option<StateResponse>,
+        current_rollout_data: &SyncCycleState,
+        last_rollout_data: &SyncCycleState,
         delta_support: bool,
     ) -> Vec<SSE::Message> {
-        match (&current_rollout_data, &last_rollout_data, delta_support) {
+        match (current_rollout_data, last_rollout_data, delta_support) {
             // First sync or error before.  Send full sync.
-            (StateResponse::State(state), None | Some(StateResponse::Error(_)), _) => {
+            (SyncCycleState::Initial, _, _) => {
+                vec![]
+            }
+            (
+                SyncCycleState::State(state),
+                SyncCycleState::Initial | SyncCycleState::Error(_),
+                _,
+            ) => {
                 vec![SSE::Message::CompleteState(state.clone())]
             }
             // Error after a good update.  Send error.
-            (StateResponse::Error(e), None | Some(StateResponse::State(_)), _) => {
-                vec![SSE::Message::Error(e.clone())]
+            (SyncCycleState::Error(e), SyncCycleState::Initial | SyncCycleState::State(_), _) => {
+                vec![SSE::Message::Error(e.clone().into())]
             }
             // Error after an error.  Only send update if errors differ.
-            (StateResponse::Error(e), Some(StateResponse::Error(olde)), _) => {
+            (SyncCycleState::Error(e), SyncCycleState::Error(olde), _) => {
+                let olde: SError = olde.clone().into();
+                let e: SError = e.clone().into();
                 if e == olde {
                     vec![]
                 } else {
-                    vec![SSE::Message::Error(e.clone())]
+                    vec![SSE::Message::Error(e)]
                 }
             }
             // Last time was a good update, but delta support is not requested.  Send full sync.
             (
-                StateResponse::State(SOK {
+                SyncCycleState::State(SOK {
                     rollouts: new_rollouts,
                     rollout_engine_states: new_rollout_engine_states,
                 }),
-                Some(StateResponse::State(SOK { .. })),
+                SyncCycleState::State(_),
                 false,
             ) => vec![
                 (SSE::Message::CompleteState(SOK {
@@ -191,14 +174,14 @@ impl ApiServer {
             ],
             // Last time was a good update and sync is enabled.  Send differential sync.
             (
-                StateResponse::State(SOK {
+                SyncCycleState::State(SOK {
                     rollouts: new_rollouts,
                     rollout_engine_states: new_rollout_engine_states,
                 }),
-                Some(StateResponse::State(SOK {
+                SyncCycleState::State(SOK {
                     rollouts: old_rollouts,
                     rollout_engine_states: old_rollout_engine_states,
-                })),
+                }),
                 true,
             ) => {
                 let new_names = new_rollouts
@@ -313,17 +296,17 @@ impl ApiServer {
                 let disconnection_guard = DisconnectionGuard::default();
 
                 // Set an initial message to diff the first broadcast message against.
-                let mut last_rollout_data: Option<CurrentState> = None;
+                let mut last_rollout_data: SyncCycleState = SyncCycleState::Initial;
                 let mut last_engine_state: v1::RolloutEngineState = v1::RolloutEngineState::Active;
 
                 loop {
-                    let current_rollout_data: CurrentState = subscription.borrow_and_update().clone();
+                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().clone();
                     let messages: Vec<SSE::Message> = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.into_iter() {
                         let mm = self.compat_convert_v2_sse_state_to_v1(message, &mut last_engine_state);
                         yield sse::Event::default().json_data(&mm).unwrap()
                     }
-                    last_rollout_data = Some(current_rollout_data);
+                    last_rollout_data = current_rollout_data;
                     if subscription.changed().await.is_err() {
                         break;
                     }
@@ -353,10 +336,10 @@ impl ApiServer {
                 let disconnection_guard = DisconnectionGuard::default();
 
                 // Set an initial message to diff the first broadcast message against.
-                let mut last_rollout_data: Option<CurrentState> = None;
+                let mut last_rollout_data = SyncCycleState::Initial;
 
                 loop {
-                    let current_rollout_data: CurrentState = subscription.borrow_and_update().clone();
+                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().clone();
                     let messages = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.iter() {
                         match message {
@@ -374,7 +357,7 @@ impl ApiServer {
                             }
                         }
                     }
-                    last_rollout_data = Some(current_rollout_data);
+                    last_rollout_data = current_rollout_data;
                     if subscription.changed().await.is_err() {
                         break;
                     }
@@ -390,6 +373,17 @@ impl ApiServer {
                 .interval(Duration::from_secs(5))
                 .text("keepalive"),
         )
+    }
+
+    // #[debug_handler]
+    async fn get_cache(
+        &self,
+    ) -> Result<Json<Vec<unstable::FlowCacheResponse>>, (StatusCode, String)> {
+        Ok(Json(self.state_syncer.get_cache().await))
+    }
+
+    async fn get_internal_state(&self) -> Result<Json<SyncCycleState>, Infallible> {
+        Ok(Json(self.state_syncer.get_current_state().await))
     }
 
     fn v1_api(self: Arc<Self>) -> Router {
@@ -441,12 +435,17 @@ impl ApiServer {
 
     fn unstable_api(self: Arc<Self>) -> Router {
         let cached_data_handler_ref = self.clone();
+        let cached_error_handler_ref = self.clone();
         let get_dag_run_handler_ref = self.clone();
 
         Router::new()
             .route(
                 "/cache",
                 get(move || async move { cached_data_handler_ref.get_cache().await }),
+            )
+            .route(
+                "/internal_state",
+                get(move || async move { cached_error_handler_ref.get_internal_state().await }),
             )
             .route(
                 "/dags",

@@ -505,7 +505,7 @@ pub mod v2 {
         pub rollout_engine_states: RolloutEngineStates,
     }
 
-    fn serialize_status_code<S>(e: &StatusCode, s: S) -> Result<S::Ok, S::Error>
+    pub fn serialize_status_code<S>(e: &StatusCode, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -528,6 +528,9 @@ pub mod v2 {
 
     /// The two variants of full state that can be sent by
     /// non-SSE endpoints, and also stored internally.
+    /// Contains either a list of rollouts ordered from newest to oldest,
+    /// dated from the last time it was successfully updated, or an HTTP
+    /// status code corresponding to -- and with -- a message for the last error.
     #[derive(Serialize, Clone)]
     #[serde(tag = "untagged")]
     pub enum StateResponse {

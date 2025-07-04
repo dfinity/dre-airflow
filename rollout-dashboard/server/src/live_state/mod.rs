@@ -9,11 +9,11 @@ use rollout_dashboard::airflow_client::{
 };
 use rollout_dashboard::types::v2::{Rollout, RolloutKind};
 use rollout_dashboard::types::{unstable, v2};
+use serde::Serialize;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::convert::Infallible;
-use std::error::Error;
 use std::fmt::{self, Display};
 use std::future::Future;
 use std::str::FromStr;
@@ -61,10 +61,32 @@ impl Display for InvalidDagID {
     }
 }
 
-#[derive(Debug)]
-enum RolloutDataGatherError {
+#[derive(Debug, Serialize)]
+pub enum RolloutDataGatherError {
     AirflowError(AirflowError),
     CyclicDependency(task_sorter::CyclicDependencyError),
+}
+
+impl Display for RolloutDataGatherError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Cannot gather rollout data: {}",
+            match self {
+                Self::AirflowError(e) => e.to_string(),
+                Self::CyclicDependency(e) => e.to_string(),
+            }
+        )
+    }
+}
+
+impl Clone for RolloutDataGatherError {
+    fn clone(&self) -> Self {
+        match self {
+            Self::AirflowError(e) => Self::AirflowError(e.clone()),
+            Self::CyclicDependency(e) => Self::CyclicDependency(e.clone()),
+        }
+    }
 }
 
 impl From<AirflowError> for RolloutDataGatherError {
@@ -79,10 +101,30 @@ impl From<task_sorter::CyclicDependencyError> for RolloutDataGatherError {
     }
 }
 
-/// Contains either a list of rollouts ordered from newest to oldest,
-/// dated from the last time it was successfully updated, or an HTTP
-/// status code corresponding to -- and with -- a message for the last error.
-pub type CurrentState = v2::StateResponse;
+impl From<RolloutDataGatherError> for (reqwest::StatusCode, String) {
+    fn from(f: RolloutDataGatherError) -> Self {
+        match f {
+            RolloutDataGatherError::AirflowError(e) => e.into(),
+            RolloutDataGatherError::CyclicDependency(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", f))
+            }
+        }
+    }
+}
+
+impl From<RolloutDataGatherError> for v2::Error {
+    fn from(f: RolloutDataGatherError) -> v2::Error {
+        let (code, message) = f.into();
+        v2::Error { code, message }
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub enum SyncCycleState {
+    Initial,
+    State(v2::State),
+    Error(RolloutDataGatherError),
+}
 
 // Types to prevent type confusion.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -355,8 +397,8 @@ pub(crate) struct Live;
 pub(crate) struct AirflowStateSyncer<S> {
     airflow_api: Arc<AirflowClient>,
     syncer_state: Arc<Mutex<SyncerState>>,
-    current_state: Arc<Mutex<CurrentState>>,
-    stream_tx: Sender<CurrentState>,
+    current_state: Arc<Mutex<SyncCycleState>>,
+    stream_tx: Sender<SyncCycleState>,
     refresh_interval: u64,
     max_rollouts: usize,
     #[allow(dead_code)]
@@ -369,11 +411,8 @@ impl AirflowStateSyncer<Initial> {
         max_rollouts: usize,
         refresh_interval: u64,
     ) -> Self {
-        let init: CurrentState = v2::StateResponse::Error(v2::Error {
-            code: StatusCode::NO_CONTENT,
-            message: "".to_string(),
-        });
-        let (stream_tx, _stream_rx) = watch::channel::<CurrentState>(init.clone());
+        let init: SyncCycleState = SyncCycleState::Initial;
+        let (stream_tx, _stream_rx) = watch::channel::<SyncCycleState>(init.clone());
         Self {
             airflow_api,
             syncer_state: Arc::new(Mutex::new(SyncerState {
@@ -414,7 +453,7 @@ impl AirflowStateSyncer<Initial> {
 }
 
 impl AirflowStateSyncer<Live> {
-    pub async fn get_current_state(&self) -> CurrentState {
+    pub async fn get_current_state(&self) -> SyncCycleState {
         self.current_state.lock().await.clone()
     }
 
@@ -446,7 +485,7 @@ impl AirflowStateSyncer<Live> {
     /// Create a channel that will get state updates as soon as they are available.
     /// This needs `periodically_sync_state` running in a coroutine.  That is
     /// statically ensured by the different type of this impl.
-    pub fn subscribe_to_state_updates(&self) -> watch::Receiver<CurrentState> {
+    pub fn subscribe_to_state_updates(&self) -> watch::Receiver<SyncCycleState> {
         self.stream_tx.subscribe()
     }
 
@@ -703,44 +742,13 @@ impl AirflowStateSyncer<Live> {
         Ok((engine_states, rollouts.into()))
     }
 
-    async fn sync_state(&self, max_rollouts: usize) -> CurrentState {
+    async fn sync_state(&self, max_rollouts: usize) -> SyncCycleState {
         match self.update(max_rollouts).await {
-            Ok((engine_state, rollouts)) => v2::StateResponse::State(v2::State {
+            Ok((engine_state, rollouts)) => SyncCycleState::State(v2::State {
                 rollout_engine_states: engine_state,
                 rollouts,
             }),
-            Err(e) => {
-                let res = match e {
-                    RolloutDataGatherError::AirflowError(AirflowError::StatusCode(c)) => {
-                        (c, "Internal server error".to_string())
-                    }
-                    RolloutDataGatherError::AirflowError(AirflowError::ReqwestError(err)) => {
-                        let mut explanation = format!("Cannot contact Airflow: {}", err);
-                        let mut err = err.source();
-                        loop {
-                            match err {
-                                None => break,
-                                Some(e) => {
-                                    explanation = format!("{} -> {}", explanation.as_str(), e);
-                                    err = e.source();
-                                }
-                            }
-                        }
-                        (StatusCode::BAD_GATEWAY, explanation)
-                    }
-                    RolloutDataGatherError::AirflowError(AirflowError::Other(msg)) => {
-                        (StatusCode::INTERNAL_SERVER_ERROR, msg)
-                    }
-                    RolloutDataGatherError::CyclicDependency(dep) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("A cyclic dependency was found in the task graph: {:?}", dep),
-                    ),
-                };
-                v2::StateResponse::Error(v2::Error {
-                    code: res.0,
-                    message: res.1,
-                })
-            }
+            Err(e) => SyncCycleState::Error(e),
         }
     }
 
@@ -758,7 +766,8 @@ impl AirflowStateSyncer<Live> {
             let d = select! {
                 d = self.sync_state(self.max_rollouts) => {
                     match &d {
-                        v2::StateResponse::State(v2::State {rollouts, ..}) => {
+                        SyncCycleState::Initial => (),
+                        SyncCycleState::State(v2::State {rollouts, ..}) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
                             info!(target: tgt, "{} rollouts collected after {}.  Sleeping for {} seconds.", rollouts.len(), loop_delta_time, self.refresh_interval);
                             if errored {
@@ -768,10 +777,10 @@ impl AirflowStateSyncer<Live> {
                                 // Ensure our data structure is overwritten by whatever data we obtained after the last loop.
                             }
                         }
-                        v2::StateResponse::Error(v2::Error{ message, ..}) => {
+                        SyncCycleState::Error(err) => {
                             error!(
                                 target: tgt, "During sync_state within periodically_sync_state: {}",
-                               message
+                               err
                             );
                             errored = true;
                         }

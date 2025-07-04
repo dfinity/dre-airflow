@@ -1,6 +1,7 @@
 use rollout_dashboard::airflow_client::{
     TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
 };
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::rc::Rc;
@@ -8,14 +9,14 @@ use std::sync::Arc;
 use std::{vec, vec::Vec};
 use topological_sort::TopologicalSort;
 
-#[derive(Debug)]
-pub(super) struct CyclicDependencyError {
+#[derive(Debug, Clone, Serialize)]
+pub struct CyclicDependencyError {
     message: String,
 }
 
 impl Display for CyclicDependencyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "Graph is cyclic: {}", self.message)
     }
 }
 
@@ -46,7 +47,7 @@ impl TaskInstanceTopologicalSorter {
                 true => {
                     if !ts.is_empty() {
                         return Err(CyclicDependencyError {
-                            message: format!("cyclic dependencies: {:?}", ts),
+                            message: format!("cyclic dependencies on tasks {:?}", ts),
                         });
                     }
                     break;
