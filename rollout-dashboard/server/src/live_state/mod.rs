@@ -770,7 +770,7 @@ impl AirflowStateSyncer<Live> {
                         }
                         v2::StateResponse::Error(v2::Error{ message, ..}) => {
                             error!(
-                                target: tgt, "After processing fetch_rollout_data: {}",
+                                target: tgt, "During sync_state within periodically_sync_state: {}",
                                message
                             );
                             errored = true;
