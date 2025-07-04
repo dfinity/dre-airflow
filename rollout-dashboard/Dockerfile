@@ -1,4 +1,4 @@
-FROM docker.io/rust:1.80-bookworm as rust
+FROM docker.io/rust:1.88-bookworm as rust
 WORKDIR /usr/src
 RUN cargo new rollout-dashboard
 COPY server/Cargo.toml server/Cargo.lock ./rollout-dashboard/

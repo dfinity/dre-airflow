@@ -1,7 +1,10 @@
+use super::types::v2::serialize_status_code;
 use async_recursion::async_recursion;
 use chrono::{DateTime, TimeDelta, Utc};
+use indexmap::IndexMap;
 use log::{debug, trace, warn};
 use regex::Regex;
+use reqwest::StatusCode;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
 use serde::de::Error;
@@ -9,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::error::Error as ErrorTrait;
 use std::fmt::Display;
 use std::future::Future;
 use std::string::FromUtf8Error;
@@ -157,7 +161,7 @@ impl<'a> DagsQueryFilter<'a> {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum DagRunState {
     Queued,
@@ -166,9 +170,9 @@ pub enum DagRunState {
     Failed,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DagRunsResponseItem {
-    pub conf: HashMap<String, serde_json::Value>,
+    pub conf: IndexMap<String, serde_json::Value>,
     /// dag_run_id is unique, enforced by Airflow.
     pub dag_run_id: String,
     pub dag_id: String,
@@ -617,11 +621,75 @@ impl Pageable for EventLogsResponse {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub enum AirflowError {
+    #[serde(serialize_with = "serialize_status_code")]
     StatusCode(reqwest::StatusCode),
-    ReqwestError(reqwest::Error),
-    Other(String),
+    ReqwestError(String),
+    JSONDecodeError {
+        explanation: String,
+        payload: String,
+    },
+    DeserializeError {
+        explanation: String,
+        payload: String,
+    },
+    AuthenticationError(String),
+}
+
+impl From<reqwest::Error> for AirflowError {
+    fn from(err: reqwest::Error) -> AirflowError {
+        let mut explanation = format!("Cannot contact Airflow: {}", err);
+        let mut err = err.source();
+        loop {
+            match err {
+                None => break,
+                Some(e) => {
+                    explanation = format!("{} -> {}", explanation.as_str(), e);
+                    err = e.source();
+                }
+            }
+        }
+        AirflowError::ReqwestError(explanation)
+    }
+}
+
+impl From<AirflowError> for (StatusCode, String) {
+    fn from(e: AirflowError) -> (reqwest::StatusCode, String) {
+        match e {
+            AirflowError::StatusCode(c) => (c, format!("{}", e)),
+            AirflowError::ReqwestError(_) => (StatusCode::BAD_GATEWAY, format!("{}", e)),
+            AirflowError::AuthenticationError(_)
+            | AirflowError::DeserializeError { .. }
+            | AirflowError::JSONDecodeError { .. } => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+            }
+        }
+    }
+}
+
+impl Display for AirflowError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::ReqwestError(s) => write!(f, "{}", s),
+            Self::StatusCode(s) => write!(f, "Unexpected response code {} from Airflow", s),
+            Self::JSONDecodeError { explanation, .. } => {
+                write!(
+                    f,
+                    "Error decoding JSON / UTF-8 from Airflow response: {}",
+                    explanation
+                )
+            }
+            Self::DeserializeError { explanation, .. } => {
+                write!(
+                    f,
+                    "Error deserializing structure from Airflow response: {}",
+                    explanation
+                )
+            }
+            Self::AuthenticationError(s) => write!(f, "{}", s),
+        }
+    }
 }
 
 struct PagingParameters {
@@ -688,11 +756,15 @@ where
             Ok(json_value) => match <T>::deserialize(json_value.clone()) {
                 Ok(deserialized) => deserialized,
                 Err(e) => {
-                    warn!(target: "airflow_client::paged_get" ,"Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
-                    return Err(AirflowError::Other(format!(
-                        "Could not deserialize structure: {}",
-                        e
-                    )));
+                    warn!(target: "airflow_client::paged_get" ,"Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
+                    return Err(AirflowError::DeserializeError {
+                        explanation: format!(
+                            "Could not deserialize {}: {}",
+                            std::any::type_name::<T>(),
+                            e
+                        ),
+                        payload: json_value.to_string(),
+                    });
                 }
             },
             Err(e) => return Err(e),
@@ -747,11 +819,15 @@ where
         Ok(json_value) => match <T>::deserialize(json_value.clone()) {
             Ok(deserialized) => deserialized,
             Err(e) => {
-                warn!(target: "airflow_client::paged_post", "Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
-                return Err(AirflowError::Other(format!(
-                    "Could not deserialize structure: {}",
-                    e
-                )));
+                warn!(target: "airflow_client::paged_post", "Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
+                return Err(AirflowError::DeserializeError {
+                    explanation: format!(
+                        "Could not deserialize {}: {}",
+                        std::any::type_name::<T>(),
+                        e
+                    ),
+                    payload: json_value.to_string(),
+                });
             }
         },
         Err(e) => return Err(e),
@@ -806,6 +882,28 @@ pub struct AirflowClient {
     username: String,
     password: String,
     client: Arc<reqwest::Client>,
+}
+
+fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowError> {
+    Ok(match serde_json::from_slice(&bytes) {
+        Ok(decoded) => decoded,
+        Err(deser_error) => match String::from_utf8(bytes.to_vec()) {
+            Ok(text) => {
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to JSON ({})\n{}", deser_error, text);
+                return Err(AirflowError::JSONDecodeError {
+                    explanation: format!("{}", deser_error),
+                    payload: text,
+                });
+            }
+            Err(decode_error) => {
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to UTF-8 ({})", decode_error);
+                return Err(AirflowError::JSONDecodeError {
+                    explanation: format!("{}: {}", deser_error, decode_error),
+                    payload: "".to_string(),
+                });
+            }
+        },
+    })
 }
 
 impl AirflowClient {
@@ -869,13 +967,15 @@ impl AirflowClient {
                 let status = resp.status();
                 debug!(target: "airflow_client::http_client", "GET {} HTTP {}", url, status);
                 match status {
-                    reqwest::StatusCode::OK => match resp.json().await {
-                        Ok(json) => Ok(json),
-                        Err(err) => Err(AirflowError::Other(format!(
-                            "Could not decode JSON from Airflow: {}",
-                            err
-                        ))),
-                    },
+                    reqwest::StatusCode::OK => {
+                        let bytes = match resp.bytes().await {
+                            Ok(bytes) => bytes,
+                            Err(fetcherror) => {
+                                return Err(AirflowError::from(fetcherror));
+                            }
+                        };
+                        decode_json_from_bytes(bytes.to_vec())
+                    }
                     reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
                         if attempt_login {
                             debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {}", status);
@@ -885,8 +985,9 @@ impl AirflowClient {
                             };
                             self._get_or_login_and_get(suburl, false).await
                         } else {
-                            Err(AirflowError::Other(
-                                "Forbidden from Airflow -- could not log in".into(),
+                            Err(AirflowError::AuthenticationError(
+                                "Proxy could not log into Airflow with its credentials (forbidden)"
+                                    .into(),
                             ))
                         }
                     }
@@ -896,7 +997,7 @@ impl AirflowClient {
                     other => Err(AirflowError::StatusCode(other)),
                 }
             }
-            Err(err) => Err(AirflowError::ReqwestError(err)),
+            Err(err) => Err(AirflowError::from(err)),
         };
         trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
         res
@@ -930,13 +1031,15 @@ impl AirflowClient {
                 let status = resp.status();
                 debug!(target: "airflow_client::http_client", "POST {} HTTP {}", url, status);
                 match status {
-                    reqwest::StatusCode::OK => match resp.json().await {
-                        Ok(json) => Ok(json),
-                        Err(err) => Err(AirflowError::Other(format!(
-                            "Could not decode JSON from Airflow: {}",
-                            err
-                        ))),
-                    },
+                    reqwest::StatusCode::OK => {
+                        let bytes = match resp.bytes().await {
+                            Ok(bytes) => bytes,
+                            Err(fetcherror) => {
+                                return Err(AirflowError::from(fetcherror));
+                            }
+                        };
+                        decode_json_from_bytes(bytes.to_vec())
+                    }
                     reqwest::StatusCode::FORBIDDEN => {
                         if attempt_login {
                             match self._login().await {
@@ -945,8 +1048,9 @@ impl AirflowClient {
                             };
                             self._post_or_login_and_post(suburl, content, false).await
                         } else {
-                            Err(AirflowError::Other(
-                                "Forbidden from Airflow -- could not log in".into(),
+                            Err(AirflowError::AuthenticationError(
+                                "Proxy could not log into Airflow with its credentials (forbidden)"
+                                    .into(),
                             ))
                         }
                     }
@@ -956,7 +1060,7 @@ impl AirflowClient {
                     other => Err(AirflowError::StatusCode(other)),
                 }
             }
-            Err(err) => Err(AirflowError::ReqwestError(err)),
+            Err(err) => Err(AirflowError::from(err)),
         };
         trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
         res
@@ -971,21 +1075,21 @@ impl AirflowClient {
                 reqwest::StatusCode::OK => match resp.text().await {
                     Ok(text) => text,
                     Err(err) => {
-                        return Err(AirflowError::Other(format!(
+                        return Err(AirflowError::AuthenticationError(format!(
                             "Error retrieving text that contains CSRF token: {}",
                             err
-                        )))
+                        )));
                     }
                 },
                 _ => {
-                    return Err(AirflowError::Other(format!(
+                    return Err(AirflowError::AuthenticationError(format!(
                         "Error retrieving page for CSRF token: {}",
                         resp.status()
                     )));
                 }
             },
             Err(err) => {
-                return Err(AirflowError::ReqwestError(err));
+                return Err(AirflowError::from(err));
             }
         };
 
@@ -999,7 +1103,7 @@ impl AirflowClient {
             csrf_tokens.push(res);
         }
         if csrf_tokens.is_empty() {
-            return Err(AirflowError::Other(
+            return Err(AirflowError::AuthenticationError(
                 "Could not find CSRF token in login page".into(),
             ));
         }
@@ -1017,22 +1121,22 @@ impl AirflowClient {
                 reqwest::StatusCode::OK => match resp.text().await {
                     Ok(text) => text,
                     Err(err) => {
-                        return Err(AirflowError::Other(format!(
+                        return Err(AirflowError::AuthenticationError(format!(
                             "Error retrieving logged-in cookie: {}",
                             err
-                        )))
+                        )));
                     }
                 },
                 _ => {
                     let (status, text) = (resp.status(), resp.text().await);
-                    return Err(AirflowError::Other(format!(
+                    return Err(AirflowError::AuthenticationError(format!(
                         "Server rejected login with status {} and text {:?}",
                         status, text
                     )));
                 }
             },
             Err(err) => {
-                return Err(AirflowError::ReqwestError(err));
+                return Err(AirflowError::from(err));
             }
         };
 
@@ -1046,7 +1150,7 @@ impl AirflowClient {
         limit: usize,
         offset: usize,
         filter: &DagsQueryFilter<'_>,
-        order_by: Option<String>, // FIXME: use structural typing here.
+        order_by: Option<String>,
     ) -> Result<DagsResponse, AirflowError> {
         let qpairs = filter.as_queryparams();
         let qparams: querystring::QueryParams =
@@ -1091,6 +1195,31 @@ impl AirflowClient {
             |x| self._get_logged_in(x),
         )
         .await
+    }
+
+    /// Return DAG runs from newest to oldest.
+    /// Optionally only return DAG runs updated between a certain time frame.
+    pub async fn dag_run(
+        &self,
+        dag_id: &str,
+        dag_run_id: &str,
+    ) -> Result<DagRunsResponseItem, AirflowError> {
+        let url = format!("dags/{}/dagRuns/{}", dag_id, dag_run_id);
+        let json_value = self._get_logged_in(url).await?;
+        match <DagRunsResponseItem>::deserialize(json_value.clone()) {
+            Ok(deserialized) => Ok(deserialized),
+            Err(e) => {
+                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
+                Err(AirflowError::DeserializeError {
+                    explanation: format!(
+                        "Could not deserialize {}: {}",
+                        std::any::type_name::<DagRunsResponseItem>(),
+                        e
+                    ),
+                    payload: json_value.to_string(),
+                })
+            }
+        }
     }
 
     /// Return TaskInstances for a DAG run.
@@ -1229,11 +1358,15 @@ impl AirflowClient {
         match <XComEntryResponse>::deserialize(json_value.clone()) {
             Ok(deserialized) => Ok(deserialized),
             Err(e) => {
-                warn!(target: "airflow_client::xcom_entry", "Error deserializing ({})\n{:?}", e, json_value);
-                Err(AirflowError::Other(format!(
-                    "Could not deserialize structure: {}",
-                    e
-                )))
+                warn!(target: "airflow_client::xcom_entry", "Error deserializing {} ({})\n{:?}", std::any::type_name::<XComEntryResponse>(), e, json_value);
+                Err(AirflowError::DeserializeError {
+                    explanation: format!(
+                        "Could not deserialize {}: {}",
+                        std::any::type_name::<XComEntryResponse>(),
+                        e
+                    ),
+                    payload: json_value.to_string(),
+                })
             }
         }
     }
@@ -1245,7 +1378,7 @@ impl AirflowClient {
         limit: usize,
         offset: usize,
         filters: &EventLogsResponseFilters<'_>,
-        order_by: Option<String>, // FIXME: use structural typing here.
+        order_by: Option<String>,
     ) -> Result<EventLogsResponse, AirflowError> {
         let qpairs = filters.as_queryparams();
         let qparams: querystring::QueryParams =

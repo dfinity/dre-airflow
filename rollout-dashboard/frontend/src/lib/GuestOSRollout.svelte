@@ -1,27 +1,33 @@
 <script lang="ts">
     import Time from "svelte-time";
     import SvelteMarkdown from "svelte-markdown";
-    import { type Rollout, rolloutStateIcon, rolloutStateName } from "./types";
-    import Batch from "./Batch.svelte";
-    export let rollout: Rollout;
+    import {
+        type RolloutIcOsToMainnetSubnets,
+        rolloutIcOsToMainnetSubnetsStateIcon,
+        rolloutIcOsToMainnetSubnetsStateName,
+        rolloutKindName,
+    } from "./types";
+    import { cap, activeClass } from "./lib";
+    import SubnetBatch from "./SubnetBatch.svelte";
+    export let rollout: RolloutIcOsToMainnetSubnets;
 
-    let rolloutClass: string = rollout.state;
-    if (rolloutClass !== "complete" && rolloutClass !== "failed") {
-        rolloutClass = "active";
-    }
+    let rolloutClass: String = activeClass(rollout.state);
 </script>
 
-<section class="rollout {rolloutClass}">
+<section class="rollout {rolloutClass} {rollout.kind}">
     <div class="general_info">
         <a
             rel="external"
             href={rollout.display_url}
             target="_blank"
-            title={rolloutStateName(rollout.state)}
+            title={cap(rolloutIcOsToMainnetSubnetsStateName(rollout))}
             data-sveltekit-preload-data="off"
         >
             <span class="state_icon">
-                {rolloutStateIcon(rollout.state)}
+                {rolloutIcOsToMainnetSubnetsStateIcon(rollout)}
+            </span>
+            <span class="kind">
+                {rolloutKindName(rollout)}
             </span>
             <span class="name">
                 {rollout.name}
@@ -48,7 +54,10 @@
                 relative
                 timestamp={rollout.dispatch_time}
                 format="dddd @ h:mm A · MMMM D, YYYY"
-            />{#if rollout.last_scheduling_decision}, updated <Time
+            />{#if rollout.last_scheduling_decision}, {rolloutIcOsToMainnetSubnetsStateName(
+                    rollout,
+                )}
+                <Time
                     live
                     relative
                     timestamp={rollout.last_scheduling_decision}
@@ -64,7 +73,7 @@
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
         <ul>
             {#each Object.entries(rollout.batches) as [batch_num, batch]}
-                <Batch {batch_num} {batch} />
+                <SubnetBatch {batch_num} {batch} />
             {/each}
         </ul>
     {:else}

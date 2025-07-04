@@ -2,47 +2,14 @@
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
-    import { type Batch, batchStateComment, batchStateIcon } from "./types";
+    import { selectTextOnFocus } from "./lib";
+    import {
+        type SubnetBatch,
+        subnetStateComment,
+        subnetStateIcon,
+    } from "./types";
     export let batch_num: String;
-    export let batch: Batch;
-
-    function selectTextOnFocus(node: HTMLDivElement | HTMLAnchorElement) {
-        const handleFocus = (event: Event) => {
-            function selectText(element: HTMLDivElement | HTMLAnchorElement) {
-                if (window.getSelection != null) {
-                    var range = document.createRange();
-                    range.selectNode(element);
-                    var selection = window.getSelection();
-                    if (selection != null) {
-                        selection.removeAllRanges();
-                        selection.addRange(range);
-                    }
-                }
-            }
-            node && selectText(node);
-        };
-        const handleDeFocus = (event: Event) => {
-            function clearSelection() {
-                if (window.getSelection != null) {
-                    var selection = window.getSelection();
-                    if (selection !== null) {
-                        selection.removeAllRanges();
-                    }
-                }
-            }
-            node && clearSelection();
-        };
-
-        node.addEventListener("focus", handleFocus);
-        node.addEventListener("focusout", handleDeFocus);
-
-        return {
-            destroy() {
-                node.removeEventListener("focus", handleFocus);
-                node.removeEventListener("focusout", handleDeFocus);
-            },
-        };
-    }
+    export let batch: SubnetBatch;
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">
@@ -55,10 +22,10 @@
                     target="_blank"
                     class="subnet_state"
                     data-sveltekit-preload-data="off"
-                    title={batchStateComment(subnet)}
+                    title={subnetStateComment(subnet)}
                 >
                     <div class="subnet_state_icon">
-                        {batchStateIcon(subnet.state)}
+                        {subnetStateIcon(subnet)}
                     </div></a
                 >
                 <a

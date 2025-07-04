@@ -8,17 +8,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tokio::select;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 use tower_http::services::ServeDir;
 
 mod api_server;
 mod live_state;
 
-use crate::live_state::AirflowStateUpdater;
 use rollout_dashboard::airflow_client::AirflowClient;
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
+const MAX_ROLLOUTS: u16 = 10;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -26,7 +26,7 @@ async fn main() -> ExitCode {
 
     let max_rollouts = from_str::<usize>(
         env::var("MAX_ROLLOUTS")
-            .unwrap_or("10".to_string())
+            .unwrap_or(format!("{}", MAX_ROLLOUTS))
             .as_str(),
     )
     .unwrap();
@@ -43,13 +43,10 @@ async fn main() -> ExitCode {
 
     let (end_tx, end_rx) = watch::channel(());
 
-    let syncer = AirflowStateSyncer::new(
-        AirflowStateUpdater::new(AirflowClient::new(airflow_url).unwrap()),
-        max_rollouts,
-        refresh_interval,
-    );
+    let airflow_client = Arc::new(AirflowClient::new(airflow_url).unwrap());
+    let syncer = AirflowStateSyncer::new(airflow_client.clone(), max_rollouts, refresh_interval);
     let (syncing_syncer, background_loop_fut) = syncer.start_syncing(end_rx.clone());
-    let server = Arc::new(api_server::ApiServer::new(syncing_syncer));
+    let server = Arc::new(api_server::ApiServer::new(syncing_syncer, airflow_client));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 

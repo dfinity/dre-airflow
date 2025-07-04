@@ -4,11 +4,11 @@
 use std::fmt::{self, Display};
 use std::ops::{AddAssign, MulAssign, Neg};
 
+use serde::Deserialize;
 use serde::de;
 use serde::de::{
     DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor,
 };
-use serde::Deserialize;
 use std::error;
 use std::result;
 
@@ -220,7 +220,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = ErrorImpl;
 
     // Look at the input data to decide what Serde data model type to

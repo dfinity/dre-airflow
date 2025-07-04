@@ -16,5 +16,8 @@
         "-p",
         "test_*.py"
     ],
-    "python.analysis.diagnosticMode": "workspace"
+    "python.analysis.diagnosticMode": "workspace",
+    "rust-analyzer.linkedProjects": [
+        "rollout-dashboard/server/Cargo.toml"
+    ]
 }
