@@ -45,12 +45,7 @@ function resetupEventSource() {
         if (status == 204) {
             airflow_state.set({ rollouts: [], error: "loading", rollout_engine_states: get(airflow_state).rollout_engine_states })
         } else {
-            let responseText = msg.message;
-            let errorText = status + " " + responseText;
-            if (responseText) {
-                responseText = responseText.split("\n")[0]
-                errorText = errorText + ": " + responseText
-            }
+            let errorText = msg.message.split("\n")[0];
             console.log('Request for rollout data failed: ' + errorText)
             airflow_state.set({
                 rollouts: get(airflow_state).rollouts,
