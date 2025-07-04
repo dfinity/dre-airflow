@@ -9,7 +9,11 @@ import operators.auto_rollout as auto_rollout
 import operators.github_rollout as github_rollout
 import operators.gsheets_rollout as gsheets_rollout
 import pendulum
-from dfinity.ic_os_rollout import DEFAULT_SUBNET_ROLLOUT_PLANS, PLAN_FORM
+from dfinity.ic_os_rollout import (
+    DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS,
+    DEFAULT_GUESTOS_ROLLOUT_PLANS,
+    PLAN_FORM,
+)
 from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
@@ -61,11 +65,20 @@ for network_name, network in IC_NETWORKS.items():
                 title="Maximum lookbehind in days",
                 description="How many days to look back for releases in release index.",
             ),
-            "plan": Param(
-                default=DEFAULT_SUBNET_ROLLOUT_PLANS[network_name].strip(),
+            "guestos_rollout_plan": Param(
+                default=DEFAULT_GUESTOS_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
-                title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule.",
+                title="GuestOS rollout plan",
+                description="A YAML-formatted string describing the GuestOS"
+                " rollout schedule.",
+                custom_html_form=PLAN_FORM,
+            ),
+            "api_boundary_nodes_rollout_plan": Param(
+                default=DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS[network_name].strip(),
+                type="string",
+                title="API boundary nodes rollout plan",
+                description="A YAML-formatted string describing the API boundary nodes"
+                " rollout schedule.",
                 custom_html_form=PLAN_FORM,
             ),
             "start_rollout": Param(
@@ -85,7 +98,9 @@ for network_name, network in IC_NETWORKS.items():
             release_versions_data_task_id="get_release_versions",
             feature_rollout_plan_task_id="get_feature_rollout_plan",
             max_days_lookbehind="{{ params.max_days_lookbehind }}",  # type: ignore
-            default_rollout_plan="{{ params.plan }}",
+            guestos_rollout_plan="{{ params.guestos_rollout_plan }}",
+            api_boundary_nodes_rollout_plan="{{ params"
+            ".api_boundary_nodes_rollout_plan }}",
         )
 
         (
@@ -118,11 +133,19 @@ for network_name, network in IC_NETWORKS.items():
                     "{{ params.start_rollout }}",
                 ],
             )
-            >> auto_rollout.TriggerRollout(
-                task_id="start_rollout",
-                trigger_dag_id=f"rollout_ic_os_to_{network_name}_subnets",
-                plan_task_id="auto_compute_rollout",
-                simulate_rollout=False,
+            >> (
+                auto_rollout.TriggerGuestOSRollout(
+                    task_id="start_guestos_rollout",
+                    trigger_dag_id=f"rollout_ic_os_to_{network_name}_subnets",
+                    plan_task_id="auto_compute_rollout",
+                    simulate_rollout=False,
+                ),
+                auto_rollout.TriggerAPIBoundaryNodesRollout(
+                    task_id="start_api_boundary_nodes_rollout",
+                    trigger_dag_id=f"rollout_ic_os_to_{network_name}_api_boundary_nodes",
+                    plan_task_id="auto_compute_rollout",
+                    simulate_rollout=False,
+                ),
             )
         )
 

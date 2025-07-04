@@ -12,6 +12,7 @@ from dfinity.rollout_types import (
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
     SubnetRolloutPlanSpec,
+    yaml_to_ApiBoundaryNodeRolloutPlanSpec,
 )
 
 from airflow.exceptions import DagRunAlreadyExists
@@ -28,24 +29,30 @@ def next_weekday(d: datetime.date, weekday: int) -> datetime.date:
 
 
 class AutoComputeRolloutPlan(BaseOperator):
-    template_fields = ["max_days_lookbehind", "default_rollout_plan"]
+    template_fields = [
+        "max_days_lookbehind",
+        "guestos_rollout_plan",
+        "api_boundary_nodes_rollout_plan",
+    ]
 
     def __init__(
         self,
         release_versions_data_task_id: str,
         feature_rollout_plan_task_id: str,
         max_days_lookbehind: int,
-        default_rollout_plan: str,
+        guestos_rollout_plan: str,
+        api_boundary_nodes_rollout_plan: str,
         _ignored: Any = None,
         **kwargs: Any,
     ) -> None:
         self.release_versions_data_task_id = release_versions_data_task_id
         self.feature_rollout_plan_task_id = feature_rollout_plan_task_id
         self.max_days_lookbehind = max_days_lookbehind
-        self.default_rollout_plan = default_rollout_plan
+        self.guestos_rollout_plan = guestos_rollout_plan
+        self.api_boundary_nodes_rollout_plan = api_boundary_nodes_rollout_plan
         super().__init__(**kwargs)
 
-    def execute(self, context: Context) -> tuple[str, str, str]:
+    def execute(self, context: Context) -> tuple[str, str, str, str]:
         release_versions = cast(
             Releases,
             context["task_instance"].xcom_pull(
@@ -180,7 +187,7 @@ class AutoComputeRolloutPlan(BaseOperator):
             )
 
         # Now compute rollout map.
-        spec = cast(SubnetRolloutPlanSpec, yaml.safe_load(self.default_rollout_plan))
+        spec = cast(SubnetRolloutPlanSpec, yaml.safe_load(self.guestos_rollout_plan))
 
         for hours in spec.values():
             for subnets in hours.values():
@@ -194,17 +201,28 @@ class AutoComputeRolloutPlan(BaseOperator):
                         subnets[n] = add_release(subnet)
 
         yamlified_spec = yaml.safe_dump(spec, sort_keys=False)
-        self.log.info("Rollout plan prepared:\n%s", yamlified_spec)
+        self.log.info("GuestOS rollout plan prepared:\n%s", yamlified_spec)
+
+        # Also parse the rollout plan spec.
+        apibnspec = yaml_to_ApiBoundaryNodeRolloutPlanSpec(
+            self.api_boundary_nodes_rollout_plan
+        )
+        yamlified_apibnspec = yaml.safe_dump(apibnspec, sort_keys=False)
+        self.log.info(
+            "Rollout plan for API boundary nodes prepared:\n%s", yamlified_apibnspec
+        )
+
         self.log.info("Base version of release: %s", selected_release_versions["base"])
 
         return (
             selected_release["rc_name"],
             selected_release_versions["base"],
             yamlified_spec,
+            yamlified_apibnspec,
         )
 
 
-class TriggerRollout(TriggerDagRunOperator):
+class TriggerGuestOSRollout(TriggerDagRunOperator):
     def __init__(
         self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
     ) -> None:
@@ -213,15 +231,45 @@ class TriggerRollout(TriggerDagRunOperator):
         TriggerDagRunOperator.__init__(self, *args, **kwargs)
 
     def execute(self, context: Context) -> None:
-        rc_name, base_git_revision, rollout_plan = cast(
-            tuple[str, str, str],
-            context["task_instance"].xcom_pull(
-                task_ids=self.plan_task_id,
-            ),
+        rc_name, base_git_revision, rollout_plan, _ = cast(
+            tuple[str, str, str, str],
+            context["task_instance"].xcom_pull(task_ids=self.plan_task_id),
         )
         self.conf = dict(
             git_revision=base_git_revision,
             plan=rollout_plan,
+            simulate=self.simulate_rollout,
+        )
+        try:
+            # Optimistically trigger DAG.
+            self.trigger_run_id = f"{rc_name}"
+            super().execute(context)
+        except DagRunAlreadyExists:
+            # Oh, another DAG already triggered with the same name.
+            # Trigger the DAG with a second name.  This second DAG
+            # will pause until all prior DAGs have finished, so for
+            # the new DAG run to continue, the prior DAG will have
+            # to be canceled by the operator.
+            retrigger_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+            self.trigger_run_id = f"{rc_name}_triggered_at_{retrigger_date}"
+            super().execute(context)
+
+
+class TriggerAPIBoundaryNodesRollout(TriggerDagRunOperator):
+    def __init__(
+        self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
+    ) -> None:
+        self.plan_task_id = plan_task_id
+        self.simulate_rollout = simulate_rollout
+        TriggerDagRunOperator.__init__(self, *args, **kwargs)
+
+    def execute(self, context: Context) -> None:
+        rc_name, base_git_revision, _, rollout_plan = cast(
+            tuple[str, str, str, str],
+            context["task_instance"].xcom_pull(task_ids=self.plan_task_id),
+        )
+        self.conf = dict(
+            git_revision=base_git_revision,
             simulate=self.simulate_rollout,
         )
         try:

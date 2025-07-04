@@ -11,7 +11,7 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS,
+    DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS,
     PLAN_FORM,
     api_boundary_node_batch_create,
     api_boundary_node_batch_timetable,
@@ -59,7 +59,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
                 description="A YAML-formatted string describing the rollout schedule",

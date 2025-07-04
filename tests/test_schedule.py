@@ -16,21 +16,23 @@ DATA_INTERVAL_START = pendulum.datetime(2021, 9, 13, tz="UTC")
 DATA_INTERVAL_END = DATA_INTERVAL_START + datetime.timedelta(days=1)
 
 
-def db():
+def db() -> None:
     airflow_home = os.path.dirname(__file__)
     db_path = os.path.join(airflow_home, "airflow.db")
-    assert os.path.isfile(
-        db_path
-    ), "tests/ airflow.db does not exist, run `make test` to generate it"
+    assert os.path.isfile(db_path), (
+        "tests/airflow.db does not exist, run `make test` to generate it"
+    )
 
 
 class TestSchedule(unittest.TestCase):
+    dagbag: DagBag
+
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         db()
         cls.dagbag = DagBag()
 
-    def setUp(self):
+    def setUp(self) -> None:
         with DAG(
             dag_id="test_schedule",
             start_date=datetime.datetime(2023, 1, 1),
@@ -45,7 +47,7 @@ class TestSchedule(unittest.TestCase):
                     description="Git revision",
                 ),
                 "plan": Param(
-                    default=ic_os_rollout.DEFAULT_SUBNET_ROLLOUT_PLANS[
+                    default=ic_os_rollout.DEFAULT_GUESTOS_ROLLOUT_PLANS[
                         "mainnet"
                     ].strip(),
                     type="string",
@@ -67,9 +69,9 @@ class TestSchedule(unittest.TestCase):
                 ),
             )
         self.dag = dag
-        self.dagbag.bag_dag(self.dag, None)
+        self.dagbag.bag_dag(self.dag, None)  # type: ignore
 
-    def test_standard_mainnet_schedule(self):
+    def test_standard_mainnet_schedule(self) -> None:
         """Tests that the EvenNumberCheckOperator returns True for 10."""
         sess = Session()
         dag = self.dagbag.get_dag(dag_id="test_schedule", session=sess)
@@ -77,6 +79,6 @@ class TestSchedule(unittest.TestCase):
 
         assert dag.get_last_dagrun().state == "success", dag.get_last_dagrun().state
         run: DagRun = dag.get_last_dagrun()
-        ret = run.get_task_instance("schedule").xcom_pull()
+        ret = run.get_task_instance("schedule").xcom_pull()  # type: ignore
         self.assertIsInstance(ret, dict)
         self.assertIn("0", ret)
