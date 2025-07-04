@@ -26,7 +26,7 @@ SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 DR_DRE_SLACK_ID = "S05GPUNS7EX"
 MAX_BATCHES: int = 30
 
-DEFAULT_SUBNET_ROLLOUT_PLANS: dict[str, str] = {
+DEFAULT_GUESTOS_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 Monday:
@@ -63,7 +63,7 @@ PLAN_FORM = """
            required="" rows="24">{value}</textarea>
 """
 # Corresponds to type ApiBoundaryNodeRolloutPlanSpec.
-DEFAULT_API_BOUNDARY_NODE_ROLLOUT_PLANS: dict[str, str] = {
+DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 nodes:
