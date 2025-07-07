@@ -43,10 +43,10 @@ with DAG(
             title="One of the pipeline files in `./data/node_pipelines`",
         ),
         "folder_name": Param(
-            default=datetime.datetime.now().strftime("%Y_%m_%d"),
+            default="",
             type="string",
-            title="The date time of starting a dag. This will be the folder in google \
-            drive where the uploads will be present.",
+            title="This will be the folder in Google Drive where the uploads will"
+            " be present.  If empty, it will be YYYY_MM_DD based on the run's date",
         ),
     },
 ) as dag:
@@ -79,7 +79,7 @@ with DAG(
         >> UploadOutputs(
             folder=REPO_DIR / "output",
             folder_id=GOOGLE_DRIVE_FOLDER,
-            drive_folder="{{ params.folder_name }}",
+            drive_folder="{{params.folder_name or logical_date.strftime('%Y_%m_%d')}}",
         )
         >> SendReport(scenario="{{ params.scenario }}")
     )
