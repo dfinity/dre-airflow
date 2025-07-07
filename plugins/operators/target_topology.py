@@ -126,7 +126,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         super().__init__(**kwargs)
 
     def execute(self, context: Any) -> None:
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(prefix="target_topology") as folder:
             scratch_folder = Path(folder)
             self.clone_repository(scratch_folder)
             self.setup_repository(scratch_folder)
