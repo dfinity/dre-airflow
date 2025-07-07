@@ -74,7 +74,7 @@ with DAG(
             scenario="{{ params.scenario }}",
             topology_file="{{ params.topology_file }}",
             node_pipeline="{{ params.node_pipeline }}",
-            repo_root=Path("/tmp/target_topology"),
+            repo_root=REPO_DIR,
         )
         >> UploadOutputs(
             folder=REPO_DIR / "output",
