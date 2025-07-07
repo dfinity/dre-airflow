@@ -203,23 +203,48 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             @task_group(group_id=f"batch_{batch_index + 1}")
             def batch(batch_index: int) -> None:
                 should_run = prepare(batch_index)  # type: ignore
-                nodes_to_rollout = wait_until_start_time(batch_index)  # type: ignore
-                chain(should_run, nodes_to_rollout)
-                proposed = create_proposal_if_none_exists(nodes_to_rollout)  # type: ignore
+                wait = ic_os_sensor.CustomDateTimeSensorAsync(
+                    task_id="wait_until_start_time",
+                    target_time="""{{
+                            ti.xcom_pull(task_ids='schedule')[%d][0] | string
+                        }}"""
+                    % batch_index,
+                )
+                chain(should_run, wait)
+                proposed = create_proposal_if_none_exists(
+                    nodes="""{{
+                        ti.xcom_pull(task_ids='schedule')[%d][1]
+                    }}"""  # type: ignore
+                    % batch_index
+                )
+                chain(wait, proposed)
                 announced = ic_os_rollout.RequestProposalVote(
                     task_id="request_proposal_vote",
                     source_task_id=f"batch_{batch_index + 1}"
                     ".create_proposal_if_none_exists",
                     retries=retries,
                 )
-                accepted = wait_until_proposal_is_accepted(  # type: ignore
-                    nodes=nodes_to_rollout,  # type: ignore
+                accepted = wait_until_proposal_is_accepted(
+                    nodes="""{{
+                        ti.xcom_pull(task_ids='schedule')[%d][1]
+                    }}"""
+                    % batch_index,  # type: ignore
                     proposal_info=proposed,  # type: ignore
                 )
                 chain(proposed, announced)
-                adopted = wait_for_revision_adoption(nodes=nodes_to_rollout)  # type: ignore
+                adopted = wait_for_revision_adoption(  # type: ignore
+                    nodes="""{{
+                        ti.xcom_pull(task_ids='schedule')[%d][1]
+                    }}"""  # type: ignore
+                    % batch_index
+                )
                 chain(accepted, adopted)
-                healthy = wait_until_nodes_healthy(nodes_to_rollout)  # type: ignore
+                healthy = wait_until_nodes_healthy(  # type: ignore
+                    nodes="""{{
+                        ti.xcom_pull(task_ids='schedule')[%d][1]
+                    }}"""  # type: ignore
+                    % batch_index
+                )
                 chain(adopted, healthy)
                 join = EmptyOperator(
                     task_id="join",

@@ -147,13 +147,13 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="start_guestos_rollout",
                     trigger_dag_id=f"rollout_ic_os_to_{network_name}_subnets",
                     plan_task_id="auto_compute_rollout",
-                    simulate_rollout="{{ params.simulate }}",
+                    simulate_rollout="{{ params.simulate }}",  # type: ignore
                 ),
                 auto_rollout.TriggerAPIBoundaryNodesRollout(
                     task_id="start_api_boundary_nodes_rollout",
                     trigger_dag_id=f"rollout_ic_os_to_{network_name}_api_boundary_nodes",
                     plan_task_id="auto_compute_rollout",
-                    simulate_rollout="{{ params.simulate }}",
+                    simulate_rollout="{{ params.simulate }}",  # type: ignore
                 ),
             )
         )
