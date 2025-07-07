@@ -83,18 +83,17 @@ connections (unless specified otherwise):
     for Airflow that our team has in the DRE team vault.
   * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive
 *
+  * Connection ID: `github.node_allocation`
+  * Connection type: Generic
+  * Description: PAT used to read dfinity/node_allocation repository
+  * Password: ask the DRE team for the github pat used to read this repo.
+*
   * Connection ID: `airflow_logging`
   * Connection type: Amazon Web Services
   * Description: S3 Logging storage for Airflow. Only needed for production (Kubernetes deployments)
   * AWS Access Key ID: the value of `AWS_ACCESS_KEY_ID` in K8s secret `airflow-logging`
   * AWS Secret Access Key: the value of `AWS_SECRET_ACCESS_KEY` in K8s secret `airflow-logging`
   * Extra: `{ "endpoint_url": "http://rook-ceph-rgw-ceph-store.rook-ceph.svc.cluster.local" }`
-  * **Only create this connection if running under K8s**
-*
-  * Connection ID: `github.node_allocation`
-  * Connection type: Generic
-  * Description: PAT used to read dfinity/node_allocation repository
-  * Password: ask the DRE team for the github pat used to read this repo.
   * **Only create this connection if running under K8s**
 
 Variables and connections are only visible to administrators.
