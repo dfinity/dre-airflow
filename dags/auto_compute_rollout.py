@@ -127,7 +127,9 @@ for network_name, network in IC_NETWORKS.items():
             >> BranchPythonOperator(
                 task_id="decide_to_start_rollout",
                 python_callable=lambda should_start: (
-                    ["start_rollout"] if should_start else []
+                    ["start_guestos_rollout", "start_api_boundary_nodes_rollout"]
+                    if should_start
+                    else []
                 ),
                 op_args=[
                     "{{ params.start_rollout }}",
