@@ -18,7 +18,7 @@ GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
 GITHUB_CONNECTION_ID = "github.node_allocation"
 
 
-def format_slack_payload(scenario: str) -> str:
+def format_slack_payload(scenario: str) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
     return [
@@ -78,7 +78,7 @@ class SendReport(slack.SlackAPIPostOperator):
     def __init__(
         self,
         scenario: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         self.scenario = scenario
         slack.SlackAPIPostOperator.__init__(
@@ -114,7 +114,7 @@ class UploadOutputs(BaseOperator):
 
         super().__init__(task_id="upload_outputs", **kwargs)
 
-    def execute(self, context: Any):
+    def execute(self, context: Any) -> None:
         hook = GoogleDriveHook(gcp_conn_id="google_cloud_default")
 
         for file in self.folder.rglob("*"):
@@ -159,7 +159,7 @@ class RunTopologyTool(BaseOperator):
 
         super().__init__(task_id="run_topology_tool", **kwargs)
 
-    def execute(self, context: Any):
+    def execute(self, context: Any) -> None:
         self.git = self.target_topology_git
         self.topology = self.topology_file
         self.pipeline = self.node_pipeline
