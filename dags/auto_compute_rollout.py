@@ -88,6 +88,13 @@ for network_name, network in IC_NETWORKS.items():
                 description="If enabled, the rollout plan"
                 " will be used to create and auto start a rollout.",
             ),
+            "simulate": Param(
+                False,
+                type="boolean",
+                title="Simulate",
+                description="If enabled (the default), any started rollouts run in"
+                " simulation mode",
+            ),
         },
     ) as dag:
         DAGS[network_name] = dag
@@ -140,13 +147,13 @@ for network_name, network in IC_NETWORKS.items():
                     task_id="start_guestos_rollout",
                     trigger_dag_id=f"rollout_ic_os_to_{network_name}_subnets",
                     plan_task_id="auto_compute_rollout",
-                    simulate_rollout=False,
+                    simulate_rollout="{{ params.simulate }}",
                 ),
                 auto_rollout.TriggerAPIBoundaryNodesRollout(
                     task_id="start_api_boundary_nodes_rollout",
                     trigger_dag_id=f"rollout_ic_os_to_{network_name}_api_boundary_nodes",
                     plan_task_id="auto_compute_rollout",
-                    simulate_rollout=False,
+                    simulate_rollout="{{ params.simulate }}",
                 ),
             )
         )

@@ -223,14 +223,16 @@ class AutoComputeRolloutPlan(BaseOperator):
 
 
 class TriggerGuestOSRollout(TriggerDagRunOperator):
+    template_fields = ["simulate_rollout"]
+
     def __init__(
-        self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
+        self, plan_task_id: str, simulate_rollout: bool, **kwargs: Any
     ) -> None:
         self.plan_task_id = plan_task_id
         self.simulate_rollout = simulate_rollout
-        TriggerDagRunOperator.__init__(self, *args, **kwargs)
+        super().__init__(**kwargs)
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Context, **kwargs: Any) -> None:
         rc_name, base_git_revision, rollout_plan, _ = cast(
             tuple[str, str, str, str],
             context["task_instance"].xcom_pull(task_ids=self.plan_task_id),
@@ -243,7 +245,7 @@ class TriggerGuestOSRollout(TriggerDagRunOperator):
         try:
             # Optimistically trigger DAG.
             self.trigger_run_id = f"{rc_name}"
-            super().execute(context)
+            super().execute(context, **kwargs)
         except DagRunAlreadyExists:
             # Oh, another DAG already triggered with the same name.
             # Trigger the DAG with a second name.  This second DAG
@@ -252,18 +254,20 @@ class TriggerGuestOSRollout(TriggerDagRunOperator):
             # to be canceled by the operator.
             retrigger_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
             self.trigger_run_id = f"{rc_name}_triggered_at_{retrigger_date}"
-            super().execute(context)
+            super().execute(context, **kwargs)
 
 
 class TriggerAPIBoundaryNodesRollout(TriggerDagRunOperator):
+    template_fields = ["simulate_rollout"]
+
     def __init__(
-        self, plan_task_id: str, simulate_rollout: bool, *args: Any, **kwargs: Any
+        self, plan_task_id: str, simulate_rollout: bool, **kwargs: Any
     ) -> None:
         self.plan_task_id = plan_task_id
         self.simulate_rollout = simulate_rollout
-        TriggerDagRunOperator.__init__(self, *args, **kwargs)
+        super().__init__(**kwargs)
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Context, **kwargs: Any) -> None:
         rc_name, base_git_revision, _, rollout_plan = cast(
             tuple[str, str, str, str],
             context["task_instance"].xcom_pull(task_ids=self.plan_task_id),
@@ -275,7 +279,7 @@ class TriggerAPIBoundaryNodesRollout(TriggerDagRunOperator):
         try:
             # Optimistically trigger DAG.
             self.trigger_run_id = f"{rc_name}"
-            super().execute(context)
+            super().execute(context, **kwargs)
         except DagRunAlreadyExists:
             # Oh, another DAG already triggered with the same name.
             # Trigger the DAG with a second name.  This second DAG
@@ -284,4 +288,4 @@ class TriggerAPIBoundaryNodesRollout(TriggerDagRunOperator):
             # to be canceled by the operator.
             retrigger_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
             self.trigger_run_id = f"{rc_name}_triggered_at_{retrigger_date}"
-            super().execute(context)
+            super().execute(context, **kwargs)
