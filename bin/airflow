@@ -59,7 +59,10 @@ function setup_airflow_variables_and_connections() {
 
 if [ "$1" == "setup" ]
 then
-    /usr/bin/python3 -m venv "$VENV_DIR"
+    # TODO: Should add a check to see if we are using a correct version of python
+    # If using version >3.12 some of the packages are reported as yanked and thus
+    # the script breaks.
+    /home/nikola/.rye/shims/python -m venv "$VENV_DIR"
     "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
