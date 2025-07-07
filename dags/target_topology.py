@@ -1,17 +1,11 @@
-import pendulum
 import datetime
-from airflow import DAG
-from airflow.decorators import task
 from pathlib import Path
-import shutil
+
+import pendulum
+from operators.target_topology import RunTopologyTool, SendReport, UploadOutputs
+
+from airflow import DAG
 from airflow.models.param import Param
-
-from operators.target_topology import UploadOutputs, SendReport, RunTopologyTool
-
-import subprocess
-
-import json
-import requests
 
 REPO_DIR = Path("/tmp/target_topology")
 GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"

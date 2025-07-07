@@ -1,19 +1,17 @@
 import datetime
-from pathlib import Path
+import json
 import shutil
-import tempfile
-from airflow.models.baseoperator import BaseOperator
-from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
-import airflow.providers.slack.operators.slack as slack
-from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
-from airflow.hooks.base import BaseHook
-
 import subprocess
+from pathlib import Path
 from typing import Any
 
-import json
 import requests
+from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 
+import airflow.providers.slack.operators.slack as slack
+from airflow.hooks.base import BaseHook
+from airflow.models.baseoperator import BaseOperator
+from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
 
 REPO_DIR = Path("/tmp/target_topology")
 GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
@@ -28,7 +26,8 @@ def format_slack_payload(scenario: str) -> str:
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Ignore for now: Target topology run report for {formatted_dt}",
+                "text": f"Ignore for now: Target topology run report for\\\
+                 {formatted_dt}",
                 "emoji": True,
             },
         },
@@ -63,7 +62,8 @@ def format_slack_payload(scenario: str) -> str:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Please review the contents of the output following the `ReviewGuide.md`",
+                "text": "Please review the contents of the output following the\\\
+                 `ReviewGuide.md`",
             },
         },
         {"type": "divider"},
