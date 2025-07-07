@@ -21,7 +21,8 @@ with DAG(
             # TODO: this should be the public repo that contains everything.
             default="https://github.com/dfinity/node_allocation.git#nim-preparing-airflow-data",
             type="string",
-            title="URL to use to clone the node allocations git directory.  Anything"
+            title="Node allocations git repository",
+            description="URL to use to clone the node allocations git.  Anything"
             " after the (optional) # sign will be understood as the branch to use from"
             " the repo (defaults to main if unspecified)",
         ),
@@ -29,24 +30,28 @@ with DAG(
             # TODO: agree on which scenario will we try to use.
             default="airflow_clusters",
             type="string",
-            title="One of the cluster scenario json files specified in the target \
-            topology data/cluster_scenarios",
+            title="Cluster scenario",
+            description="One of the cluster scenario JSON files specified in the"
+            " target topology data/cluster_scenarios",
         ),
         "topology_file": Param(
             # TODO: agree on which topology to run by default.
             default="./data/topology/airflow_topology.csv",
             type="string",
-            title="One of the topology files in `./data/topology`",
+            title="Topology file",
+            description="One of the topology files in `./data/topology`",
         ),
         "node_pipeline": Param(
             default="./data/node_pipelines/airflow_pipeline.csv",
             type="string",
-            title="One of the pipeline files in `./data/node_pipelines`",
+            title="Node pipeline",
+            description="One of the pipeline files in `./data/node_pipelines`",
         ),
         "folder_name": Param(
-            default="",
-            type="string",
-            title="This will be the folder in Google Drive where the uploads will"
+            default=None,
+            type=["null", "string"],
+            title="Output folder pattern",
+            description="This will be the folder in Google Drive where the uploads will"
             " be present.  If empty, it will be YYYY_MM_DD based on the run's date",
         ),
     },
@@ -76,7 +81,7 @@ with DAG(
             topology_file="{{ params.topology_file }}",
             node_pipeline="{{ params.node_pipeline }}",
             drive_subfolder="""{{
-                params.folder_name or logical_date.strftime('%Y_%m_%d')
+                params.folder_name or logical_date.strftime('%Y-%m-%d')
             }}""",
             task_id="run_topology_tool",
         )

@@ -1,18 +1,20 @@
 import datetime
 import json
 import pprint
+import shlex
 import shutil
-import subprocess
 import tempfile
 from functools import partial
 from pathlib import Path
-from typing import Any
+from subprocess import CalledProcessError
+from typing import Any, cast
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 
 import airflow.providers.slack.operators.slack as slack
 from airflow.hooks.base import BaseHook
+from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 from airflow.models.baseoperator import BaseOperator
 from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
 
@@ -102,6 +104,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         "scenario",
         "topology_file",
         "node_pipeline",
+        "drive_subfolder",
     ]
 
     def __init__(
@@ -118,7 +121,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         self.topology_file = topology_file
         self.node_pipeline = node_pipeline
         self.folder_id = GOOGLE_DRIVE_FOLDER
-        self.drive_subfolder = Path(drive_subfolder)
+        self.drive_subfolder = drive_subfolder
 
         super().__init__(**kwargs)
 
@@ -132,6 +135,23 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             self.run_tool_inner(scratch_folder)
             self.collect_inputs(scratch_folder)
             self.upload_outputs(scratch_folder)
+
+    def run_cmd(
+        self, cmd: list[str | Path], cwd: str | Path | None = None, check: bool = True
+    ) -> SubprocessResult:
+        shlexed = shlex.join([str(s) for s in cmd])
+        print(f"::group::{shlexed} output")
+        with tempfile.NamedTemporaryFile(mode="r") as f:
+            wrapped_cmd = ["bash", "-c", shlexed + " > " + f.name]
+            r = SubprocessHook().run_command(wrapped_cmd, cwd=str(cwd) if cwd else None)
+            f.seek(0)
+            data = f.read()
+            if check and r.exit_code != 0:
+                raise CalledProcessError(r.exit_code, cmd, output=data, stderr=None)
+            if data.rstrip():
+                print(data.rstrip())
+        print("::endgroup::")
+        return SubprocessResult(r.exit_code, data)
 
     def clone_repository(self, scratch_folder: Path) -> None:
         """Clone a git repository."""
@@ -147,17 +167,13 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             url, branch = url, "main"
 
         shutil.rmtree(scratch_folder)
-        subprocess.run(["git", "clone", url, scratch_folder], check=True)
-        subprocess.run(
-            ["git", "checkout", branch],
-            cwd=scratch_folder,
-            check=True,
-        )
+        self.run_cmd(["git", "clone", url, scratch_folder])
+        self.run_cmd(["git", "checkout", branch], cwd=scratch_folder)
 
     def setup_repository(self, scratch_folder: Path) -> None:
         """Sets up the repository."""
         self.log.info("Setting up repository environment.")
-        subprocess.run(["poetry", "install"], cwd=scratch_folder, check=True)
+        self.run_cmd(["poetry", "install"], cwd=scratch_folder)
 
     def sync_dashboard_data(self, scratch_folder: Path) -> str:
         """Sync the dashboard data."""
@@ -173,18 +189,14 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(ic_topology / "main.py", "w+") as f:
             f.write(response.text)
 
-        output = subprocess.run(
-            ["poetry", "run", "python", "./ic_topology/main.py"],
-            cwd=scratch_folder,
-            stdout=subprocess.PIPE,
-            check=True,
-            text=True,
+        output = self.run_cmd(
+            ["poetry", "run", "python", "./ic_topology/main.py"], cwd=scratch_folder
         )
 
-        destination = output.stdout.splitlines()[-1]
+        destination = cast(str, output.output.splitlines()[-1])
         destination = destination.replace("Saved current nodes to ", "")
 
-        print("Sync completed. Destination:", destination)
+        self.log.info("Sync completed. Destination: %s", destination)
         return destination
 
     def configure_tool(self, scratch_folder: Path, nodes_file: str) -> None:
@@ -207,9 +219,9 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(config, "w") as f:
             json.dump(configuration, f, indent=2)
 
-        self.log.info(
-            "The configuration has been updated.  It looks like this:\n%s",
-            pprint.pformat(configuration),
+        print(
+            "The configuration has been updated.  It looks like this:\n%s"
+            % pprint.pformat(configuration),
         )
 
     def run_tool_inner(self, scratch_folder: Path) -> None:
@@ -220,7 +232,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         self.log.info("Running topology optimizer.")
         # TODO: enrich this with diagnostics like the overall time it took
         # to run. Also forward the stderr to airflow.
-        subprocess.run(
+        self.run_cmd(
             [
                 "poetry",
                 "run",
@@ -230,10 +242,10 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
                 "./topology_optimizer/config.json",
             ],
             cwd=scratch_folder,
-            check=True,
         )
 
     def collect_inputs(self, scratch_folder: Path) -> None:
+        self.log.info("Collecting inputs.")
         inputs = scratch_folder / "output" / "inputs"
         inputs.mkdir(exist_ok=True)
 
@@ -255,11 +267,13 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             shutil.copyfile(path, inputs / path.name)
 
     def upload_outputs(self, scratch_folder: Path) -> None:
+        self.log.info("Uploading inputs and outputs.")
         hook = GoogleDriveHook(gcp_conn_id=GOOGLE_CONNECTION_ID)
         upload = partial(hook.upload_file, folder_id=self.folder_id)
 
-        for file in scratch_folder.rglob("*"):
+        output = scratch_folder / "output"
+        for file in output.rglob("*"):
             if not file.is_file():
                 continue
-            dest_file = self.drive_subfolder / file.relative_to(scratch_folder)
+            dest_file = Path(self.drive_subfolder) / file.relative_to(output)
             upload(str(file), str(dest_file))
