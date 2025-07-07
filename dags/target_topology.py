@@ -1,14 +1,13 @@
 import datetime
-from pathlib import Path
 
 import pendulum
-from operators.target_topology import RunTopologyTool, SendReport, UploadOutputs
+from operators.target_topology import (
+    RunTopologyToolAndUploadOutputs,
+    SendReport,
+)
 
 from airflow import DAG
 from airflow.models.param import Param
-
-REPO_DIR = Path("/tmp/target_topology")
-GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
 
 with DAG(
     dag_id="target_topology",
@@ -20,9 +19,11 @@ with DAG(
     params={
         "target_topology_git": Param(
             # TODO: this should be the public repo that contains everything.
-            default="https://github.com/dfinity/node_allocation.git",
+            default="https://github.com/dfinity/node_allocation.git#nim-preparing-airflow-data",
             type="string",
-            title="Url to use to clone the node allocations git directory.",
+            title="URL to use to clone the node allocations git directory.  Anything"
+            " after the (optional) # sign will be understood as the branch to use from"
+            " the repo (defaults to main if unspecified)",
         ),
         "scenario": Param(
             # TODO: agree on which scenario will we try to use.
@@ -69,17 +70,15 @@ with DAG(
     # DAG definition
 
     (
-        RunTopologyTool(
+        RunTopologyToolAndUploadOutputs(
             target_topology_git="{{ params.target_topology_git }}",
             scenario="{{ params.scenario }}",
             topology_file="{{ params.topology_file }}",
             node_pipeline="{{ params.node_pipeline }}",
-            repo_root=REPO_DIR,
-        )
-        >> UploadOutputs(
-            folder=REPO_DIR / "output",
-            folder_id=GOOGLE_DRIVE_FOLDER,
-            drive_folder="{{params.folder_name or logical_date.strftime('%Y_%m_%d')}}",
+            drive_subfolder="""{{
+                params.folder_name or logical_date.strftime('%Y_%m_%d')
+            }}""",
+            task_id="run_topology_tool",
         )
         >> SendReport(scenario="{{ params.scenario }}")
     )

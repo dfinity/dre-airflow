@@ -1,7 +1,10 @@
 import datetime
 import json
+import pprint
 import shutil
 import subprocess
+import tempfile
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,7 @@ from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
 REPO_DIR = Path("/tmp/target_topology")
 GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
 GITHUB_CONNECTION_ID = "github.node_allocation"
+GOOGLE_CONNECTION_ID = "google_cloud_default"
 
 
 def format_slack_payload(scenario: str) -> list[object]:
@@ -92,49 +96,7 @@ class SendReport(slack.SlackAPIPostOperator):
         )
 
 
-class UploadOutputs(BaseOperator):
-    folder_id: str
-    drive_folder: str
-    folder: Path
-    template_fields = ["drive_folder"]
-
-    def __init__(
-        self,
-        folder: Path,
-        folder_id: str,
-        drive_folder: str,
-        **kwargs: Any,
-    ) -> None:
-        if not folder.exists():
-            folder.mkdir(parents=True)
-
-        self.folder_id = folder_id
-        self.folder = folder
-        self.drive_folder = drive_folder
-
-        super().__init__(task_id="upload_outputs", **kwargs)
-
-    def execute(self, context: Any) -> None:
-        hook = GoogleDriveHook(gcp_conn_id="google_cloud_default")
-
-        for file in self.folder.rglob("*"):
-            if not file.is_file():
-                continue
-            dest_file = Path(self.drive_folder) / file.relative_to(self.folder)
-
-            hook.upload_file(str(file), str(dest_file), folder_id=self.folder_id)
-
-
-class RunTopologyTool(BaseOperator):
-    target_topology_git: str
-    scenario: str
-    topology_file: str
-    node_pipeline: str
-
-    git: str
-    topology: str
-    pipeline: str
-    repo_root: Path
+class RunTopologyToolAndUploadOutputs(BaseOperator):
     template_fields = [
         "target_topology_git",
         "scenario",
@@ -148,61 +110,64 @@ class RunTopologyTool(BaseOperator):
         scenario: str,
         topology_file: str,
         node_pipeline: str,
-        repo_root: Path,
+        drive_subfolder: str,
         **kwargs: Any,
     ) -> None:
         self.target_topology_git = target_topology_git
         self.scenario = scenario
         self.topology_file = topology_file
         self.node_pipeline = node_pipeline
-        self.repo_root = repo_root
+        self.folder_id = GOOGLE_DRIVE_FOLDER
+        self.drive_subfolder = Path(drive_subfolder)
 
-        super().__init__(task_id="run_topology_tool", **kwargs)
+        super().__init__(**kwargs)
 
     def execute(self, context: Any) -> None:
-        self.git = self.target_topology_git
-        self.topology = self.topology_file
-        self.pipeline = self.node_pipeline
+        with tempfile.TemporaryDirectory() as folder:
+            scratch_folder = Path(folder)
+            self.clone_repository(scratch_folder)
+            self.setup_repository(scratch_folder)
+            destination = self.sync_dashboard_data(scratch_folder)
+            self.configure_tool(scratch_folder, destination)
+            self.run_tool_inner(scratch_folder)
+            self.collect_inputs(scratch_folder)
+            self.upload_outputs(scratch_folder)
 
-        self.clone_repository()
-        self.setup_repository()
-        destination = self.sync_dashboard_data()
-        self.configure_tool(destination)
-        self.run_tool_inner()
-        self.collect_inputs()
-
-    def clone_repository(self) -> None:
+    def clone_repository(self, scratch_folder: Path) -> None:
         """Clone a git repository."""
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-
+        self.log.info("Cloning %s to %s .", self.target_topology_git, scratch_folder)
         connection = BaseHook.get_connection(GITHUB_CONNECTION_ID)
         token = connection.password
 
-        url = self.git.split("https://")[1]
+        url = self.target_topology_git.split("https://")[1]
         url = "https://" + token + "@" + url
+        if "#" in url:
+            url, _, branch = url.partition("#")
+        else:
+            url, branch = url, "main"
 
-        output = subprocess.run(["git", "clone", url, self.repo_root])
-
-        output.check_returncode()
-
-        output = subprocess.run(
-            ["git", "checkout", "nim-preparing-airflow-data"], cwd=self.repo_root
+        shutil.rmtree(scratch_folder)
+        subprocess.run(["git", "clone", url, scratch_folder], check=True)
+        subprocess.run(
+            ["git", "checkout", branch],
+            cwd=scratch_folder,
+            check=True,
         )
-        output.check_returncode()
 
-    def setup_repository(self) -> None:
+    def setup_repository(self, scratch_folder: Path) -> None:
         """Sets up the repository."""
-        output = subprocess.run(["poetry", "install"], cwd=self.repo_root)
+        self.log.info("Setting up repository environment.")
+        subprocess.run(["poetry", "install"], cwd=scratch_folder, check=True)
 
-        output.check_returncode()
-
-    def sync_dashboard_data(self) -> str:
+    def sync_dashboard_data(self, scratch_folder: Path) -> str:
         """Sync the dashboard data."""
+        self.log.info("Synchronizing dashboard data.")
         response = requests.get(
             "https://raw.githubusercontent.com/dfinity/decentralization/refs/heads/main/ic_topology/main.py"
         )
+        response.raise_for_status()
 
-        ic_topology = self.repo_root / "ic_topology"
+        ic_topology = scratch_folder / "ic_topology"
         ic_topology.mkdir(exist_ok=True)
 
         with open(ic_topology / "main.py", "w+") as f:
@@ -210,46 +175,52 @@ class RunTopologyTool(BaseOperator):
 
         output = subprocess.run(
             ["poetry", "run", "python", "./ic_topology/main.py"],
-            cwd=self.repo_root,
+            cwd=scratch_folder,
             stdout=subprocess.PIPE,
+            check=True,
+            text=True,
         )
 
-        output.check_returncode()
-        destination = output.stdout.decode().splitlines()[-1]
+        destination = output.stdout.splitlines()[-1]
         destination = destination.replace("Saved current nodes to ", "")
 
         print("Sync completed. Destination:", destination)
         return destination
 
-    def configure_tool(self, nodes_file: str) -> None:
+    def configure_tool(self, scratch_folder: Path, nodes_file: str) -> None:
         """Configure the `config.json`
 
         This should only change the `nodes_file` in the config since
         that changes daily. Other this are left unchanged.
         """
-        config = self.repo_root / "topology_optimizer" / "config.json"
+        self.log.info("Configuring topology optimizer.")
+        config = scratch_folder / "topology_optimizer" / "config.json"
 
         with open(config, "r") as f:
             configuration = json.load(f)
 
         configuration["cluster_file"] = self.scenario + ".json"
-        configuration["topology_file"] = self.topology
-        configuration["node_pipeline_file"] = self.pipeline
+        configuration["topology_file"] = self.topology_file
+        configuration["node_pipeline_file"] = self.node_pipeline
         configuration["nodes_file"] = nodes_file
 
         with open(config, "w") as f:
             json.dump(configuration, f, indent=2)
 
-        print("The configuration has been updated.")
+        self.log.info(
+            "The configuration has been updated.  It looks like this:\n%s",
+            pprint.pformat(configuration),
+        )
 
-    def run_tool_inner(self) -> None:
+    def run_tool_inner(self, scratch_folder: Path) -> None:
         """Run the actual tool.
 
         This function will run the tool until completion.
         """
+        self.log.info("Running topology optimizer.")
         # TODO: enrich this with diagnostics like the overall time it took
         # to run. Also forward the stderr to airflow.
-        output = subprocess.run(
+        subprocess.run(
             [
                 "poetry",
                 "run",
@@ -258,23 +229,19 @@ class RunTopologyTool(BaseOperator):
                 "--config-file",
                 "./topology_optimizer/config.json",
             ],
-            cwd=self.repo_root,
-            stdout=subprocess.PIPE,
+            cwd=scratch_folder,
+            check=True,
         )
 
-        output.check_returncode()
-
-        print("Tool output:\n", output.stdout)
-
-    def collect_inputs(self) -> None:
-        inputs = self.repo_root / "output" / "inputs"
+    def collect_inputs(self, scratch_folder: Path) -> None:
+        inputs = scratch_folder / "output" / "inputs"
         inputs.mkdir(exist_ok=True)
 
-        config = self.repo_root / "topology_optimizer" / "config.json"
+        config = scratch_folder / "topology_optimizer" / "config.json"
         with open(config, "r") as f:
             configuration = json.load(f)
 
-        files = [
+        files: list[str | Path] = [
             configuration["nodes_file"],
             configuration["topology_file"],
             configuration["node_pipeline_file"],
@@ -284,5 +251,15 @@ class RunTopologyTool(BaseOperator):
         ]
 
         for file in files:
-            path = self.repo_root / file
+            path = scratch_folder / file
             shutil.copyfile(path, inputs / path.name)
+
+    def upload_outputs(self, scratch_folder: Path) -> None:
+        hook = GoogleDriveHook(gcp_conn_id=GOOGLE_CONNECTION_ID)
+        upload = partial(hook.upload_file, folder_id=self.folder_id)
+
+        for file in scratch_folder.rglob("*"):
+            if not file.is_file():
+                continue
+            dest_file = self.drive_subfolder / file.relative_to(scratch_folder)
+            upload(str(file), str(dest_file))
