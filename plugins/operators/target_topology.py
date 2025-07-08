@@ -97,7 +97,6 @@ class SendReport(slack.SlackAPIPostOperator):
     ) -> None:
         self.scenario = scenario
         self.drive_subfolder = drive_subfolder
-        print(scenario, drive_subfolder)
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
