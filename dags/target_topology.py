@@ -81,14 +81,14 @@ with DAG(
             topology_file="{{ params.topology_file }}",
             node_pipeline="{{ params.node_pipeline }}",
             drive_subfolder="""{{
-                params.folder_name or data_interval_start.strftime('%Y-%m-%d')
+                params.folder_name or data_interval_end.strftime('%Y-%m-%d')
             }}""",
             task_id="run_topology_tool",
         )
         >> SendReport(
             scenario="{{ params.scenario }}",
             drive_subfolder="""{{
-                params.folder_name or data_interval_start.strftime('%Y-%m-%d')
+                params.folder_name or data_interval_end.strftime('%Y-%m-%d')
             }}""",
         )
     )
