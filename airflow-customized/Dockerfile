@@ -10,6 +10,7 @@ RUN \
     apt-get install -y git && \
     apt-get purge -y msodbcsql18 odbcinst && \
     apt-get install -y libdbus-1-3 && \
+    apt-get install -y python3-poetry && \
     apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /var/log/*
