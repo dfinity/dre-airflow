@@ -48,7 +48,7 @@ function setup_airflow_variables_and_connections() {
     SLACK_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Slack token for Airflow connection slack.ic_os_rollout/credential")"
     "$AIRFLOW_BIN" connections delete "slack.ic_os_rollout" || true
     "$AIRFLOW_BIN" connections add "slack.ic_os_rollout" --conn-type slack --conn-password "$SLACK_CREDS" --conn-extra "{\"slack_token\": \"$SLACK_CREDS\"}"
-    GOOGLE_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Airflow Google Drive credentials/credential" | jq -c .)"
+    GOOGLE_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Airflow Google Sheets and Drive credentials/credential" | jq -c .)"
     "$AIRFLOW_BIN" connections delete "google_cloud_default" || true
     "$AIRFLOW_BIN" connections add "google_cloud_default" --conn-type google_cloud_platform --conn-extra "{
         \"extra__google_cloud_platform__project\": \"airflow-422113\",
@@ -59,6 +59,9 @@ function setup_airflow_variables_and_connections() {
 
 if [ "$1" == "setup" ]
 then
+    # TODO: Should add a check to see if we are using a correct version of python
+    # If using version >3.12 some of the packages are reported as yanked and thus
+    # the script breaks.
     /usr/bin/python3 -m venv "$VENV_DIR"
     "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
         apache-airflow-providers-slack[common.sql] \

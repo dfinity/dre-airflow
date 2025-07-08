@@ -80,8 +80,14 @@ connections (unless specified otherwise):
   * Connection type: Google Cloud
   * Description: Used to access Google spreadsheets for rollout plan.
   * Keyfile JSON: the contents of the Google API key created
-    for Airflow that our team has in the DRE team vault.
-  * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets
+    for Airflow that our team has in the DRE team vault, titled
+    *Airflow Google Sheets and Drive credentials*.
+  * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive
+*
+  * Connection ID: `github.node_allocation`
+  * Connection type: Generic
+  * Description: PAT used to read dfinity/node_allocation repository
+  * Password: ask the DRE team for the github pat used to read this repo.
 *
   * Connection ID: `airflow_logging`
   * Connection type: Amazon Web Services
