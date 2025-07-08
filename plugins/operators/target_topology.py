@@ -24,7 +24,7 @@ GITHUB_CONNECTION_ID = "github.node_allocation"
 GOOGLE_CONNECTION_ID = "google_cloud_default"
 
 
-def format_slack_payload(scenario: str, drive_subfolder: str) -> list[object]:
+def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
     return [
@@ -49,7 +49,7 @@ def format_slack_payload(scenario: str, drive_subfolder: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"To view the artifacts for scenario {scenario},"
+                "text": f"To view the artifacts for the run"
                 f" open folder {drive_subfolder} in",
             },
             "accessory": {
@@ -62,6 +62,24 @@ def format_slack_payload(scenario: str, drive_subfolder: str) -> list[object]:
                 "value": "click_me_123",
                 "url": "https://drive.google.com/drive/u/2/folders/"
                 + GOOGLE_DRIVE_FOLDER,
+                "action_id": "button-action",
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "To view the execution logs follow:",
+            },
+            "accessory": {
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Open logs :scroll:",
+                    "emoji": True,
+                },
+                "value": "click_me_124",
+                "url": log_link,
                 "action_id": "button-action",
             },
         },
@@ -84,19 +102,16 @@ def format_slack_payload(scenario: str, drive_subfolder: str) -> list[object]:
 class SendReport(slack.SlackAPIPostOperator):
     template_fields: Sequence[str] = list(
         slack.SlackAPIPostOperator.template_fields
-    ) + [
-        "drive_subfolder",
-        "scenario",
-    ]
+    ) + ["drive_subfolder", "log_url"]
 
     def __init__(
         self,
-        scenario: str,
         drive_subfolder: str,
+        log_url: str,
         **kwargs: Any,
     ) -> None:
-        self.scenario = scenario
         self.drive_subfolder = drive_subfolder
+        self.log_url = log_url
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
@@ -113,7 +128,7 @@ class SendReport(slack.SlackAPIPostOperator):
         super().construct_api_call_params()
         assert isinstance(self.api_params, dict)  # appease the type checker gods
         self.api_params["blocks"] = json.dumps(
-            format_slack_payload(self.scenario, self.drive_subfolder)
+            format_slack_payload(self.drive_subfolder, self.log_url)
         )
 
 
@@ -157,7 +172,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             self.configure_tool(scratch_folder, destination)
             self.run_tool_inner(scratch_folder)
             self.collect_inputs(scratch_folder)
-            self.upload_outputs(scratch_folder)
+            # self.upload_outputs(scratch_folder)
 
     def run_cmd(
         self, cmd: list[str | Path], cwd: str | Path | None = None, check: bool = True

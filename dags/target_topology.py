@@ -90,5 +90,8 @@ with DAG(
             drive_subfolder="""{{
                 params.folder_name or data_interval_start.strftime('%Y-%m-%d')
             }}""",
+            log_url="""{{
+                 ti.get_dagrun().get_task_instance('run_topology_tool').log_url
+            }}""",
         )
     )
