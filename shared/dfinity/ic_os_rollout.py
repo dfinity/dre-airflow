@@ -30,14 +30,13 @@ DEFAULT_GUESTOS_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 # See documentation at the end of this configuration block.
 Monday:
-  9:00:      [io67a]
-  10:00:     [xok3w]
+  9:00:      [io67a, xok3w]
   11:00:     [shefu, fuqsr, 4utr6]
-  13:00:     [c4isl, mkbc3, vcpt7]
 Tuesday:
   7:00:      [pjljw, qdvhd, 2fq7c]
   9:00:      [snjp4, w4asl, qxesv]
   11:00:     [4zbus, ejbmu, uzr34]
+  13:00:     [c4isl, mkbc3, vcpt7]
 Wednesday:
   7:00:      [pae4o, 5kdm2, csyj4]
   9:00:      [eq6en, lhg73, brlsh]
