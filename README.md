@@ -80,7 +80,8 @@ connections (unless specified otherwise):
   * Connection type: Google Cloud
   * Description: Used to access Google spreadsheets for rollout plan.
   * Keyfile JSON: the contents of the Google API key created
-    for Airflow that our team has in the DRE team vault.
+    for Airflow that our team has in the DRE team vault, titled
+    *Airflow Google Sheets and Drive credentials*.
   * Scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive
 *
   * Connection ID: `github.node_allocation`
