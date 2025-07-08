@@ -7,7 +7,7 @@ import tempfile
 from functools import partial
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Any, cast
+from typing import Any, Sequence, cast
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
@@ -24,7 +24,7 @@ GITHUB_CONNECTION_ID = "github.node_allocation"
 GOOGLE_CONNECTION_ID = "google_cloud_default"
 
 
-def format_slack_payload(scenario: str) -> list[object]:
+def format_slack_payload(scenario: str, drive_subfolder: str) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
     return [
@@ -32,8 +32,8 @@ def format_slack_payload(scenario: str) -> list[object]:
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Ignore for now: Target topology run report for\\\
-                 {formatted_dt}",
+                "text": "Ignore for now: Target topology run report for"
+                f" {formatted_dt}",
                 "emoji": True,
             },
         },
@@ -49,7 +49,8 @@ def format_slack_payload(scenario: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"To view the artifacts for scenario {scenario}:",
+                "text": f"To view the artifacts for scenario {scenario},"
+                f" open folder {drive_subfolder} in",
             },
             "accessory": {
                 "type": "button",
@@ -68,8 +69,8 @@ def format_slack_payload(scenario: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Please review the contents of the output following the\\\
-                 `ReviewGuide.md`",
+                "text": "Please review the contents of the output following the"
+                " `ReviewGuide.md` document.",
             },
         },
         {"type": "divider"},
@@ -81,20 +82,39 @@ def format_slack_payload(scenario: str) -> list[object]:
 
 
 class SendReport(slack.SlackAPIPostOperator):
+    template_fields: Sequence[str] = list(
+        slack.SlackAPIPostOperator.template_fields
+    ) + [
+        "drive_subfolder",
+        "scenario",
+    ]
+
     def __init__(
         self,
         scenario: str,
+        drive_subfolder: str,
         **kwargs: Any,
     ) -> None:
         self.scenario = scenario
+        self.drive_subfolder = drive_subfolder
+        print(scenario, drive_subfolder)
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
             username="Airflow",
-            blocks=format_slack_payload(scenario),
             slack_conn_id=SLACK_CONNECTION_ID,
             task_id="send_report",
             **kwargs,
+        )
+
+    def construct_api_call_params(self) -> Any:
+        # We must override caller instead of setting the blocks in the constructor
+        # because the Airflow machinery needs to render the templates passed as
+        # parameters set in the class instance durign construction.
+        super().construct_api_call_params()
+        assert isinstance(self.api_params, dict)  # appease the type checker gods
+        self.api_params["blocks"] = json.dumps(
+            format_slack_payload(self.scenario, self.drive_subfolder)
         )
 
 
