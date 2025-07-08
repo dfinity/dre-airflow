@@ -126,6 +126,10 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         super().__init__(**kwargs)
 
     def execute(self, context: Any) -> None:
+        self.log.info(
+            "User requested results to be uploaded to subfolder %s",
+            self.drive_subfolder,
+        )
         with tempfile.TemporaryDirectory(prefix="target_topology") as folder:
             scratch_folder = Path(folder)
             self.clone_repository(scratch_folder)
