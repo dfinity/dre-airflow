@@ -47,14 +47,17 @@ function setup_airflow_variables_and_connections() {
     "$AIRFLOW_BIN" variables set "dfinity.ic_admin.mainnet.proposer_key_file" "$("$ONEPASS_BIN" read "op://DRE Team/DFX release-automation principal key/identity.pem")"
     SLACK_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Slack token for Airflow connection slack.ic_os_rollout/credential")"
     "$AIRFLOW_BIN" connections delete "slack.ic_os_rollout" || true
-    "$AIRFLOW_BIN" connections add "slack.ic_os_rollout" --conn-type slack --conn-password "$SLACK_CREDS" --conn-extra "{\"slack_token\": \"$SLACK_CREDS\"}"
+    "$AIRFLOW_BIN" connections add "slack.ic_os_rollout" --conn-type slack --conn-password "$SLACK_CREDS" --conn-extra "{\"slack_token\": \"$SLACK_CREDS\"}" --conn-description "The connection used for IC OS rollouts."
     GOOGLE_CREDS="$("$ONEPASS_BIN" read "op://DRE Team/Airflow Google Sheets and Drive credentials/credential" | jq -c .)"
     "$AIRFLOW_BIN" connections delete "google_cloud_default" || true
     "$AIRFLOW_BIN" connections add "google_cloud_default" --conn-type google_cloud_platform --conn-extra "{
         \"extra__google_cloud_platform__project\": \"airflow-422113\",
         \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets\",
         \"extra__google_cloud_platform__keyfile_dict\": $GOOGLE_CREDS}
-    "
+    " --conn-description "Used to access Google spreadsheets for rollout plan and Google drive for target topology output uploads."
+    NODE_ALLOC_PAT="$("$ONEPASS_BIN" read "op://DRE Team/Airflow DFINITY node_allocation Github read token/password")"
+    "$AIRFLOW_BIN" connections delete "github.node_allocation" || true
+    "$AIRFLOW_BIN" connections add "github.node_allocation" --conn-type generic --conn-password "$NODE_ALLOC_PAT" --conn-description "Used by the target topology flow. Permits access to the https://github.com/dfinity/node_allocation repository."
 }
 
 if [ "$1" == "setup" ]

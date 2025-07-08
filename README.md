@@ -87,7 +87,7 @@ connections (unless specified otherwise):
   * Connection ID: `github.node_allocation`
   * Connection type: Generic
   * Description: PAT used to read dfinity/node_allocation repository
-  * Password: ask the DRE team for the github pat used to read this repo.
+  * Password: ask the DRE team for the Github PAT used to read this repo.
 *
   * Connection ID: `airflow_logging`
   * Connection type: Amazon Web Services
