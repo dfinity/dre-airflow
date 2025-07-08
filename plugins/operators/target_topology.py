@@ -140,7 +140,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         self, cmd: list[str | Path], cwd: str | Path | None = None, check: bool = True
     ) -> SubprocessResult:
         shlexed = shlex.join([str(s) for s in cmd])
-        print(f"::group::{shlexed} output")
+        print(f"::group::Output of {shlexed}")
         with tempfile.NamedTemporaryFile(mode="r") as f:
             wrapped_cmd = ["bash", "-c", shlexed + " > " + f.name]
             r = SubprocessHook().run_command(wrapped_cmd, cwd=str(cwd) if cwd else None)
