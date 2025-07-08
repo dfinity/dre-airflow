@@ -86,7 +86,6 @@ with DAG(
             task_id="run_topology_tool",
         )
         >> SendReport(
-            scenario="{{ params.scenario }}",
             drive_subfolder="""{{
                 params.folder_name or data_interval_start.strftime('%Y-%m-%d')
             }}""",
