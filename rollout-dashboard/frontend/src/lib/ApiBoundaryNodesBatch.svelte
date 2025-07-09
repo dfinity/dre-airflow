@@ -7,7 +7,7 @@
         apiBoundaryNodesBatchRolloutStateComment,
         apiBoundaryNodesBatchRolloutStateIcon,
     } from "./types";
-    import { selectTextOnFocus } from "./lib";
+    import { cap, selectTextOnFocus } from "./lib";
     export let batch_num: String;
     export let batch: ApiBoundaryNodesBatch;
     export let git_revision: string;
@@ -23,7 +23,7 @@
                     target="_blank"
                     class="api_boundary_node_batch_state"
                     data-sveltekit-preload-data="off"
-                    title={apiBoundaryNodesBatchRolloutStateComment(batch)}
+                    title={cap(apiBoundaryNodesBatchRolloutStateComment(batch))}
                 >
                     <div class="api_boundary_node_batch_state_icon">
                         {apiBoundaryNodesBatchRolloutStateIcon(batch)}
