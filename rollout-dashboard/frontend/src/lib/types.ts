@@ -36,7 +36,7 @@ export function subnetStateIcon(subnet: Subnet): String {
 export function subnetStateComment(subnet: Subnet): string {
     let s = SubnetRolloutState[subnet.state].name;
     if (subnet.comment) {
-        s = s + ": " + subnet.comment
+        s = s + " • " + subnet.comment
     }
     return s
 }
@@ -135,7 +135,7 @@ export function apiBoundaryNodesBatchRolloutStateIcon(batch: ApiBoundaryNodesBat
 export function apiBoundaryNodesBatchRolloutStateComment(subnet: ApiBoundaryNodesBatch): string {
     let s = ApiBoundaryNodesBatchRolloutState[subnet.state].name;
     if (subnet.comment) {
-        s = s + ": " + subnet.comment
+        s = s + " • " + subnet.comment
     }
     return s
 }
