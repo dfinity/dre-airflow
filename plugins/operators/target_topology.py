@@ -172,7 +172,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             self.configure_tool(scratch_folder, destination)
             self.run_tool_inner(scratch_folder)
             self.collect_inputs(scratch_folder)
-            # self.upload_outputs(scratch_folder)
+            self.upload_outputs(scratch_folder)
 
     def run_cmd(
         self, cmd: list[str | Path], cwd: str | Path | None = None, check: bool = True
