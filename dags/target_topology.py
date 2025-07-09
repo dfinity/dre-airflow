@@ -19,7 +19,7 @@ with DAG(
     params={
         "target_topology_git": Param(
             # TODO: this should be the public repo that contains everything.
-            default="https://github.com/dfinity/node_allocation.git#nim-preparing-airflow-data",
+            default="https://github.com/dfinity/node_allocation.git",
             type="string",
             title="Node allocations git repository",
             description="URL to use to clone the node allocations git.  Anything"
