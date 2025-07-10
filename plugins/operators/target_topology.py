@@ -1,15 +1,15 @@
 import datetime
-import random
-import time
-from logging import Logger
 import json
 import pprint
+import random
 import shlex
 import shutil
 import tempfile
+import time
+from logging import Logger
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Any, Sequence, cast, Callable
+from typing import Any, Callable, Sequence, cast
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
