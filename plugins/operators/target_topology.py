@@ -337,7 +337,7 @@ def run_with_backoff(
     kwargs: dict[str, Any] = {},
     max_retries: int = 5,
     base_delay: float = 1.0,
-    max_delay: float = 60.0,
+    max_delay: float = 600.0,
     logger: Logger,
     **kwrags: Any,
 ) -> Any:
