@@ -26,9 +26,12 @@ GITHUB_CONNECTION_ID = "github.node_allocation"
 GOOGLE_CONNECTION_ID = "google_cloud_default"
 
 
-def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
+def format_slack_payload(
+    drive_subfolder: str, log_link: str, success: bool
+) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
+    status_log = ":white_check_mark: success" if success else ":x: failure"
     return [
         {
             "type": "header",
@@ -43,7 +46,9 @@ def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "plain_text",
-                "text": "The run of the target topology tool for today is complete!",
+                "text": "The run of the target topology tool for today is complete!\n"
+                + "Execution status: "
+                + status_log,
                 "emoji": True,
             },
         },
@@ -104,16 +109,18 @@ def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
 class SendReport(slack.SlackAPIPostOperator):
     template_fields: Sequence[str] = list(
         slack.SlackAPIPostOperator.template_fields
-    ) + ["drive_subfolder", "log_url"]
+    ) + ["drive_subfolder", "log_url", "task_state"]
 
     def __init__(
         self,
         drive_subfolder: str,
         log_url: str,
+        task_state: str,
         **kwargs: Any,
     ) -> None:
         self.drive_subfolder = drive_subfolder
         self.log_url = log_url
+        self.task_state = task_state
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
@@ -130,7 +137,9 @@ class SendReport(slack.SlackAPIPostOperator):
         super().construct_api_call_params()
         assert isinstance(self.api_params, dict)  # appease the type checker gods
         self.api_params["blocks"] = json.dumps(
-            format_slack_payload(self.drive_subfolder, self.log_url)
+            format_slack_payload(
+                self.drive_subfolder, self.log_url, self.task_state == "success"
+            )
         )
 
 
