@@ -324,20 +324,22 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
             dest_file = Path(self.drive_subfolder) / file.relative_to(output)
             run_with_backoff(
                 hook.upload_file,
-                args=(str(file), str(dest_file)),
-                kwargs={"folder_id": self.folder_id},
+                str(file),
+                str(dest_file),
+                logger=self.log,
+                folder_id=self.folder_id,
             )
 
 
 def run_with_backoff(
-    func: Callable,
-    args: tuple = (),
-    kwargs: dict = {},
-    *,
+    func: Callable[..., Any],
+    *args: Any,
+    kwargs: dict[str, Any] = {},
     max_retries: int = 5,
     base_delay: float = 1.0,
     max_delay: float = 60.0,
-    logger: Logger = None,
+    logger: Logger,
+    **kwrags: Any,
 ) -> Any:
     attempt = 0
 
@@ -347,14 +349,12 @@ def run_with_backoff(
         except Exception as e:
             attempt += 1
             if attempt > max_retries:
-                if logger:
-                    logger.error(f"Exceeded {max_retries} retries. Raising exception.")
+                logger.error(f"Exceeded {max_retries} retries. Raising exception.")
                 raise
             delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
             jitter = random.uniform(0, delay / 2)
             total_delay = delay + jitter
-            if logger:
-                logger.warning(
-                    f"Retry {attempt}/{max_retries} in {total_delay:.2f}s due to: {e}"
-                )
+            logger.warning(
+                f"Retry {attempt}/{max_retries} in {total_delay:.2f}s due to: {e}"
+            )
             time.sleep(total_delay)
