@@ -8,6 +8,7 @@ from operators.target_topology import (
 
 from airflow import DAG
 from airflow.models.param import Param
+from airflow.utils.trigger_rule import TriggerRule
 
 with DAG(
     dag_id="target_topology",
@@ -90,7 +91,11 @@ with DAG(
                 params.folder_name or data_interval_end.strftime('%Y-%m-%d')
             }}""",
             log_url="""{{
-                 ti.get_dagrun().get_task_instance('run_topology_tool').log_url
+                ti.get_dagrun().get_task_instance('run_topology_tool').log_url
             }}""",
+            task_state="""{{
+                ti.get_dagrun().get_task_instance('run_topology_tool').state 
+            }}""",  # noqa: E501
+            trigger_rule=TriggerRule.ALL_DONE,
         )
     )
