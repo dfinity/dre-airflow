@@ -1,13 +1,15 @@
 import datetime
+import random
+import time
+from logging import Logger
 import json
 import pprint
 import shlex
 import shutil
 import tempfile
-from functools import partial
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Any, Sequence, cast
+from typing import Any, Sequence, cast, Callable
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
@@ -19,7 +21,7 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
 
 REPO_DIR = Path("/tmp/target_topology")
-GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
+GOOGLE_DRIVE_FOLDER = "1FuEIL4qKMxPqpNqxEwR9zAKxPOF5waqF"
 GITHUB_CONNECTION_ID = "github.node_allocation"
 GOOGLE_CONNECTION_ID = "google_cloud_default"
 
@@ -249,7 +251,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(config, "r") as f:
             configuration = json.load(f)
 
-        configuration["cluster_file"] = self.scenario + ".json"
+        configuration["scenario"] = f"./data/cluster_scenarios/{self.scenario}.json"
         configuration["topology_file"] = self.topology_file
         configuration["node_pipeline_file"] = self.node_pipeline
         configuration["nodes_file"] = nodes_file
@@ -291,14 +293,21 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(config, "r") as f:
             configuration = json.load(f)
 
+        scenario = Path(configuration["scenario"])
+        if scenario.is_dir():
+            scenario_files = [scenario]
+        else:
+            scenario_files = sorted(scenario.glob("*.json"))
+
         files: list[str | Path] = [
             configuration["nodes_file"],
             configuration["topology_file"],
             configuration["node_pipeline_file"],
             configuration["blacklist_file"],
-            Path(configuration["scenario_folder"]) / configuration["cluster_file"],
             config,
         ]
+
+        files.extend(scenario_files)
 
         for file in files:
             path = scratch_folder / file
@@ -307,11 +316,45 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
     def upload_outputs(self, scratch_folder: Path) -> None:
         self.log.info("Uploading inputs and outputs.")
         hook = GoogleDriveHook(gcp_conn_id=GOOGLE_CONNECTION_ID)
-        upload = partial(hook.upload_file, folder_id=self.folder_id)
 
         output = scratch_folder / "output"
         for file in output.rglob("*"):
             if not file.is_file():
                 continue
             dest_file = Path(self.drive_subfolder) / file.relative_to(output)
-            upload(str(file), str(dest_file))
+            run_with_backoff(
+                hook.upload_file,
+                args=(str(file), str(dest_file)),
+                kwargs={"folder_id": self.folder_id},
+            )
+
+
+def run_with_backoff(
+    func: Callable,
+    args: tuple = (),
+    kwargs: dict = {},
+    *,
+    max_retries: int = 5,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    logger: Logger = None,
+) -> Any:
+    attempt = 0
+
+    while True:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            attempt += 1
+            if attempt > max_retries:
+                if logger:
+                    logger.error(f"Exceeded {max_retries} retries. Raising exception.")
+                raise
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            jitter = random.uniform(0, delay / 2)
+            total_delay = delay + jitter
+            if logger:
+                logger.warning(
+                    f"Retry {attempt}/{max_retries} in {total_delay:.2f}s due to: {e}"
+                )
+            time.sleep(total_delay)
