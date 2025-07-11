@@ -11,12 +11,13 @@ import shlex
 import tempfile
 import time
 from contextlib import contextmanager
-from typing import IO, Generator, cast
+from typing import IO, Generator, TypedDict, cast
 
 import requests
 
 import airflow.models
 import dfinity.ic_types as ic_types
+import dfinity.rollout_types as rollout_types
 from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
@@ -47,6 +48,111 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
             yield fd
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+type PossibleSubnetId = rollout_types.SubnetId | None
+
+
+class RegistryNode(TypedDict):
+    node_id: rollout_types.NodeId
+    # xnet
+    # http
+    node_operator_id: rollout_types.NodeOperatorId
+    #   "chip_id": null,
+    hostos_version_id: rollout_types.HostOsVersion
+    #   "public_ipv4_config": null,
+    subnet_id: PossibleSubnetId
+    dc_id: rollout_types.DCId
+    node_provider_id: rollout_types.NodeProviderId
+    status: rollout_types.NodeStatus
+    #  "node_type": "type1.1"
+
+
+class RegistrySubnet(TypedDict):
+    subnet_id: PossibleSubnetId
+    membership: list[rollout_types.NodeId]
+    nodes: dict[rollout_types.NodeId, RegistryNode]
+    #  "max_ingress_bytes_per_message": 2097152,
+    #  "max_ingress_messages_per_block": 1000,
+    #  "max_block_payload_size": 4194304,
+    #  "unit_delay_millis": 1000,
+    #  "initial_notary_delay_millis": 300,
+    #  "replica_version_id": "e915efecc8af90993ccfc499721ebe826aadba60",
+    #  "dkg_interval_length": 499,
+    #  "dkg_dealings_per_block": 1,
+    #  "start_as_nns": false,
+    #  "subnet_type": "application",
+    #  "features": {
+    #    "canister_sandboxing": false,
+    #    "http_requests": true,
+    #    "sev_enabled": null
+    #  },
+    #  "max_number_of_canisters": 120000,
+    #  "ssh_readonly_access": [],
+    #  "ssh_backup_access": [],
+    #  "is_halted": false,
+    #  "halt_at_cup_height": false,
+    #  "chain_key_config": null
+
+
+class RegistryDC(TypedDict):
+    id: rollout_types.DCId
+    region: str
+    owner: str
+    # gps: {
+    #   "latitude": 51.219398498535156,
+    #   "longitude": 4.402500152587891
+    # }
+
+
+class RegistryNodeOperatorComputedValues(TypedDict):
+    node_provider_name: str
+    #    "node_provider_name": "Illusions In Art (Pty) Ltd",
+    #    "node_allowance_remaining": 0,
+    #    "node_allowance_total": 6,
+    #    "total_up_nodes": 6,
+    nodes_health: dict[rollout_types.NodeStatus, list[rollout_types.NodeId]]
+    #    "max_rewardable_count": {
+    #      "type3.1": 6
+    #    },
+    #    "nodes_in_subnets": 4,
+    #    "nodes_in_registry": 6
+
+
+class RegistryNodeOperator(TypedDict):
+    node_operator_principal_id: rollout_types.NodeOperatorId
+    node_provider_principal_id: rollout_types.NodeProviderId
+    dc_id: rollout_types.DCId
+    #  "rewardable_nodes": {
+    #    "type3.1": 6
+    #  },
+    #  "node_allowance": 0,
+    #  "ipv6": "",
+    computed: RegistryNodeOperatorComputedValues
+
+
+class RegistryNodeProvider(TypedDict):
+    name: str
+    principal: rollout_types.NodeProviderId
+    #   "reward_account": "",
+    #  "total_nodes": 2,
+    #  "nodes_in_subnet": 0,
+    #  "nodes_per_dc": {
+    #    "zh5": 2
+    #  }
+
+
+class RegistrySnapshot(TypedDict):
+    subnets: list[RegistrySubnet]
+    nodes: list[RegistryNode]
+    # unassigned_nodes_config
+    dcs: list[RegistryDC]
+    node_operators: list[RegistryNodeOperator]
+    # node_rewards_table
+    # api_bns
+    # elected_guest_os_versions
+    # elected_host_os_versions
+    node_providers: list[RegistryNodeProvider]
 
 
 class DRE:
@@ -251,6 +357,15 @@ class DRE:
             if r["payload"].get("subnet_id") == subnet_id
             and r["payload"].get("replica_version_id") is not None
         ]
+
+    def get_registry(
+        self,
+    ) -> RegistrySnapshot:
+        r = self.run("registry", full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        data = json.loads(r.output)
+        return cast(RegistrySnapshot, data)
 
     def get_ic_os_version_deployment_proposals_for_boundary_nodes_and_revision(
         self,
