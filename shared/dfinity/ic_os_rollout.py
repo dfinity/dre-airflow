@@ -13,6 +13,9 @@ from dfinity.ic_types import (
 )
 from dfinity.rollout_types import (
     ApiBoundaryNodeRolloutPlanSpec,
+    DaysOfWeek,
+    HostOSRolloutPlanSpec,
+    ProvisionalHostOSPlan,
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
     SubnetNumberWithRevision,
@@ -97,6 +100,61 @@ minimum_minutes_per_batch: 15
         "# "
         + "# ".join(
             textwrap.dedent(cast(str, ApiBoundaryNodeRolloutPlanSpec.__doc__))
+            .strip()
+            .splitlines(True)
+        )
+    )
+}
+
+DEFAULT_HOSTOS_ROLLOUT_PLANS: dict[str, str] = {
+    "mainnet": """
+# See documentation at the end of this configuration block.
+stages:
+  canary:
+  - 
+    - assignment: unassigned
+      owner: DFINITY
+      status: Healthy
+      nodes_per_group: 1
+  - 
+    - assignment: unassigned
+      owner: DFINITY
+      status: Healthy
+      nodes_per_group: 5
+  - 
+    - assignment: assigned
+      owner: DFINITY
+      status: Healthy
+      nodes_per_group: 10%
+  - 
+    - assignment: assigned
+      owner: others
+      group_by: subnet
+      status: Healthy
+      nodes_per_group: 1
+  main:
+  - assignment: assigned
+    group_by: subnet
+    status: Healthy
+    nodes_per_group: 1
+  unassigned:
+  - assignment: unassigned
+    status: Healthy
+    nodes_per_group: 100
+  stragglers: []
+allowed_days:
+- Monday
+- Tuesday
+- Wednesday
+- Thursday
+resume_at: 7:00
+suspend_at: 15:00
+minimum_minutes_per_batch: 120
+"""
+    + (
+        "# "
+        + "# ".join(
+            textwrap.dedent(cast(str, HostOSRolloutPlanSpec.__doc__))
             .strip()
             .splitlines(True)
         )
@@ -419,7 +477,9 @@ def check_plan(plan: SubnetRolloutPlanWithRevision) -> None:
 
 
 def api_boundary_node_batch_timetable(
-    spec: ApiBoundaryNodeRolloutPlanSpec,
+    spec: ApiBoundaryNodeRolloutPlanSpec
+    | HostOSRolloutPlanSpec
+    | ProvisionalHostOSPlan,
     batch_count: int,
     now: datetime.datetime | None = None,
 ) -> list[datetime.datetime]:
@@ -430,6 +490,7 @@ def api_boundary_node_batch_timetable(
     minimum_minutes_per_batch in the spec.  The start_day in the spec (optional)
     defines which day is picked for the first item in the timetable -- if absent,
     the day will correspond to now (or the value of now passed to this function).
+    If the spec does not contain allowed_days, that will default to weekdays.
     """
     if batch_count < 1:
         raise ValueError("batch_count must be a positive integer")
@@ -471,6 +532,18 @@ def api_boundary_node_batch_timetable(
     def hm(d: datetime.datetime) -> float:
         return d.hour * 3600 + d.minute * 60 + d.second + d.microsecond / 1000000
 
+    allowed_days = cast(
+        list[DaysOfWeek],
+        spec.get("allowed_days")
+        or [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+        ],
+    )
+
     batch_start_time = (
         at(
             next_day_of_the_week(spec["start_day"], now=now),
@@ -481,10 +554,11 @@ def api_boundary_node_batch_timetable(
     )
     batches = []
     tries = 0
+    max_tries = batch_count * 24 * 60 / spec["minimum_minutes_per_batch"]
     for _ in range(batch_count):
         while True:
             tries = tries + 1
-            if tries > batch_count * 24 * 60 / spec["minimum_minutes_per_batch"]:
+            if tries > max_tries:
                 raise ValueError(
                     "could not find a timetable in a reasonable amount of attempts"
                 )
@@ -495,8 +569,17 @@ def api_boundary_node_batch_timetable(
                     run_at = run_at - datetime.timedelta(days=1)
                 elif batch_start_time >= run_at:
                     stop_at = stop_at + datetime.timedelta(days=1)
-            if run_at <= batch_start_time <= (stop_at - increment):
+            if (
+                run_at <= batch_start_time <= (stop_at - increment)
+                and batch_start_time.strftime("%A") in allowed_days
+                and batch_start_time >= now
+            ):
                 break
+            if (
+                batch_start_time.strftime("%A") not in allowed_days
+                or batch_start_time < now
+            ):
+                tries = tries - 1
             batch_start_time = batch_start_time + increment
         batches.append(batch_start_time)
         batch_start_time = batch_start_time + increment

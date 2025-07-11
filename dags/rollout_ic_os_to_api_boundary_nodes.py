@@ -208,6 +208,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 wait = ic_os_sensor.CustomDateTimeSensorAsync(
                     task_id="wait_until_start_time",
                     target_time=time_tpl % batch_index,
+                    simulate="{{ params.simulate }}",
                 )
                 chain(should_run, wait)
                 proposed = create_proposal_if_none_exists(  # type: ignore

@@ -113,6 +113,7 @@ for network_name, network in IC_NETWORKS.items():
                             ti.xcom_pull(task_ids='schedule')["%d"][0] | string
                         }}"""
                     % batch,
+                    simulate="{{ params.simulate }}",
                 ).expand(_ignored=proceed)
                 >> ic_os_sensor.WaitForPreconditions.partial(
                     task_id="wait_for_preconditions",
