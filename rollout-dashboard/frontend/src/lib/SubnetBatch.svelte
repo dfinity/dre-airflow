@@ -8,6 +8,7 @@
         subnetStateComment,
         subnetStateIcon,
     } from "./types";
+    import { cap } from "./lib";
     export let batch_num: String;
     export let batch: SubnetBatch;
 </script>
@@ -22,7 +23,7 @@
                     target="_blank"
                     class="subnet_state"
                     data-sveltekit-preload-data="off"
-                    title={subnetStateComment(subnet)}
+                    title={cap(subnetStateComment(subnet))}
                 >
                     <div class="subnet_state_icon">
                         {subnetStateIcon(subnet)}
