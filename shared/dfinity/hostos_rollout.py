@@ -357,9 +357,7 @@ def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
     assert 0, "not possible: %r" % batch_name
 
 
-def should_run(
-    batch_name: HostOSStage, batch_index: int, ti: TaskInstance
-) -> list[str]:
+def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[str]:
     schedule: ProvisionalHostOSPlan = ti.xcom_pull("schedule")
     batch: ProvisionalHostOSPlanBatch | None
     bn = stage_name(batch_name, batch_index)
@@ -404,7 +402,7 @@ def should_run(
         if previous_tasks_that_had_nodes:
             pt = previous_tasks_that_had_nodes[-1]
             print(f"Investigating batch {pt} to see what its start time was")
-            previous_task_started_at = ti.xcom_pull(f"{pt}.should_run", key="start_at")
+            previous_task_started_at = ti.xcom_pull(f"{pt}.plan", key="start_at")
             if previous_task_started_at:
                 print(
                     f"The latest batch to run started at {previous_task_started_at},"
@@ -432,16 +430,9 @@ def should_run(
         ti.xcom_push("selectors", selectors)
         ti.xcom_push("start_at", start_at)
         if selectors is not None:
-            return [f"{bn}.will_run"]
+            return [f"{bn}.wait_until_start_time"]
 
     return [f"{bn}.join"]
-
-
-def will_run(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> None:
-    selectors = ti.xcom_pull(
-        stage_name(batch_name, batch_index) + ".should_run", key="selectors"
-    )
-    print("Selectors:", selectors)
 
 
 def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostOSPlan:
@@ -502,12 +493,12 @@ def collect_nodes(
     network: ic_types.ICNetwork,
     ti: TaskInstance,
     params: DagParams,
-) -> None:
+) -> list[str]:
     # Fetch the list of nodes.
     selectors = typing.cast(
         NodeSelectors,
         ti.xcom_pull(
-            stage_name(batch_name, batch_index) + ".should_run",
+            stage_name(batch_name, batch_index) + ".plan",
             key="selectors",
         ),
     )
@@ -543,7 +534,38 @@ def collect_nodes(
         assert 0
 
     ti.xcom_push("nodes", nodes)
+    if nodes:
+        return [f"{stage_name(batch_name, batch_index)}.create_proposal_if_none_exists"]
+    return [f"{stage_name(batch_name, batch_index)}.join"]
 
+
+def create_proposal_if_none_exists(
+    batch_name: HostOSStage,
+    batch_index: int,
+    network: ic_types.ICNetwork,
+    ti: TaskInstance,
+    params: DagParams,
+) -> int:
+    nodes = ti.xcom_pull(
+        f"{stage_name(batch_name, batch_index)}.collect_nodes", key="nodes"
+    )
+    print("proposing for these nodes:", nodes)
+    return -123456
+
+
+def request_proposal_vote(
+    batch_name: HostOSStage,
+    batch_index: int,
+    network: ic_types.ICNetwork,
+    ti: TaskInstance,
+    params: DagParams,
+) -> None:
+    print("FIXME")
+
+
+wait_until_proposal_is_accepted = request_proposal_vote
+wait_for_revision_adoption = request_proposal_vote
+wait_until_nodes_healthy = request_proposal_vote
 
 if __name__ == "__main__":
     network = ic_types.ICNetwork(

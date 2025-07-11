@@ -14,9 +14,7 @@ from dfinity.hostos_rollout import (
     MAIN_BATCH_COUNT,
     UNASSIGNED_BATCH_COUNT,
     collect_nodes,
-    should_run,
     stage_name,
-    will_run,
 )
 from dfinity.ic_os_rollout import (
     DEFAULT_HOSTOS_ROLLOUT_PLANS,
@@ -85,40 +83,65 @@ for network_name, network in IC_NETWORKS.items():
 
                 @task_group(group_id=stage_name(batch_name, batch_index))
                 def batch(stage: HostOSStage, batch_index: int) -> None:
-                    should = python_operator.BranchPythonOperator(
-                        task_id="should_run",
-                        python_callable=should_run,
+                    plan = python_operator.BranchPythonOperator(
+                        task_id="plan",
+                        python_callable=hostos_rollout.plan,
                         op_args=[stage, batch_index],
                     )
-                    will = python_operator.PythonOperator(
-                        task_id="will_run",
-                        python_callable=will_run,
-                        op_args=[stage, batch_index],
-                    )
-                    chain(should, will)
                     wait = ic_os_sensor.CustomDateTimeSensorAsync(
                         task_id="wait_until_start_time",
                         target_time="""{{
-                            ti.xcom_pull(task_ids='%s.should_run', key="start_at")
+                            ti.xcom_pull(task_ids='%s.plan', key="start_at")
                             | string
                         }}"""
                         % (stage_name(stage, batch_index)),
                         simulate="{{ params.simulate }}",
                     )
-                    chain(will, wait)
+                    chain(plan, wait)
                     # FIXME: if no nodes, we should skip straight to the next batch!
-                    nodes = python_operator.PythonOperator(
+                    # FIXME up number of tasks fetched (max  tasks) in rollout dashboard!!!
+                    nodes = python_operator.BranchPythonOperator(
                         task_id="collect_nodes",
                         python_callable=collect_nodes,
                         op_args=[stage, batch_index, network],
                         retries=retries,
                     )
                     chain(wait, nodes)
+                    propose = python_operator.PythonOperator(
+                        task_id="create_proposal_if_none_exists",
+                        python_callable=hostos_rollout.create_proposal_if_none_exists,
+                        op_args=[stage, batch_index, network],
+                    )
+                    chain(nodes, propose)
+                    announce = python_operator.PythonOperator(
+                        task_id="request_proposal_vote",
+                        python_callable=hostos_rollout.request_proposal_vote,
+                        op_args=[stage, batch_index, network],
+                    )
+                    chain(propose, announce)
+                    accept = python_operator.PythonOperator(
+                        task_id="wait_until_proposal_is_accepted",
+                        python_callable=hostos_rollout.wait_until_proposal_is_accepted,
+                        op_args=[stage, batch_index, network],
+                    )
+                    chain(propose, accept)
+                    adopt = python_operator.PythonOperator(
+                        task_id="wait_for_revision_adoption",
+                        python_callable=hostos_rollout.wait_for_revision_adoption,
+                        op_args=[stage, batch_index, network],
+                    )
+                    chain(accept, adopt)
+                    healthy = python_operator.PythonOperator(
+                        task_id="wait_until_nodes_healthy",
+                        python_callable=hostos_rollout.wait_until_nodes_healthy,
+                        op_args=[stage, batch_index, network],
+                    )
+                    chain(adopt, healthy)
                     join = EmptyOperator(
                         task_id="join",
                         trigger_rule="none_failed_min_one_success",
                     )
-                    chain([should, nodes], join)
+                    chain([plan, nodes, propose, healthy, announce], join)
 
                 batches.append(batch(batch_name, batch_index))
 
