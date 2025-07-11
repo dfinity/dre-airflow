@@ -392,33 +392,41 @@ def should_run(
                 )
                 batch = None
 
-    print(f"Schedule:\n{pprint.pformat(batch)}")
+    print(f"Original schedule:\n{pprint.pformat(batch)}")
     if batch:
         selectors = batch["selectors"]
         start_at = batch["start_at"]
-        previous_start_ats = [
-            ti.xcom_pull(f"{b}.should_run", key="start_at")
+        previous_tasks_that_had_nodes = [
+            b
             for b in precedent_batches(batch_name, batch_index)
+            if ti.xcom_pull(f"{b}.collect_nodes", key="nodes")
         ]
-        previous_start_ats = list(
-            sorted([s for s in previous_start_ats if s is not None])
-        )
-        if previous_start_ats:
-            print(
-                f"The latest batch to run started at {previous_start_ats[-1]},"
-                " computing a more accurate start time"
-            )
-            new_start_ats = api_boundary_node_batch_timetable(
-                schedule,
-                batch_count=2,
-                now=previous_start_ats[-1],
-            )
-            start_at = new_start_ats[1]
-            print(f"Updated start date: {start_at}")
+        if previous_tasks_that_had_nodes:
+            pt = previous_tasks_that_had_nodes[-1]
+            print(f"Investigating batch {pt} to see what its start time was")
+            previous_task_started_at = ti.xcom_pull(f"{pt}.should_run", key="start_at")
+            if previous_task_started_at:
+                print(
+                    f"The latest batch to run started at {previous_task_started_at},"
+                    " computing a more accurate start time"
+                )
+                new_start_at = api_boundary_node_batch_timetable(
+                    schedule,
+                    batch_count=2,
+                    now=previous_task_started_at,
+                )[1]
+                print(f"Original start date: {start_at}")
+                print(f"Updated start date: {new_start_at}")
+                start_at = new_start_at
+            else:
+                print(
+                    "The latest batch to run does not have a start date,"
+                    f" using the start date of the original plan: {start_at}."
+                )
         else:
             print(
-                f"No recorded start date for any previous batches,"
-                f" using the start date of the original plan: {start_at}."
+                "No recorded start date for any previous batches,"
+                f" using the start date of the original plan: {start_at}"
             )
 
         ti.xcom_push("selectors", selectors)

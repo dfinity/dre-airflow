@@ -106,6 +106,7 @@ for network_name, network in IC_NETWORKS.items():
                         simulate="{{ params.simulate }}",
                     )
                     chain(will, wait)
+                    # FIXME: if no nodes, we should skip straight to the next batch!
                     nodes = python_operator.PythonOperator(
                         task_id="collect_nodes",
                         python_callable=collect_nodes,
