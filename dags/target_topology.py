@@ -94,7 +94,7 @@ with DAG(
                 ti.get_dagrun().get_task_instance('run_topology_tool').log_url
             }}""",
             task_state="""{{
-                ti.get_dagrun().get_task_instance('run_topology_tool').state 
+                ti.get_dagrun().get_task_instance('run_topology_tool').state
             }}""",  # noqa: E501
             trigger_rule=TriggerRule.ALL_DONE,
         )
