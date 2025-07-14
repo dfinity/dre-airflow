@@ -462,7 +462,7 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
             else:
                 print(f"Batch {pb} to run does not have a start date, continuing")
 
-    print("Using {start_at} as the start date")
+    print(f"Using {start_at} as the start date")
     ti.xcom_push("selectors", batch["selectors"])
     ti.xcom_push("start_at", start_at)
     return [f"{bn}.wait_until_start_time"]
