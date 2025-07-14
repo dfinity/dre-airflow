@@ -8,8 +8,9 @@ from dfinity.ic_os_rollout import (
     exponential_increase,
     next_day_of_the_week,
 )
+from dfinity.rollout_types import ApiBoundaryNodeRolloutPlanSpec, DaysOfWeek
 
-ALL_DAYS = [
+ALL_DAYS: list[DaysOfWeek] = [
     "Thursday",
     "Friday",
     "Saturday",
@@ -52,7 +53,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_simple_case(self) -> None:
         now = datetime.datetime(2025, 6, 12, 6, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "9:00",
@@ -87,7 +88,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_tight_night_case(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "allowed_days": ALL_DAYS,
@@ -122,7 +123,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_defaults_to_only_weekdays(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -156,7 +157,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_night_case(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -179,7 +180,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_barely_fits_in_window(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -197,7 +198,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_barely_fits_in_window_with_default_weekdays(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -214,7 +215,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_does_not_fit_in_window(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -227,7 +228,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_absent_start_day(self) -> None:
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "suspend_at": "23:00",
@@ -243,7 +244,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_starts_tomorrow(self) -> None:
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "start_day": "Thursday",
@@ -264,7 +265,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
         Test that a plan computed Wed 11th for Thu next week starts the 19th.
         """
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "start_day": "Thursday next week",

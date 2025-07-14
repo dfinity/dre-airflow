@@ -2,10 +2,10 @@ import datetime
 import os
 import unittest
 
-import dfinity.ic_os_rollout as ic_os_rollout
 import dfinity.ic_types as ic_types
 import operators.ic_os_rollout as ic_os_rollout_operators
 import pendulum
+from dfinity.rollout_types import DEFAULT_GUESTOS_ROLLOUT_PLANS
 
 from airflow import DAG
 from airflow.models import DagBag, DagRun
@@ -47,9 +47,7 @@ class TestSchedule(unittest.TestCase):
                     description="Git revision",
                 ),
                 "plan": Param(
-                    default=ic_os_rollout.DEFAULT_GUESTOS_ROLLOUT_PLANS[
-                        "mainnet"
-                    ].strip(),
+                    default=DEFAULT_GUESTOS_ROLLOUT_PLANS["mainnet"].strip(),
                     type="string",
                     title="Rollout plan",
                     description="YAML-formatted string describing the rollout schedule",

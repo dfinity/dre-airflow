@@ -9,12 +9,12 @@ import operators.auto_rollout as auto_rollout
 import operators.github_rollout as github_rollout
 import operators.gsheets_rollout as gsheets_rollout
 import pendulum
-from dfinity.ic_os_rollout import (
+from dfinity.ic_os_rollout import PLAN_FORM
+from dfinity.ic_types import IC_NETWORKS
+from dfinity.rollout_types import (
     DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS,
     DEFAULT_GUESTOS_ROLLOUT_PLANS,
-    PLAN_FORM,
 )
-from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
 from airflow.models.param import Param

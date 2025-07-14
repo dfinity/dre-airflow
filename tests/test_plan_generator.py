@@ -55,14 +55,14 @@ class TestRolloutPlanner(unittest.TestCase):
     def transform_actual_with_git_revision(
         self,
         inp: SubnetRolloutPlan,
-    ) -> list[tuple[int, datetime.datetime, int, str]]:
+    ) -> list[tuple[int, datetime.datetime, int, str | None]]:
         """
         Convert RolloutPlan into simple list of batch index, date/time, subnet num.
 
         This is done for aesthetic purposes in diffs when the tests do not return
         the expected results.
         """
-        ret: list[tuple[int, datetime.datetime, int, str]] = []
+        ret: list[tuple[int, datetime.datetime, int, str | None]] = []
         for nstr, (_, subnets) in inp.items():
             for i in subnets:
                 ret.append((int(nstr) + 1, i.start_at, i.subnet_num, i.git_revision))

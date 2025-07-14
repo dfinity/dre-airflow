@@ -1,3 +1,5 @@
+# mypy: disable-error-code=unused-ignore
+
 import contextlib
 import unittest
 
@@ -38,7 +40,7 @@ class TestCreateProposal(unittest.TestCase):
             simulate_proposal=True,
             network=IC_NETWORKS["mainnet"],
         )
-        k.xcom_push = fake_xcom_push
+        k.xcom_push = fake_xcom_push  # type: ignore
         return k
 
     def _prop(
@@ -53,7 +55,7 @@ class TestCreateProposal(unittest.TestCase):
                 "replica_version_id": git_revision,
                 "subnet_id": ("yinp6-35cfo-wgcd2"),
             },
-            "proposer": "80",
+            "proposer": 80,
             "status": proposal_status,
             "summary": "Update subnet "
             "yinp6-35cfo-wgcd2"
@@ -65,13 +67,16 @@ class TestCreateProposal(unittest.TestCase):
 
     @contextlib.contextmanager
     def _ctx(self):  # type:ignore
-        with mock.patch(
-            "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
-        ) as m, mock.patch(
-            "dfinity.prom_api.query_prometheus_servers"
-        ) as n, mock.patch(
-            "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
-        ) as p, mock.patch("airflow.models.variable.Variable.get") as v:
+        with (
+            mock.patch(
+                "dfinity.dre.DRE.get_ic_os_version_deployment_proposals_for_subnet"
+            ) as m,
+            mock.patch("dfinity.prom_api.query_prometheus_servers") as n,
+            mock.patch(
+                "dfinity.dre.AuthenticatedDRE.propose_to_update_subnet_replica_version"
+            ) as p,
+            mock.patch("airflow.models.variable.Variable.get") as v,
+        ):
             n.return_value = [{"value": 13}]
             v.return_value = "FAKE CERT"
             yield m, p

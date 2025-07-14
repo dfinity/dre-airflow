@@ -397,6 +397,22 @@ class DRE:
             and r["payload"].get("version") is not None
         ]
 
+    def get_ic_os_version_deployment_proposals_for_hostos_nodes(
+        self,
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevHostOsVersionUpdateProposal]:
+        """
+        Get all proposals that request upgrade of HostOS nodes.
+        """
+        return [
+            cast(ic_types.AbbrevHostOsVersionUpdateProposal, r)
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if "hostos_version_id" in r["payload"]
+        ]
+
     def get_subnet_list(self) -> list[str]:
         r = self.run("get", "subnet-list", "--json", full_stdout=True)
         if r.exit_code != 0:
@@ -410,6 +426,11 @@ class DRE:
         return cast(list[str], json.loads(r.output)["value"]["blessed_version_ids"])
 
     def is_replica_version_blessed(self, git_revision: str) -> bool:
+        return git_revision.lower() in [
+            x.lower() for x in self.get_blessed_replica_versions()
+        ]
+
+    def is_hostos_version_blessed(self, git_revision: str) -> bool:
         return git_revision.lower() in [
             x.lower() for x in self.get_blessed_replica_versions()
         ]
@@ -555,6 +576,51 @@ class AuthenticatedDRE(DRE):
                 f"its standard output: {r.output.rstrip()}"
             )
 
+    def propose_to_update_hostos_nodes_version(
+        self,
+        node_ids: list[str],
+        git_revision: str,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create proposal to update some API boundary nodes.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        nodesparms: list[str] = []
+        for n in node_ids:
+            nodesparms.append("--nodes")
+            nodesparms.append(n)
+
+        r = self.run(
+            "host-os",
+            "rollout",
+            "--forum-post-link=omit",
+            "--version",
+            git_revision,
+            *nodesparms,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
+
 
 if __name__ == "__main__":
     network = ic_types.ICNetworkWithPrivateKey(
@@ -571,18 +637,21 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
 -----END EC PRIVATE KEY-----""",
     )
     d = DRE(network, SubprocessHook())
-    p = d.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
-        subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
-        git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
-    )
-    p2 = d.get_proposals(
-        limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
-    )
+    # p = d.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+    #    subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
+    #    git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
+    # )
+    # p2 = d.get_proposals(
+    #    limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
+    # )
+    p3 = d.get_proposals(topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT)
 
-    pprint.pprint(p)
-    print(len(p))
-    pprint.pprint(p2)
-    print(len(p2))
+    for m in p3:
+        print(m["title"])
+    # pprint.pprint(p3)
+    print(len(p3))
+    # pprint.pprint(p2)
+    # print(len(p2))
     # p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
     # print("Stdout", p.output)
     # print("Return code:", p.exit_code)

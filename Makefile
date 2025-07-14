@@ -15,7 +15,7 @@ $(VENV_BINDIR)/pytest: $(VENV_BINDIR)
 	touch $(VENV_BINDIR)/pytest
 
 $(VENV_BINDIR)/mypy: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install mypy types-PyYAML types-requests
+	$(VENV_BINDIR)/pip3 install mypy types-PyYAML types-requests types-mock
 	touch $(VENV_BINDIR)/mypy
 
 $(VENV_BINDIR)/ruff: $(VENV_BINDIR)
@@ -32,6 +32,6 @@ tests/airflow.db: $(VENV_BINDIR)
 	AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/airflow db migrate
 
 pytest: tests/airflow.db $(VENV_BINDIR)/pytest $(VENV_DIR)/lib/*/site-packages/mock
-	AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(airflow|dfinity)[.].*" AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/pytest -vv tests
+	AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(airflow|dfinity)[.].*" AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared:$(PWD) $(VENV_BINDIR)/pytest -vv tests
 
 test: ruff mypy pytest

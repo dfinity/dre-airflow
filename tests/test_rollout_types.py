@@ -76,36 +76,39 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         inp = textwrap.dedent("""\
         stages:
             canary:
-            - 
+            - selectors:
                 - assignment: unassigned
                   owner: DFINITY
                   nodes_per_group: 1
                   status: Healthy
-            - 
+            - selectors:
                 - assignment: unassigned
                   owner: DFINITY
                   nodes_per_group: 5
                   status: Healthy
-            - 
+            - selectors:
                 - assignment: assigned
                   owner: DFINITY
                   nodes_per_group: 40%
                   status: Healthy
-            - 
+            - selectors:
                 - assignment: assigned
                   owner: others
                   group_by: subnet
                   nodes_per_group: 1
                   status: Healthy
             main:
-            - assignment: assigned
-              group_by: subnet
-              nodes_per_group: 1
-              status: Healthy
+                selectors:
+                - assignment: assigned
+                  group_by: subnet
+                  nodes_per_group: 1
+                  status: Healthy
             unassigned:
-            - assignment: unassigned
-              status: Healthy
-            stragglers: []
+                selectors:
+                - assignment: unassigned
+                  status: Healthy
+            stragglers:
+                selectors: []
         allowed_days: [Wednesday]
         resume_at: 9:00
         suspend_at: 18:59
@@ -117,7 +120,7 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         inp = textwrap.dedent("""\
         stages:
             canary:
-            - 
+            - selectors:
                 - assignment: unassigned
                   owner: DFINITY
                   nodes_per_group: 20%
@@ -129,7 +132,7 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         """)
         p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
         stages = p["stages"]
-        assert stages["canary"][0][0]["nodes_per_group"] == 0.2
+        assert stages["canary"][0]["selectors"][0]["nodes_per_group"] == 0.2
         assert len(stages["canary"]) == 1
         assert "main" not in stages
         assert "unassigned" not in stages

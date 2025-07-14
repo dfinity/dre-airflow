@@ -1,5 +1,5 @@
 """
-IC-OS rollout operators.
+IC-OS HostOS rollout operators.
 """
 
 import collections
@@ -12,32 +12,46 @@ from typing import Literal, cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
-import dfinity.rollout_types as rollout_types
-from airflow.hooks.subprocess import SubprocessHook
-from airflow.models.taskinstance import TaskInstance
 from dfinity.ic_os_rollout import api_boundary_node_batch_timetable
 from dfinity.rollout_types import (
+    DCId,
+    GitCommit,
+    HostOSRolloutPlanSpec,
+    HostOSRolloutStages,
     HostOSStage,
     NodeBatch,
+    NodeInfo,
+    NodeProviderId,
     NodeSelectors,
+    ProposalInfo,
     ProvisionalHostOSBatches,
     ProvisionalHostOSPlan,
     ProvisionalHostOSPlanBatch,
     yaml_to_HostOSRolloutPlanSpec,
 )
 
-LOGGER = logging.getLogger(__name__)
+from airflow.hooks.subprocess import SubprocessHook
+from airflow.models.taskinstance import TaskInstance
 
-DFINITY: rollout_types.NodeProviderId = (
-    "bvcsg-3od6r-jnydw-eysln-aql7w-td5zn-ay5m6-sibd2-jzojt-anwag-mqe"
-)
 CANARY_BATCH_COUNT: int = 5
 MAIN_BATCH_COUNT: int = 50
 UNASSIGNED_BATCH_COUNT: int = 15
 MAX_NODES_PER_BATCH: int = 150
 
+DFINITY: NodeProviderId = (
+    "bvcsg-3od6r-jnydw-eysln-aql7w-td5zn-ay5m6-sibd2-jzojt-anwag-mqe"
+)
 
-def node_info(n: dre.RegistryNode) -> rollout_types.NodeInfo:
+LOGGER = logging.getLogger(__name__)
+
+
+class DagParams(typing.TypedDict):
+    git_revision: str
+    plan: str
+    simulate: bool
+
+
+def registry_node_to_node_info(n: dre.RegistryNode) -> NodeInfo:
     return {
         "node_id": n["node_id"],
         "node_provider_id": n["node_provider_id"],
@@ -47,11 +61,39 @@ def node_info(n: dre.RegistryNode) -> rollout_types.NodeInfo:
     }
 
 
+def stage_name(batch_name: HostOSStage, batch_index: int) -> str:
+    if batch_name in ["canary", "main", "unassigned"]:
+        return f"{batch_name}_{batch_index + 1}"
+    return cast(str, batch_name)
+
+
+def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
+    if batch_name == "canary":
+        return [stage_name(batch_name, n) for n in range(batch_index)]
+    if batch_name == "main":
+        return [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)] + [
+            stage_name(batch_name, n) for n in range(batch_index)
+        ]
+    if batch_name == "unassigned":
+        return (
+            [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)]
+            + [stage_name("main", n) for n in range(MAIN_BATCH_COUNT)]
+            + [stage_name("unassigned", n) for n in range(batch_index)]
+        )
+    if batch_name == "stragglers":
+        return (
+            [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)]
+            + [stage_name("main", n) for n in range(MAIN_BATCH_COUNT)]
+            + [stage_name("unassigned", n) for n in range(UNASSIGNED_BATCH_COUNT)]
+        )
+    assert 0, "not possible: %r" % batch_name
+
+
 def apply_selectors(
     pool: list[dre.RegistryNode],
-    selectors: rollout_types.NodeSelectors,
-    dcs_owned_by_dfinity: set[rollout_types.DCId],
-) -> tuple[list[rollout_types.NodeInfo], list[dre.RegistryNode]]:
+    selectors: NodeSelectors,
+    dcs_owned_by_dfinity: set[DCId],
+) -> tuple[list[NodeInfo], list[dre.RegistryNode]]:
     """
     Take as many nodes from the pool as selectors prescribe, then return info
     on those nodes and a new, reduced pool without those nodes
@@ -97,12 +139,40 @@ def apply_selectors(
     spent = set(node_ids)
     remaining_nodes = [n for n in remaining_nodes if n["node_id"] not in spent]
 
-    return [node_info(n) for n in pool], remaining_nodes
+    return [registry_node_to_node_info(n) for n in pool], remaining_nodes
+
+
+def compute_actual_plan_for_batch(
+    git_revision: str,
+    selectors: NodeSelectors,
+    registry: dre.RegistrySnapshot,
+) -> NodeBatch:
+    """
+    Computes a formal plan for the rollout of a single batch.
+
+    Because the nodes are limited to only those that don't already have the
+    specified git revision, it is expected during production that the list of
+    nodes to be considered by this batch will be equivalent to what the
+    provisional plan computed ahead of time.  That is, equivalent minus the
+    possibility that nodes may have changed assignment in the meantime, or
+    may have changed health status.
+    """
+    # Exclude all upgraded nodes already.
+    remaining_nodes = [
+        n for n in registry["nodes"] if n["hostos_version_id"] != git_revision
+    ]
+    dcs_owned_by_dfinity = set(
+        d["dc_id"]
+        for d in registry["node_operators"]
+        if d["node_provider_principal_id"] == DFINITY
+    )
+    node_ids, _ = apply_selectors(remaining_nodes, selectors, dcs_owned_by_dfinity)
+    return node_ids
 
 
 def compute_provisional_node_batches(
-    git_revision: rollout_types.GitCommit,
-    stages: rollout_types.HostOSRolloutStages,
+    git_revision: GitCommit,
+    stages: HostOSRolloutStages,
     registry: dre.RegistrySnapshot,
 ) -> ProvisionalHostOSBatches:
     """
@@ -137,13 +207,13 @@ def compute_provisional_node_batches(
         "unassigned": [],
         "stragglers": None,
     }
-    for canary_stage_selectors in stages.get("canary", []):
+    for batch_spec in stages.get("canary", []):
         node_ids, remaining_nodes = apply_selectors(
-            remaining_nodes, canary_stage_selectors, dcs_owned_by_dfinity
+            remaining_nodes, batch_spec["selectors"], dcs_owned_by_dfinity
         )
-        p["canary"].append({"selectors": canary_stage_selectors, "nodes": node_ids})
+        p["canary"].append({"selectors": batch_spec["selectors"], "nodes": node_ids})
     if "main" in stages:
-        selectors = stages["main"]
+        selectors = stages["main"]["selectors"]
         while True:
             node_ids, remaining_nodes = apply_selectors(
                 remaining_nodes, selectors, dcs_owned_by_dfinity
@@ -152,7 +222,7 @@ def compute_provisional_node_batches(
                 break
             p["main"].append({"selectors": selectors, "nodes": node_ids})
     if "unassigned" in stages:
-        selectors = stages["unassigned"]
+        selectors = stages["unassigned"]["selectors"]
         while True:
             node_ids, remaining_nodes = apply_selectors(
                 remaining_nodes, selectors, dcs_owned_by_dfinity
@@ -164,15 +234,15 @@ def compute_provisional_node_batches(
         list[Literal["stragglers"]],
         ["stragglers"],
     ):
-        s_selectors = stages.get(n)
-        if s_selectors is None:
+        s_batch_spec = stages.get(n)
+        if s_batch_spec is None:
             pass
         else:
             node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, s_selectors, dcs_owned_by_dfinity
+                remaining_nodes, s_batch_spec["selectors"], dcs_owned_by_dfinity
             )
             p[n] = {
-                "selectors": s_selectors,
+                "selectors": s_batch_spec["selectors"],
                 "nodes": node_ids,
             }
 
@@ -180,14 +250,14 @@ def compute_provisional_node_batches(
 
 
 def compute_provisional_plan(
-    git_revision: rollout_types.GitCommit,
+    git_revision: GitCommit,
     max_canary_batches: int,
     max_main_batches: int,
     max_unassigned_batches: int,
-    spec: rollout_types.HostOSRolloutPlanSpec,
+    spec: HostOSRolloutPlanSpec,
     registry: dre.RegistrySnapshot,
     now: datetime.datetime | None = None,
-) -> rollout_types.ProvisionalHostOSPlan:
+) -> ProvisionalHostOSPlan:
     """
     Much like compute_provisional_node_batches, this function computes
     the batches, but this one returns a provisional timetable alongside
@@ -235,7 +305,7 @@ def compute_provisional_plan(
         "total length of all batches %s"
     ) % (len(timetable), len_of_work)
 
-    plan: rollout_types.ProvisionalHostOSPlan = {
+    plan: ProvisionalHostOSPlan = {
         "canary": [],
         "main": [],
         "unassigned": [],
@@ -295,66 +365,54 @@ def compute_provisional_plan(
     return plan
 
 
-def compute_this_batch_plan(
-    git_revision: str,
-    selectors: rollout_types.NodeSelectors,
-    registry: dre.RegistrySnapshot,
-) -> rollout_types.NodeBatch:
-    """
-    Computes a formal plan for the rollout of a single batch.
+def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostOSPlan:
+    # Import the plan into data structure.
+    spec = yaml_to_HostOSRolloutPlanSpec(params["plan"])
 
-    Because the nodes are limited to only those that don't already have the
-    specified git revision, it is expected during production that the list of
-    nodes to be considered by this batch will be equivalent to what the
-    provisional plan computed ahead of time.  That is, equivalent minus the
-    possibility that nodes may have changed assignment in the meantime, or
-    may have changed health status.
-    """
-    # Exclude all upgraded nodes already.
-    remaining_nodes = [
-        n for n in registry["nodes"] if n["hostos_version_id"] != git_revision
-    ]
-    dcs_owned_by_dfinity = set(
-        d["dc_id"]
-        for d in registry["node_operators"]
-        if d["node_provider_principal_id"] == DFINITY
+    # Fetch the list of nodes.
+    runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
+    registry = runner.get_registry()
+    plan = compute_provisional_plan(
+        params["git_revision"],
+        CANARY_BATCH_COUNT,
+        MAIN_BATCH_COUNT,
+        UNASSIGNED_BATCH_COUNT,
+        spec,
+        registry,
     )
-    node_ids, _ = apply_selectors(remaining_nodes, selectors, dcs_owned_by_dfinity)
-    return node_ids
 
+    print("Prospective timetable:\n%s" % pprint.pformat(plan))
+    print("Summary of prospective timetable:")
+    bad: str | None = None
+    for batch_name in [
+        "canary",
+        "main",
+        "unassigned",
+        "stragglers",
+    ]:
+        batchname = cast(HostOSStage, batch_name)
+        if batchname == "stragglers":
+            if plan["stragglers"] is not None:
+                b = plan["stragglers"]
+                sn = stage_name(batchname, 1)
+                print(f"* {sn}: {len(b['nodes'])} nodes at {b['start_at']}")
+                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
+                    bad = sn
+        else:
+            for n, b in enumerate(plan[batchname]):
+                sn = stage_name(batchname, n)
+                print(f"* {sn}: {len(b['nodes'])} at {b['start_at']}")
+                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
+                    bad = sn
 
-class DagParams(typing.TypedDict):
-    git_revision: str
-    plan: str
-    simulate: bool
-
-
-def stage_name(batch_name: HostOSStage, batch_index: int) -> str:
-    if batch_name in ["canary", "main", "unassigned"]:
-        return f"{batch_name}_{batch_index + 1}"
-    return batch_name
-
-
-def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
-    if batch_name == "canary":
-        return [stage_name(batch_name, n) for n in range(batch_index)]
-    if batch_name == "main":
-        return [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)] + [
-            stage_name(batch_name, n) for n in range(batch_index)
-        ]
-    if batch_name == "unassigned":
-        return (
-            [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)]
-            + [stage_name("main", n) for n in range(MAIN_BATCH_COUNT)]
-            + [stage_name("unassigned", n) for n in range(batch_index)]
+    if bad:
+        LOGGER.error(
+            f"The list of nodes in batch {bad} is too long (> {MAX_NODES_PER_BATCH})."
+            "  Failing preemptively to protect the IC."
         )
-    if batch_name == "stragglers":
-        return (
-            [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)]
-            + [stage_name("main", n) for n in range(MAIN_BATCH_COUNT)]
-            + [stage_name("unassigned", n) for n in range(UNASSIGNED_BATCH_COUNT)]
-        )
-    assert 0, "not possible: %r" % batch_name
+        assert 0
+
+    return plan
 
 
 def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[str]:
@@ -390,23 +448,21 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
                 )
                 batch = None
 
+    if not batch or batch["selectors"] is None:
+        print(f"Batch is empty, skipping: {batch}")
+        return [f"{bn}.join"]
+
     print(f"Original schedule:\n{pprint.pformat(batch)}")
-    if batch:
-        selectors = batch["selectors"]
-        start_at = batch["start_at"]
-        previous_tasks_that_had_nodes = [
-            b
-            for b in precedent_batches(batch_name, batch_index)
-            if ti.xcom_pull(f"{b}.collect_nodes", key="nodes")
-        ]
-        if previous_tasks_that_had_nodes:
-            pt = previous_tasks_that_had_nodes[-1]
-            print(f"Investigating batch {pt} to see what its start time was")
-            previous_task_started_at = ti.xcom_pull(f"{pt}.plan", key="start_at")
-            if previous_task_started_at:
+    start_at = batch["start_at"]
+    for pb in reversed(precedent_batches(batch_name, batch_index)):
+        had_nodes = ti.xcom_pull(f"{pb}.collect_nodes", key="nodes")
+        if had_nodes:
+            print(f"Investigating batch {pb} to see what its start time was")
+            if previous_task_started_at := ti.xcom_pull(f"{pb}.plan", key="start_at"):
                 print(
-                    f"The latest batch to run started at {previous_task_started_at},"
-                    " computing a more accurate start time"
+                    "The latest batch with nodes to run started at"
+                    f" {previous_task_started_at}"
+                    " -- computing a faster start time"
                 )
                 new_start_at = api_boundary_node_batch_timetable(
                     schedule,
@@ -416,75 +472,14 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
                 print(f"Original start date: {start_at}")
                 print(f"Updated start date: {new_start_at}")
                 start_at = new_start_at
+                break
             else:
-                print(
-                    "The latest batch to run does not have a start date,"
-                    f" using the start date of the original plan: {start_at}."
-                )
-        else:
-            print(
-                "No recorded start date for any previous batches,"
-                f" using the start date of the original plan: {start_at}"
-            )
+                print(f"Batch {pb} to run does not have a start date, continuing")
 
-        ti.xcom_push("selectors", selectors)
-        ti.xcom_push("start_at", start_at)
-        if selectors is not None:
-            return [f"{bn}.wait_until_start_time"]
-
-    return [f"{bn}.join"]
-
-
-def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostOSPlan:
-    # Import the plan into data structure.
-    spec = yaml_to_HostOSRolloutPlanSpec(params["plan"])
-
-    # Fetch the list of nodes.
-    runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
-    registry = runner.get_registry()
-    plan = compute_provisional_plan(
-        params["git_revision"],
-        CANARY_BATCH_COUNT,
-        MAIN_BATCH_COUNT,
-        UNASSIGNED_BATCH_COUNT,
-        spec,
-        registry,
-    )
-
-    print("Prospective timetable:\n%s" % pprint.pformat(plan))
-    print("Summary of prospective timetable:")
-    bad: str | None = None
-    for batch_name in cast(
-        list[HostOSStage],
-        [
-            "canary",
-            "main",
-            "unassigned",
-            "stragglers",
-        ],
-    ):
-        if batch_name == "stragglers":
-            if plan["stragglers"] is not None:
-                b = plan["stragglers"]
-                sn = stage_name(batch_name, 1)
-                print(f"* {sn}: {len(b['nodes'])} nodes at {b['start_at']}")
-                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
-                    bad = sn
-        else:
-            for n, b in enumerate(plan[batch_name]):
-                sn = stage_name(batch_name, n)
-                print(f"* {sn}: {len(b['nodes'])} at {b['start_at']}")
-                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
-                    bad = sn
-
-    if bad:
-        LOGGER.error(
-            f"The list of nodes in batch {bad} is too long (> {MAX_NODES_PER_BATCH})."
-            "  Failing preemptively to protect the IC."
-        )
-        assert 0
-
-    return plan
+    print("Using {start_at} as the start date")
+    ti.xcom_push("selectors", batch["selectors"])
+    ti.xcom_push("start_at", start_at)
+    return [f"{bn}.wait_until_start_time"]
 
 
 def collect_nodes(
@@ -523,7 +518,7 @@ def collect_nodes(
             if n["node_id"] not in already_simulated_node_ids
         ]
 
-    nodes = compute_this_batch_plan(params["git_revision"], selectors, registry)
+    nodes = compute_actual_plan_for_batch(params["git_revision"], selectors, registry)
     print("Nodes to roll out to:\n%s" % pprint.pformat(nodes))
 
     if len(nodes) > MAX_NODES_PER_BATCH:
@@ -540,32 +535,99 @@ def collect_nodes(
 
 
 def create_proposal_if_none_exists(
-    batch_name: HostOSStage,
-    batch_index: int,
+    nodes_considered_to_upgrade: list[NodeInfo],
     network: ic_types.ICNetwork,
-    ti: TaskInstance,
     params: DagParams,
-) -> int:
-    nodes = ti.xcom_pull(
-        f"{stage_name(batch_name, batch_index)}.collect_nodes", key="nodes"
+) -> ProposalInfo:
+    """
+    Creates a proposal for HostOS upgrades if it is necessary.
+
+    Returns the proposal information.
+
+    Intended for use as a python_callable parameter in a PythonOperator.
+    """
+    git_revision = params["git_revision"]
+    simulate = params["simulate"]
+
+    if simulate:
+        print(f"simulate_proposal={simulate}")
+
+    runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
+
+    # Get proposals sorted by proposal number.
+    props: list[ic_types.AbbrevHostOsVersionUpdateProposal] = list(
+        sorted(
+            runner.get_ic_os_version_deployment_proposals_for_hostos_nodes(),
+            key=lambda prop: prop["proposal_id"],
+        )
     )
-    print("proposing for these nodes:", nodes)
-    return -123456
 
+    # For each found proposal, identify if the proposal upgrades each
+    # node in the proposal to the specified version ID.  The proposals
+    # are visited in order.  The result of this research indicates to
+    # us which nodes are indeed missing an upgrade to the specific
+    # git revision.
+    nodes_upgraded: dict[str, ic_types.AbbrevHostOsVersionUpdateProposal | None] = {
+        n["node_id"]: None for n in nodes_considered_to_upgrade
+    }
+    for prop in props:
+        for n in nodes_considered_to_upgrade:
+            if n["node_id"] in prop["payload"]["node_ids"]:
+                nodes_upgraded[n["node_id"]] = (
+                    prop
+                    if (
+                        (git_revision == prop["payload"]["hostos_version_id"])
+                        and prop["status"]
+                        in (
+                            ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+                            ic_types.ProposalStatus.PROPOSAL_STATUS_ADOPTED,
+                            ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED,
+                        )
+                    )
+                    else None
+                )
 
-def request_proposal_vote(
-    batch_name: HostOSStage,
-    batch_index: int,
-    network: ic_types.ICNetwork,
-    ti: TaskInstance,
-    params: DagParams,
-) -> None:
-    print("FIXME")
+    nodes_to_upgrade: list[str] = []
+    for node_id, prop_id in nodes_upgraded.items():
+        if prop_id is not None:
+            print(f"Node {node_id} got upgraded in proposal {prop_id}.")
+        else:
+            print(
+                f"Node {node_id} was either not targeted by a proposal, or the"
+                " latest proposal upgraded it to a different version than"
+                f" {git_revision}, or a previous proposal to upgrade it failed."
+            )
+            nodes_to_upgrade.append(node_id)
 
+    if not nodes_to_upgrade:
+        upgrade_proposal = [
+            prop
+            for prop in nodes_upgraded.values()
+            if prop and prop["status"] == ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN
+        ] or [prop for prop in nodes_upgraded.values() if prop]
+        return {
+            "proposal_id": upgrade_proposal[0]["proposal_id"],
+            "proposal_url": f"{network.proposal_display_url}/"
+            f"{upgrade_proposal[0]['proposal_id']}",
+            "needs_vote": upgrade_proposal[0]["status"]
+            == ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+        }
 
-wait_until_proposal_is_accepted = request_proposal_vote
-wait_for_revision_adoption = request_proposal_vote
-wait_until_nodes_healthy = request_proposal_vote
+    print(
+        f"Creating proposal for HostOS nodes {nodes_to_upgrade} to "
+        + f"adopt revision {git_revision} (simulate {simulate})."
+    )
+
+    proposal_number = runner.authenticated().propose_to_update_hostos_nodes_version(
+        nodes_to_upgrade, git_revision, dry_run=simulate
+    )
+
+    return {
+        "proposal_id": proposal_number,
+        "proposal_url": f"{network.proposal_display_url}/{proposal_number}",
+        "needs_vote": True,
+    }
+
 
 if __name__ == "__main__":
     network = ic_types.ICNetwork(
@@ -577,57 +639,69 @@ if __name__ == "__main__":
         "dfinity.ic_admin.mainnet.proposer_key_file",
     )
     runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
-    spec: rollout_types.HostOSRolloutStages = {
+    spec: HostOSRolloutStages = {
         "canary": [
-            [
-                {
-                    "assignment": "unassigned",
-                    "owner": "DFINITY",
-                    "nodes_per_group": 1,
-                    "status": "Healthy",
-                }
-            ],
-            [
-                {
-                    "assignment": "unassigned",
-                    "owner": "DFINITY",
-                    "nodes_per_group": 5,
-                    "status": "Healthy",
-                }
-            ],
-            [
+            {
+                "selectors": [
+                    {
+                        "assignment": "unassigned",
+                        "owner": "DFINITY",
+                        "nodes_per_group": 1,
+                        "status": "Healthy",
+                    }
+                ],
+            },
+            {
+                "selectors": [
+                    {
+                        "assignment": "unassigned",
+                        "owner": "DFINITY",
+                        "nodes_per_group": 5,
+                        "status": "Healthy",
+                    }
+                ],
+            },
+            {
+                "selectors": [
+                    {
+                        "assignment": "assigned",
+                        "owner": "DFINITY",
+                        "nodes_per_group": 40.0,
+                        "status": "Healthy",
+                    }
+                ],
+            },
+            {
+                "selectors": [
+                    {
+                        "assignment": "assigned",
+                        "owner": "others",
+                        "group_by": "subnet",
+                        "nodes_per_group": 1,
+                        "status": "Healthy",
+                    }
+                ],
+            },
+        ],
+        "main": {
+            "selectors": [
                 {
                     "assignment": "assigned",
-                    "owner": "DFINITY",
-                    "nodes_per_group": 40.0,
-                    "status": "Healthy",
-                }
-            ],
-            [
-                {
-                    "assignment": "assigned",
-                    "owner": "others",
                     "group_by": "subnet",
                     "nodes_per_group": 1,
                     "status": "Healthy",
                 }
-            ],
-        ],
-        "main": [
-            {
-                "assignment": "assigned",
-                "group_by": "subnet",
-                "nodes_per_group": 1,
-                "status": "Healthy",
-            }
-        ],
-        "unassigned": [
-            {
-                "assignment": "unassigned",
-                "status": "Healthy",
-            }
-        ],
-        "stragglers": [],
+            ]
+        },
+        "unassigned": {
+            "selectors": [
+                {
+                    "assignment": "unassigned",
+                    "status": "Healthy",
+                }
+            ]
+        },
+        "stragglers": {"selectors": []},
     }
     """
     import yaml

@@ -11,13 +11,14 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_GUESTOS_ROLLOUT_PLANS,
     MAX_BATCHES,
     PLAN_FORM,
     SubnetIdWithRevision,
     SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
+from dfinity.rollout_types import DEFAULT_GUESTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
+from dfinity.rollout_types import GUESTOS_ROLLOUT_PLAN_HELP as ROLLOUT_PLAN_HELP
 
 from airflow import DAG
 from airflow.decorators import task
@@ -47,10 +48,10 @@ for network_name, network in IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_GUESTOS_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
+                description_md=ROLLOUT_PLAN_HELP,
                 custom_html_form=PLAN_FORM,
             ),
             "simulate": Param(
@@ -222,7 +223,7 @@ if __name__ == "__main__":
     try:
         plan = sys.argv[2]
     except Exception:
-        plan = DEFAULT_GUESTOS_ROLLOUT_PLANS["mainnet"]
+        plan = DEFAULT_ROLLOUT_PLANS["mainnet"]
     dag = DAGS["mainnet"]
     dag.test(
         run_conf={

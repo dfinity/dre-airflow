@@ -246,7 +246,7 @@ class AbbrevSubnetUpdateProposal(TypedDict):
 
 class AbbrevApiBoundaryNodesUpdateProposalPayload(TypedDict):
     version: str
-    api_boundary_node_ids: str
+    node_ids: list[str]
 
 
 class AbbrevApiBoundaryNodesUpdateProposal(TypedDict):
@@ -266,6 +266,35 @@ class AbbrevApiBoundaryNodesUpdateProposal(TypedDict):
     """
 
     payload: AbbrevApiBoundaryNodesUpdateProposalPayload
+    proposal_id: int
+    proposer: int
+    status: ProposalStatus
+    summary: str
+    title: str
+    topic: ProposalTopic
+
+
+class AbbrevHostOsVersionUpdateProposalPayload(TypedDict):
+    hostos_version_id: str | None
+    node_ids: list[str]
+
+
+class AbbrevHostOsVersionUpdateProposal(TypedDict):
+    """
+    {'proposal_id': 102768,
+    'payload': {'hostos_version_id': 'b3b00ba59c366384e3e0cd53a69457e9053ec987',
+                'node_ids': [
+                '4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae'
+                ]},
+    'proposer': '80',
+    'status': 'EXECUTED',
+    'summary': '...',
+    'title': 'Set HostOS version: f195ba756bc3bf170a2888699e5e74101fdac6ba'
+             ' on 27 nodes',
+    'topic': 'TOPIC_IC_OS_VERSION_DEPLOYMENT'}
+    """
+
+    payload: AbbrevHostOsVersionUpdateProposalPayload
     proposal_id: int
     proposer: int
     status: ProposalStatus

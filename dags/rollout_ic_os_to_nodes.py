@@ -1,3 +1,5 @@
+# mypy: disable-error-code=unused-ignore
+
 """
 Rollout IC os to subnets in batches.
 
@@ -5,25 +7,21 @@ Each batch runs in parallel.
 """
 
 import datetime
+import typing
 
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-from dfinity import hostos_rollout
-from dfinity.hostos_rollout import (
-    CANARY_BATCH_COUNT,
-    MAIN_BATCH_COUNT,
-    UNASSIGNED_BATCH_COUNT,
-    collect_nodes,
-    stage_name,
-)
-from dfinity.ic_os_rollout import (
-    DEFAULT_HOSTOS_ROLLOUT_PLANS,
-    PLAN_FORM,
-)
+from dfinity.ic_os_rollout import PLAN_FORM
 from dfinity.ic_types import IC_NETWORKS
+from dfinity.rollout_types import DEFAULT_HOSTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
+from dfinity.rollout_types import HOSTOS_ROLLOUT_PLAN_HELP as ROLLOUT_PLAN_HELP
 from dfinity.rollout_types import HostOSStage
+from operators import hostos_rollout as hostos_operators
+from operators.ic_os_rollout import RequestProposalVote
+from sensors import hostos_rollout as hostos_sensors
 
 import airflow.operators.python as python_operator
+import airflow.sensors.python as python_sensor
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -50,10 +48,10 @@ for network_name, network in IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_HOSTOS_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
+                description_md=ROLLOUT_PLAN_HELP,
                 custom_html_form=PLAN_FORM,
             ),
             "simulate": Param(
@@ -68,83 +66,118 @@ for network_name, network in IC_NETWORKS.items():
     def rollout_ic_os_to_nodes() -> None:
         retries = int(86400 / 60 / 5)  # one day worth of retries
 
-        schedule = task(hostos_rollout.schedule)
+        schedule = task(hostos_operators.schedule)
 
-        timetable = schedule(network=network)  # type: ignore # noqa
+        timetable = schedule(network=network)  # type: ignore
         batches = []
         batch_name: HostOSStage
-        for batch_name, batch_count in [  # type:ignore
-            ("canary", CANARY_BATCH_COUNT),
-            ("main", MAIN_BATCH_COUNT),
-            ("unassigned", UNASSIGNED_BATCH_COUNT),
+        for batch__name, batch_count in [
+            ("canary", hostos_operators.CANARY_BATCH_COUNT),
+            ("main", hostos_operators.MAIN_BATCH_COUNT),
+            ("unassigned", hostos_operators.UNASSIGNED_BATCH_COUNT),
             ("stragglers", 1),
         ]:
+            batch_name = typing.cast(HostOSStage, batch__name)
             for batch_index in range(batch_count):
 
-                @task_group(group_id=stage_name(batch_name, batch_index))
+                @task_group(
+                    group_id=hostos_operators.stage_name(batch_name, batch_index)
+                )
                 def batch(stage: HostOSStage, batch_index: int) -> None:
+                    nodes_xcom_pull = (
+                        "{{ ti.xcom_pull('%s.collect_nodes', key='nodes') }}"
+                        % (hostos_operators.stage_name(stage, batch_index))
+                    )
+                    start_time_xcom_pull = """{{
+                        ti.xcom_pull(task_ids='%s.plan', key="start_at")
+                        | string
+                    }}""" % (hostos_operators.stage_name(stage, batch_index))
+                    proposal_xcom_pull = """{{
+                        ti.xcom_pull(task_ids='%s.create_proposal_if_none_exists')
+                    }}""" % (hostos_operators.stage_name(stage, batch_index))
+
                     plan = python_operator.BranchPythonOperator(
                         task_id="plan",
-                        python_callable=hostos_rollout.plan,
+                        python_callable=hostos_operators.plan,
                         op_args=[stage, batch_index],
                     )
                     wait = ic_os_sensor.CustomDateTimeSensorAsync(
                         task_id="wait_until_start_time",
-                        target_time="""{{
-                            ti.xcom_pull(task_ids='%s.plan', key="start_at")
-                            | string
-                        }}"""
-                        % (stage_name(stage, batch_index)),
+                        target_time=start_time_xcom_pull,
                         simulate="{{ params.simulate }}",
                     )
-                    chain(plan, wait)
-                    # FIXME: if no nodes, we should skip straight to the next batch!
-                    # FIXME up number of tasks fetched (max  tasks) in rollout dashboard!!!
+                    # FIXME up number of tasks fetched (max tasks) in rollout dashboard!
                     nodes = python_operator.BranchPythonOperator(
                         task_id="collect_nodes",
-                        python_callable=collect_nodes,
+                        python_callable=hostos_operators.collect_nodes,
                         op_args=[stage, batch_index, network],
                         retries=retries,
                     )
-                    chain(wait, nodes)
                     propose = python_operator.PythonOperator(
                         task_id="create_proposal_if_none_exists",
-                        python_callable=hostos_rollout.create_proposal_if_none_exists,
-                        op_args=[stage, batch_index, network],
+                        python_callable=hostos_operators.create_proposal_if_none_exists,
+                        op_args=[nodes_xcom_pull, network],
+                        retries=retries,
+                        do_xcom_push=True,
                     )
-                    chain(nodes, propose)
-                    announce = python_operator.PythonOperator(
+                    announce = RequestProposalVote(
                         task_id="request_proposal_vote",
-                        python_callable=hostos_rollout.request_proposal_vote,
-                        op_args=[stage, batch_index, network],
+                        source_task_id="%s.create_proposal_if_none_exists"
+                        % hostos_operators.stage_name(stage, batch_index),
+                        retries=retries,
                     )
-                    chain(propose, announce)
-                    accept = python_operator.PythonOperator(
+                    accept = python_sensor.PythonSensor(
                         task_id="wait_until_proposal_is_accepted",
-                        python_callable=hostos_rollout.wait_until_proposal_is_accepted,
-                        op_args=[stage, batch_index, network],
+                        python_callable=ic_os_sensor.has_proposal_executed,
+                        poke_interval=120,
+                        timeout=86400 * 7,
+                        mode="reschedule",
+                        op_args=[proposal_xcom_pull, network, "{{ params.simulate }}"],
+                        retries=retries,
                     )
-                    chain(propose, accept)
-                    adopt = python_operator.PythonOperator(
+                    adopt = python_sensor.PythonSensor(
                         task_id="wait_for_revision_adoption",
-                        python_callable=hostos_rollout.wait_for_revision_adoption,
-                        op_args=[stage, batch_index, network],
+                        python_callable=hostos_sensors.have_hostos_nodes_adopted_revision,
+                        poke_interval=120,
+                        timeout=86400 * 7,
+                        mode="reschedule",
+                        op_args=[nodes_xcom_pull, network],
+                        retries=retries,
                     )
-                    chain(accept, adopt)
-                    healthy = python_operator.PythonOperator(
+                    healthy = python_sensor.PythonSensor(
                         task_id="wait_until_nodes_healthy",
-                        python_callable=hostos_rollout.wait_until_nodes_healthy,
-                        op_args=[stage, batch_index, network],
+                        python_callable=hostos_sensors.are_hostos_nodes_healthy,
+                        poke_interval=120,
+                        timeout=86400 * 7,
+                        mode="reschedule",
+                        op_args=[nodes_xcom_pull, network],
+                        retries=retries,
                     )
-                    chain(adopt, healthy)
                     join = EmptyOperator(
                         task_id="join",
                         trigger_rule="none_failed_min_one_success",
                     )
-                    chain([plan, nodes, propose, healthy, announce], join)
+                    # And now the dependency of the batches.
+                    plan >> wait >> nodes >> propose >> announce
+                    propose >> accept >> adopt >> healthy
+                    [plan, nodes, announce, healthy] >> join
 
                 batches.append(batch(batch_name, batch_index))
 
-        chain([timetable], *batches)
+        wait_for_other_rollouts = ic_os_sensor.WaitForOtherDAGs(
+            task_id="wait_for_other_rollouts"
+        )
+
+        wait_for_election = python_sensor.PythonSensor(
+            task_id="wait_until_nodes_healthy",
+            python_callable=hostos_sensors.has_network_adopted_hostos_revision,
+            poke_interval=300,
+            timeout=86400 * 7,
+            mode="reschedule",
+            op_args=[network],
+            retries=retries,
+        )
+
+        chain([timetable, wait_for_election, wait_for_other_rollouts], *batches)
 
     rollout_ic_os_to_nodes()

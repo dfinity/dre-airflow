@@ -2,20 +2,22 @@ import datetime
 import json
 import os
 import textwrap
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from dfinity import dre
-from dfinity.hostos_rollout import compute_provisional_plan, schedule
-from dfinity.ic_os_rollout import DEFAULT_HOSTOS_ROLLOUT_PLANS
 from dfinity.ic_types import IC_NETWORKS
-from dfinity.rollout_types import yaml_to_HostOSRolloutPlanSpec
+from dfinity.rollout_types import (
+    DEFAULT_HOSTOS_ROLLOUT_PLANS,
+    yaml_to_HostOSRolloutPlanSpec,
+)
+from operators.hostos_rollout import DagParams, compute_provisional_plan, schedule
 
 
 @pytest.fixture
 def registry() -> dre.RegistrySnapshot:
     with open(os.path.join(os.path.dirname(__file__), "registry.json"), "r") as f:
-        return json.load(f)
+        return cast(dre.RegistrySnapshot, json.load(f))
 
 
 def test_simple_plan(registry: dre.RegistrySnapshot) -> None:
@@ -23,7 +25,7 @@ def test_simple_plan(registry: dre.RegistrySnapshot) -> None:
     spec = textwrap.dedent("""\
         stages:
           canary:
-          - 
+          - selectors:
             - assignment: unassigned
               owner: DFINITY
               nodes_per_group: 1
@@ -86,7 +88,8 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     batches = (
         [r for r in res["canary"]]
         + [r for r in res["main"]]
-        + [res["unassigned"], res["stragglers"]]
+        + [r for r in res["unassigned"]]
+        + [res["stragglers"]]
     )
     assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 28, 13, 0)
 
@@ -99,13 +102,13 @@ def test_schedule_bombs_with_too_many_nodes(
     spec = textwrap.dedent("""\
         stages:
           canary:
-          - [] # should cause ALL nodes to be upgraded
-               # in this stage
+          - selectors: [] # should cause ALL nodes to be upgraded
+                          # in this stage
         resume_at: 7:00
         suspend_at: 15:00
         minimum_minutes_per_batch: 30
         """)
-    params = {"simulate": True, "plan": spec, "git_revision": "0"}
+    params: DagParams = {"simulate": True, "plan": spec, "git_revision": "0"}
     mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
     with pytest.raises(AssertionError):
         schedule(IC_NETWORKS["mainnet"], params)
