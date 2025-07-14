@@ -604,7 +604,7 @@ class ProvisionalHostOSBatches(TypedDict):
     canary: list[ComputedBatch]
     main: list[ComputedBatch]
     unassigned: list[ComputedBatch]
-    stragglers: ComputedBatch | None
+    stragglers: list[ComputedBatch]
 
 
 class ProvisionalHostOSPlanBatch(TypedDict):
@@ -617,7 +617,7 @@ class ProvisionalHostOSPlan(TypedDict):
     canary: list[ProvisionalHostOSPlanBatch]
     main: list[ProvisionalHostOSPlanBatch]
     unassigned: list[ProvisionalHostOSPlanBatch]
-    stragglers: ProvisionalHostOSPlanBatch | None
+    stragglers: list[ProvisionalHostOSPlanBatch]
     minimum_minutes_per_batch: int
     allowed_days: NotRequired[list[DaysOfWeek]]
     resume_at: str

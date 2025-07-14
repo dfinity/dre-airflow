@@ -1,3 +1,4 @@
+# mypy: disable-error-code=unused-ignore
 """
 Automatic computation of next rollout.
 """

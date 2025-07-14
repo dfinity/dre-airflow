@@ -41,6 +41,7 @@ def test_simple_plan(registry: dre.RegistrySnapshot) -> None:
         5,
         1,
         15,
+        1,
         yaml_to_HostOSRolloutPlanSpec(spec),
         registry,
         now,
@@ -63,6 +64,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
         5,
         40,
         15,
+        1,
         spec,
         registry,
         now,
@@ -84,12 +86,12 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     assert len(res["main"][-1]["nodes"]) == 1
     assert len(res["unassigned"]) == 8
     assert len(res["unassigned"][-1]["nodes"]) == 83
-    assert len(res["stragglers"]["nodes"]) == 14
+    assert len(res["stragglers"][0]["nodes"]) == 14
     batches = (
         [r for r in res["canary"]]
         + [r for r in res["main"]]
         + [r for r in res["unassigned"]]
-        + [res["stragglers"]]
+        + [r for r in res["stragglers"]]
     )
     assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 28, 13, 0)
 

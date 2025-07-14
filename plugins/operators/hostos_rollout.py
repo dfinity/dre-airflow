@@ -8,7 +8,7 @@ import logging
 import pprint
 import typing
 from copy import deepcopy
-from typing import Literal, cast
+from typing import cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
@@ -36,6 +36,7 @@ from airflow.models.taskinstance import TaskInstance
 CANARY_BATCH_COUNT: int = 5
 MAIN_BATCH_COUNT: int = 50
 UNASSIGNED_BATCH_COUNT: int = 15
+STRAGGLERS_BATCH_COUNT: int = 1
 MAX_NODES_PER_BATCH: int = 150
 
 DFINITY: NodeProviderId = (
@@ -62,9 +63,7 @@ def registry_node_to_node_info(n: dre.RegistryNode) -> NodeInfo:
 
 
 def stage_name(batch_name: HostOSStage, batch_index: int) -> str:
-    if batch_name in ["canary", "main", "unassigned"]:
-        return f"{batch_name}_{batch_index + 1}"
-    return cast(str, batch_name)
+    return f"{batch_name}_{batch_index + 1}"
 
 
 def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
@@ -85,6 +84,7 @@ def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
             [stage_name("canary", n) for n in range(CANARY_BATCH_COUNT)]
             + [stage_name("main", n) for n in range(MAIN_BATCH_COUNT)]
             + [stage_name("unassigned", n) for n in range(UNASSIGNED_BATCH_COUNT)]
+            + [stage_name("stragglers", n) for n in range(STRAGGLERS_BATCH_COUNT)]
         )
     assert 0, "not possible: %r" % batch_name
 
@@ -205,7 +205,7 @@ def compute_provisional_node_batches(
         "canary": [],
         "main": [],
         "unassigned": [],
-        "stragglers": None,
+        "stragglers": [],
     }
     for batch_spec in stages.get("canary", []):
         node_ids, remaining_nodes = apply_selectors(
@@ -230,21 +230,15 @@ def compute_provisional_node_batches(
             if not node_ids:
                 break
             p["unassigned"].append({"selectors": selectors, "nodes": node_ids})
-    for n in cast(
-        list[Literal["stragglers"]],
-        ["stragglers"],
-    ):
-        s_batch_spec = stages.get(n)
-        if s_batch_spec is None:
-            pass
-        else:
+    if "stragglers" in stages:
+        selectors = stages["stragglers"]["selectors"]
+        while True:
             node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, s_batch_spec["selectors"], dcs_owned_by_dfinity
+                remaining_nodes, selectors, dcs_owned_by_dfinity
             )
-            p[n] = {
-                "selectors": s_batch_spec["selectors"],
-                "nodes": node_ids,
-            }
+            if not node_ids:
+                break
+            p["stragglers"].append({"selectors": selectors, "nodes": node_ids})
 
     return p
 
@@ -254,6 +248,7 @@ def compute_provisional_plan(
     max_canary_batches: int,
     max_main_batches: int,
     max_unassigned_batches: int,
+    max_stragglers_batches: int,
     spec: HostOSRolloutPlanSpec,
     registry: dre.RegistrySnapshot,
     now: datetime.datetime | None = None,
@@ -276,7 +271,7 @@ def compute_provisional_plan(
         batch_count=max_canary_batches
         + max_main_batches
         + max_unassigned_batches
-        + 1,  # stragglers
+        + max_stragglers_batches,
         now=now,
     )
 
@@ -309,7 +304,7 @@ def compute_provisional_plan(
         "canary": [],
         "main": [],
         "unassigned": [],
-        "stragglers": None,
+        "stragglers": [],
         "resume_at": spec["resume_at"],
         "suspend_at": spec["suspend_at"],
         "minimum_minutes_per_batch": spec["minimum_minutes_per_batch"],
@@ -353,15 +348,18 @@ def compute_provisional_plan(
                 "selectors": batch["selectors"],
             }
         )
-    for x in ["stragglers"]:
-        x = typing.cast(typing.Literal["stragglers"], x)
-        s_batch = batches[x]
-        if s_batch:
-            plan[x] = {
+    for n in range(max_stragglers_batches):
+        try:
+            batch = batches.get("stragglers", [])[n]
+        except IndexError:
+            continue
+        plan["stragglers"].append(
+            {
                 "start_at": timetable.pop(0),
-                "nodes": s_batch["nodes"],
-                "selectors": s_batch["selectors"],
+                "nodes": batch["nodes"],
+                "selectors": batch["selectors"],
             }
+        )
     return plan
 
 
@@ -377,6 +375,7 @@ def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostO
         CANARY_BATCH_COUNT,
         MAIN_BATCH_COUNT,
         UNASSIGNED_BATCH_COUNT,
+        STRAGGLERS_BATCH_COUNT,
         spec,
         registry,
     )
@@ -391,19 +390,11 @@ def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostO
         "stragglers",
     ]:
         batchname = cast(HostOSStage, batch_name)
-        if batchname == "stragglers":
-            if plan["stragglers"] is not None:
-                b = plan["stragglers"]
-                sn = stage_name(batchname, 1)
-                print(f"* {sn}: {len(b['nodes'])} nodes at {b['start_at']}")
-                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
-                    bad = sn
-        else:
-            for n, b in enumerate(plan[batchname]):
-                sn = stage_name(batchname, n)
-                print(f"* {sn}: {len(b['nodes'])} at {b['start_at']}")
-                if len(b["nodes"]) > MAX_NODES_PER_BATCH:
-                    bad = sn
+        for n, b in enumerate(plan[batchname]):
+            sn = stage_name(batchname, n)
+            print(f"* {sn}: {len(b['nodes'])} at {b['start_at']}")
+            if len(b["nodes"]) > MAX_NODES_PER_BATCH:
+                bad = sn
 
     if bad:
         LOGGER.error(
@@ -426,12 +417,7 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
         except IndexError:
             print("No prepared batch, skipping this batch")
             batch = None
-    elif batch_name == "stragglers":
-        print(f"Attempting to retrieve the schedule for the {batch_name} batch")
-        batch = schedule[batch_name]
-        if batch is None:
-            print("No prepared batch, skipping this batch")
-    elif batch_name == "main" or batch_name == "unassigned":
+    else:
         try:
             print(f"Attempting to retrieve the {batch_name} {batch_index + 1} batch ")
             batch = schedule[batch_name][batch_index]

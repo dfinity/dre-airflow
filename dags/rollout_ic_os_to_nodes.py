@@ -1,5 +1,4 @@
 # mypy: disable-error-code=unused-ignore
-
 """
 Rollout IC os to subnets in batches.
 
@@ -75,7 +74,7 @@ for network_name, network in IC_NETWORKS.items():
             ("canary", hostos_operators.CANARY_BATCH_COUNT),
             ("main", hostos_operators.MAIN_BATCH_COUNT),
             ("unassigned", hostos_operators.UNASSIGNED_BATCH_COUNT),
-            ("stragglers", 1),
+            ("stragglers", hostos_operators.STRAGGLERS_BATCH_COUNT),
         ]:
             batch_name = typing.cast(HostOSStage, batch__name)
             for batch_index in range(batch_count):
