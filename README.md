@@ -96,6 +96,13 @@ connections (unless specified otherwise):
   * AWS Secret Access Key: the value of `AWS_SECRET_ACCESS_KEY` in K8s secret `airflow-logging`
   * Extra: `{ "endpoint_url": "http://rook-ceph-rgw-ceph-store.rook-ceph.svc.cluster.local" }`
   * **Only create this connection if running under K8s**
+*
+  * Connection ID: `wasabi.target_topology`
+  * Connection type: Amazon Web Service
+  * Description: Wasabi storage used for storing artifacts
+  * AWS Acess Key ID: Wasabi dre target topology bucket - Username
+  * AWS Secret Key: Wasabi dre target topology bucket - credential
+  * Extra: `{ "endpoint_url": "https://s3.eu-central-2.wasabisys.com" }`
 
 Variables and connections are only visible to administrators.
 

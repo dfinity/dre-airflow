@@ -1,15 +1,13 @@
 import datetime
 import json
 import pprint
-import random
 import shlex
 import shutil
 import tempfile
-import time
-from logging import Logger
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Any, Callable, Sequence, cast
+from typing import Any, Sequence, cast
+import zipfile
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
@@ -18,17 +16,15 @@ import airflow.providers.slack.operators.slack as slack
 from airflow.hooks.base import BaseHook
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 from airflow.models.baseoperator import BaseOperator
-from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 REPO_DIR = Path("/tmp/target_topology")
-GOOGLE_DRIVE_FOLDER = "1FuEIL4qKMxPqpNqxEwR9zAKxPOF5waqF"
 GITHUB_CONNECTION_ID = "github.node_allocation"
-GOOGLE_CONNECTION_ID = "google_cloud_default"
+S3_CONNECTION_ID = "wasabi.target_topology"
+S3_BUCKET = "dre-target-topology"
 
 
-def format_slack_payload(
-    drive_subfolder: str, log_link: str, success: bool
-) -> list[object]:
+def format_slack_payload(subfolder: str, log_link: str, success: bool) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
     status_log = ":white_check_mark: success" if success else ":x: failure"
@@ -56,19 +52,17 @@ def format_slack_payload(
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"To view the artifacts for the run"
-                f" open folder {drive_subfolder} in",
+                "text": "Download artifacts of the run:",
             },
             "accessory": {
                 "type": "button",
                 "text": {
                     "type": "plain_text",
-                    "text": "Open drive :open_file_folder:",
+                    "text": "Download :open_file_folder:",
                     "emoji": True,
                 },
                 "value": "click_me_123",
-                "url": "https://drive.google.com/drive/u/2/folders/"
-                + GOOGLE_DRIVE_FOLDER,
+                "url": f"https://s3.eu-central-2.wasabisys.com/{S3_BUCKET}/{subfolder}.zip",
                 "action_id": "button-action",
             },
         },
@@ -165,7 +159,6 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         self.scenario = scenario
         self.topology_file = topology_file
         self.node_pipeline = node_pipeline
-        self.folder_id = GOOGLE_DRIVE_FOLDER
         self.drive_subfolder = drive_subfolder
 
         super().__init__(**kwargs)
@@ -324,46 +317,23 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
 
     def upload_outputs(self, scratch_folder: Path) -> None:
         self.log.info("Uploading inputs and outputs.")
-        hook = GoogleDriveHook(gcp_conn_id=GOOGLE_CONNECTION_ID)
 
         output = scratch_folder / "output"
-        for file in output.rglob("*"):
-            if not file.is_file():
-                continue
-            dest_file = Path(self.drive_subfolder) / file.relative_to(output)
-            run_with_backoff(
-                hook.upload_file,
-                str(file),
-                str(dest_file),
-                logger=self.log,
-                folder_id=self.folder_id,
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / "output.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for file in output.rglob("*"):
+                    if file.is_file():
+                        # Write file to zip with relative path inside "output" folder
+                        zipf.write(file, arcname=file.relative_to(output))
+
+            # Upload the zip to Wasabi
+            hook = S3Hook(aws_conn_id=S3_CONNECTION_ID)
+            zip_key = f"{self.drive_subfolder}.zip"
+            hook.load_file(
+                filename=str(zip_path),
+                key=zip_key,
+                bucket_name=S3_BUCKET,
+                replace=False,
+                acl_policy="public-read",
             )
-
-
-def run_with_backoff(
-    func: Callable[..., Any],
-    *args: Any,
-    kwargs: dict[str, Any] = {},
-    max_retries: int = 5,
-    base_delay: float = 1.0,
-    max_delay: float = 600.0,
-    logger: Logger,
-    **kwrags: Any,
-) -> Any:
-    attempt = 0
-
-    while True:
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            attempt += 1
-            if attempt > max_retries:
-                logger.error(f"Exceeded {max_retries} retries. Raising exception.")
-                raise
-            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-            jitter = random.uniform(0, delay / 2)
-            total_delay = delay + jitter
-            logger.warning(
-                f"Retry {attempt}/{max_retries} in {total_delay:.2f}s due to: {e}"
-            )
-            time.sleep(total_delay)
