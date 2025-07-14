@@ -4,10 +4,10 @@ import pprint
 import shlex
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Sequence, cast
-import zipfile
 
 import requests
 from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
