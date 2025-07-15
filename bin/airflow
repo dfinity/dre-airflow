@@ -62,13 +62,22 @@ function setup_airflow_variables_and_connections() {
 
 if [ "$1" == "setup" ]
 then
-    # TODO: Should add a check to see if we are using a correct version of python
-    # If using version >3.12 some of the packages are reported as yanked and thus
-    # the script breaks.
-    /usr/bin/python3 -m venv "$VENV_DIR"
+    PYTHON_VERSION=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+
+    # Split version
+    PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [ "$PYTHON_MAJOR" -gt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -gt 12 ]; }; then
+        echo "❌ Python $PYTHON_VERSION is not supported. Please use Python 3.12 or lower."
+        exit 1
+    fi
+
+    python -m venv "$VENV_DIR"
     "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
+        "apache-airflow[amazon]" \
         --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt
     mkdir -p "$AIRFLOW_HOME"
     if ! test -f "$AIRFLOW_HOME"/airflow.db

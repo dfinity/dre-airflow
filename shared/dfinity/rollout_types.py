@@ -106,16 +106,17 @@ Wednesday:
   9:00:      [eq6en, lhg73, brlsh]
   11:00:     [k44fs, cv73p, 4ecnw]
   13:00:     [opn46, lspz2, o3ow2]
+  15:00:     [2zs4v, 6excn, kp5jj]
 Thursday:
   7:00:      [w4rem, 6pbhf, e66qm]
   9:00:      [yinp6, bkfrj, jtdsg]
   11:00:     [mpubz, x33ed, gmq5v]
   13:00:     [3hhby, nl6hn, pzp6e]
+  15:00:     [rtvil, xlkub]
 Monday next week:
   7:00:
     subnets: [tdb26]
-    batch: 30
-""".strip()
+    batch: 30""".strip()
 }
 GUESTOS_ROLLOUT_PLAN_HELP = """\
 A specification of what subnets to rollout, when, and with which versions.

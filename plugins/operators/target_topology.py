@@ -4,7 +4,7 @@ import pprint
 import shlex
 import shutil
 import tempfile
-from functools import partial
+import zipfile
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Sequence, cast
@@ -16,17 +16,18 @@ import airflow.providers.slack.operators.slack as slack
 from airflow.hooks.base import BaseHook
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 from airflow.models.baseoperator import BaseOperator
-from airflow.providers.google.suite.hooks.drive import GoogleDriveHook
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 REPO_DIR = Path("/tmp/target_topology")
-GOOGLE_DRIVE_FOLDER = "1v3ISHRdNHm0p1J1n-ySm4GNl4sQGEf77"
 GITHUB_CONNECTION_ID = "github.node_allocation"
-GOOGLE_CONNECTION_ID = "google_cloud_default"
+S3_CONNECTION_ID = "wasabi.target_topology"
+S3_BUCKET = "dre-target-topology"
 
 
-def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
+def format_slack_payload(subfolder: str, log_link: str, success: bool) -> list[object]:
     now = datetime.datetime.now()
     formatted_dt = now.strftime("%A, %d %B %Y")
+    status_log = ":white_check_mark: success" if success else ":x: failure"
     return [
         {
             "type": "header",
@@ -41,7 +42,9 @@ def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "plain_text",
-                "text": "The run of the target topology tool for today is complete!",
+                "text": "The run of the target topology tool for today is complete!\n"
+                + "Execution status: "
+                + status_log,
                 "emoji": True,
             },
         },
@@ -49,19 +52,17 @@ def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"To view the artifacts for the run"
-                f" open folder {drive_subfolder} in",
+                "text": "Download artifacts of the run:",
             },
             "accessory": {
                 "type": "button",
                 "text": {
                     "type": "plain_text",
-                    "text": "Open drive :open_file_folder:",
+                    "text": "Download :open_file_folder:",
                     "emoji": True,
                 },
                 "value": "click_me_123",
-                "url": "https://drive.google.com/drive/u/2/folders/"
-                + GOOGLE_DRIVE_FOLDER,
+                "url": f"https://s3.eu-central-2.wasabisys.com/{S3_BUCKET}/{subfolder}.zip",
                 "action_id": "button-action",
             },
         },
@@ -102,16 +103,18 @@ def format_slack_payload(drive_subfolder: str, log_link: str) -> list[object]:
 class SendReport(slack.SlackAPIPostOperator):
     template_fields: Sequence[str] = list(
         slack.SlackAPIPostOperator.template_fields
-    ) + ["drive_subfolder", "log_url"]
+    ) + ["drive_subfolder", "log_url", "task_state"]
 
     def __init__(
         self,
         drive_subfolder: str,
         log_url: str,
+        task_state: str,
         **kwargs: Any,
     ) -> None:
         self.drive_subfolder = drive_subfolder
         self.log_url = log_url
+        self.task_state = task_state
         slack.SlackAPIPostOperator.__init__(
             self,
             channel=SLACK_CHANNEL,
@@ -128,7 +131,9 @@ class SendReport(slack.SlackAPIPostOperator):
         super().construct_api_call_params()
         assert isinstance(self.api_params, dict)  # appease the type checker gods
         self.api_params["blocks"] = json.dumps(
-            format_slack_payload(self.drive_subfolder, self.log_url)
+            format_slack_payload(
+                self.drive_subfolder, self.log_url, self.task_state == "success"
+            )
         )
 
 
@@ -154,7 +159,6 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         self.scenario = scenario
         self.topology_file = topology_file
         self.node_pipeline = node_pipeline
-        self.folder_id = GOOGLE_DRIVE_FOLDER
         self.drive_subfolder = drive_subfolder
 
         super().__init__(**kwargs)
@@ -249,7 +253,7 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(config, "r") as f:
             configuration = json.load(f)
 
-        configuration["cluster_file"] = self.scenario + ".json"
+        configuration["scenario"] = f"./data/cluster_scenarios/{self.scenario}.json"
         configuration["topology_file"] = self.topology_file
         configuration["node_pipeline_file"] = self.node_pipeline
         configuration["nodes_file"] = nodes_file
@@ -291,14 +295,21 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
         with open(config, "r") as f:
             configuration = json.load(f)
 
+        scenario = Path(configuration["scenario"])
+        if scenario.is_dir():
+            scenario_files = [scenario]
+        else:
+            scenario_files = sorted(scenario.glob("*.json"))
+
         files: list[str | Path] = [
             configuration["nodes_file"],
             configuration["topology_file"],
             configuration["node_pipeline_file"],
             configuration["blacklist_file"],
-            Path(configuration["scenario_folder"]) / configuration["cluster_file"],
             config,
         ]
+
+        files.extend(scenario_files)
 
         for file in files:
             path = scratch_folder / file
@@ -306,12 +317,23 @@ class RunTopologyToolAndUploadOutputs(BaseOperator):
 
     def upload_outputs(self, scratch_folder: Path) -> None:
         self.log.info("Uploading inputs and outputs.")
-        hook = GoogleDriveHook(gcp_conn_id=GOOGLE_CONNECTION_ID)
-        upload = partial(hook.upload_file, folder_id=self.folder_id)
 
         output = scratch_folder / "output"
-        for file in output.rglob("*"):
-            if not file.is_file():
-                continue
-            dest_file = Path(self.drive_subfolder) / file.relative_to(output)
-            upload(str(file), str(dest_file))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / "output.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for file in output.rglob("*"):
+                    if file.is_file():
+                        # Write file to zip with relative path inside "output" folder
+                        zipf.write(file, arcname=file.relative_to(output))
+
+            # Upload the zip to Wasabi
+            hook = S3Hook(aws_conn_id=S3_CONNECTION_ID)
+            zip_key = f"{self.drive_subfolder}.zip"
+            hook.load_file(
+                filename=str(zip_path),
+                key=zip_key,
+                bucket_name=S3_BUCKET,
+                replace=False,
+                acl_policy="public-read",
+            )
