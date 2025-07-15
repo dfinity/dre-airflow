@@ -26,7 +26,7 @@ use urlencoding::decode;
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
 /// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
-/// The issue is now fixed but we will have to upgrade to Airflow released after late August 2024 for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
+/// The issue is now fixed but we will have to upgrade to Airflow 2.10.5 (we may have to also upgrade our Helm chart!) for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 /// Default timeout per request to Airflow.
 const PER_REQUEST_TIMEOUT: u64 = 15;
