@@ -26,6 +26,7 @@ use urlencoding::decode;
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
 /// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
+/// The issue is now fixed but we will have to upgrade to Airflow 2.10.5 (we may have to also upgrade our Helm chart!) for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 /// Default timeout per request to Airflow.
 const PER_REQUEST_TIMEOUT: u64 = 15;
@@ -1209,7 +1210,7 @@ impl AirflowClient {
         match <DagRunsResponseItem>::deserialize(json_value.clone()) {
             Ok(deserialized) => Ok(deserialized),
             Err(e) => {
-                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({})\n{:?}", e, json_value); // FIXME; make proper type
+                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({})\n{:?}", e, json_value);
                 Err(AirflowError::DeserializeError {
                     explanation: format!(
                         "Could not deserialize {}: {}",
@@ -1222,8 +1223,7 @@ impl AirflowClient {
         }
     }
 
-    /// Return TaskInstances for a DAG run.
-    /// Mapped tasks are not returned here.
+    /// Return TaskInstances for a DAG ID and run.
     pub async fn task_instances(
         &self,
         dag_id: &str,
@@ -1247,12 +1247,11 @@ impl AirflowClient {
     }
 
     /// Return listed TaskInstances for a number of DAG IDs and DAG runs.
-    /// Mapped tasks are not returned here.
     pub async fn task_instances_batch(
         &self,
         dag_ids: Option<Vec<String>>,
         dag_run_ids: Option<Vec<String>>,
-        task_instances: Option<Vec<String>>,
+        task_ids: Option<Vec<String>>,
     ) -> Result<TaskInstancesResponse, AirflowError> {
         if let Some(dag_ids) = &dag_ids {
             if dag_ids.is_empty() {
@@ -1264,7 +1263,7 @@ impl AirflowClient {
                 return Ok(TaskInstancesResponse::default());
             }
         }
-        if let Some(task_instances) = &task_instances {
+        if let Some(task_instances) = &task_ids {
             if task_instances.is_empty() {
                 return Ok(TaskInstancesResponse::default());
             }
@@ -1282,13 +1281,12 @@ impl AirflowClient {
         let tr = TaskInstancesRequest {
             dag_ids,
             dag_run_ids,
-            task_ids: task_instances,
+            task_ids,
         };
         _post(url.to_string(), &tr, |x, c| self._post_logged_in(x, c)).await
     }
 
-    /// Return TaskInstances for a DAG run.
-    /// Mapped tasks are not returned here.
+    /// Return Tasks for a DAG run.
     pub async fn tasks(&self, dag_id: &str) -> Result<TasksResponse, AirflowError> {
         _paged_get(
             format!("dags/{}/tasks", dag_id),
@@ -1298,40 +1296,6 @@ impl AirflowClient {
             |x| self._get_logged_in(x),
         )
         .await
-    }
-
-    /// Return mapped tasks of a task instance in a DAG run.
-    /// API function, will likely call in the future.
-    #[allow(dead_code)]
-    pub async fn mapped_task_instances(
-        &self,
-        dag_id: &str,
-        dag_run_id: &str,
-        task_instance_id: &str,
-        limit: usize,
-        offset: usize,
-    ) -> Result<TaskInstancesResponse, AirflowError> {
-        match _paged_get(
-            format!(
-                "dags/{}/dagRuns/{}/taskInstances/{}/listMapped",
-                dag_id, dag_run_id, task_instance_id
-            ),
-            None,
-            Some(PagingParameters { limit, offset }),
-            MAX_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-        {
-            Ok(v) => Ok(v),
-            Err(e) => match e {
-                // Task is not mapped.
-                AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND) => {
-                    Ok(TaskInstancesResponse::default())
-                }
-                _ => Err(e),
-            },
-        }
     }
 
     /// Return mapped tasks of a task instance in a DAG run.

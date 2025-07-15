@@ -3,7 +3,9 @@ Rollout IC OS to boundary nodes in batches.
 """
 
 import datetime
+import os
 import pprint
+import sys
 import typing
 
 import dfinity.ic_types as ic_types
@@ -11,19 +13,35 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS,
-    PLAN_FORM,
     api_boundary_node_batch_create,
     api_boundary_node_batch_timetable,
 )
 from dfinity.rollout_types import ProposalInfo, yaml_to_ApiBoundaryNodeRolloutPlanSpec
 
+from airflow import __version__
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.models.taskinstance import TaskInstance
 from airflow.operators.empty import EmptyOperator
 from airflow.sensors.base import PokeReturnValue
+
+# Temporarily add the DAGs folder to import defaults.py.
+sys.path.append(os.path.dirname(__file__))
+try:
+    from defaults import (
+        DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS,
+    )
+finally:
+    sys.path.pop()
+
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
 
 
 class DagParams(typing.TypedDict):
@@ -36,6 +54,31 @@ BatchSpec = tuple[datetime.datetime, list[str]]
 
 
 BATCH_COUNT: int = 20
+
+ROLLOUT_PLAN_HELP = """\
+Represents the shape of the rollout plan for boundary nodes input into Airflow
+by the operator.
+
+All keys are required except for start_day.
+
+Remarks:
+
+* The nodes key contains a list of all boundary nodes to be
+  rolled out to.  These will be batched (in the given order) into
+  batches of one or more, to fit a total maximum of 20 batches.
+  The largest batches will occur at the end.
+* The minimum_minutes_per_batch key indicates how fast we can go.
+  The default 60 minutes ensures batches are spaced a minimum of
+  60 minutes apart.
+* The start_day key indicates the weekday (in English) when the
+  first batch of the rollout should start being rolled out.
+  If left unspecified, it corresponds to today.
+* Batches are rolled out between the times specified in the
+  resume_at and the suspend_at keys (in HH:MM format).  The time
+  window between resume_at and suspend_at must be large enough
+  to fit the minimum_minutes_per_batch value.
+* All times are UTC.
+"""
 
 
 for network_name, network in ic_types.IC_NETWORKS.items():
@@ -59,11 +102,11 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
-                custom_html_form=PLAN_FORM,
+                description_md=ROLLOUT_PLAN_HELP,
+                **format,
             ),
             "simulate": Param(
                 True,
@@ -117,26 +160,6 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 if run
                 else [f"batch_{batch_num + 1}.join"]
             )
-
-        @task.sensor(poke_interval=60, timeout=86400 * 7, mode="reschedule")
-        def wait_until_start_time(
-            batch_num: int,
-            task_instance: TaskInstance,
-            params: DagParams,
-        ) -> PokeReturnValue:
-            timetable = typing.cast(
-                list[BatchSpec], task_instance.xcom_pull("schedule")
-            )
-            until, nodes = timetable[batch_num]
-            if params["simulate"]:
-                print("Simulating waiting until %s", until)
-            else:
-                print("Waiting until", until)
-                now = datetime.datetime.now().replace(tzinfo=None)
-                if now < until:
-                    return PokeReturnValue(is_done=False)
-
-            return PokeReturnValue(is_done=True, xcom_value=nodes)
 
         @task(retries=retries)
         def create_proposal_if_none_exists(
@@ -208,6 +231,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 wait = ic_os_sensor.CustomDateTimeSensorAsync(
                     task_id="wait_until_start_time",
                     target_time=time_tpl % batch_index,
+                    simulate="{{ params.simulate }}",
                 )
                 chain(should_run, wait)
                 proposed = create_proposal_if_none_exists(  # type: ignore

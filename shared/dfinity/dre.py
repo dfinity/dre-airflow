@@ -11,12 +11,13 @@ import shlex
 import tempfile
 import time
 from contextlib import contextmanager
-from typing import IO, Generator, cast
+from typing import IO, Generator, TypedDict, cast
 
 import requests
 
 import airflow.models
 import dfinity.ic_types as ic_types
+import dfinity.rollout_types as rollout_types
 from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 
@@ -47,6 +48,111 @@ def locked_open(filename: str, mode: str = "w") -> Generator[IO[str], None, None
             yield fd
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+type PossibleSubnetId = rollout_types.SubnetId | None
+
+
+class RegistryNode(TypedDict):
+    node_id: rollout_types.NodeId
+    # xnet
+    # http
+    node_operator_id: rollout_types.NodeOperatorId
+    #   "chip_id": null,
+    hostos_version_id: rollout_types.HostOsVersion
+    #   "public_ipv4_config": null,
+    subnet_id: PossibleSubnetId
+    dc_id: rollout_types.DCId
+    node_provider_id: rollout_types.NodeProviderId
+    status: rollout_types.NodeStatus
+    #  "node_type": "type1.1"
+
+
+class RegistrySubnet(TypedDict):
+    subnet_id: PossibleSubnetId
+    membership: list[rollout_types.NodeId]
+    nodes: dict[rollout_types.NodeId, RegistryNode]
+    #  "max_ingress_bytes_per_message": 2097152,
+    #  "max_ingress_messages_per_block": 1000,
+    #  "max_block_payload_size": 4194304,
+    #  "unit_delay_millis": 1000,
+    #  "initial_notary_delay_millis": 300,
+    #  "replica_version_id": "e915efecc8af90993ccfc499721ebe826aadba60",
+    #  "dkg_interval_length": 499,
+    #  "dkg_dealings_per_block": 1,
+    #  "start_as_nns": false,
+    #  "subnet_type": "application",
+    #  "features": {
+    #    "canister_sandboxing": false,
+    #    "http_requests": true,
+    #    "sev_enabled": null
+    #  },
+    #  "max_number_of_canisters": 120000,
+    #  "ssh_readonly_access": [],
+    #  "ssh_backup_access": [],
+    #  "is_halted": false,
+    #  "halt_at_cup_height": false,
+    #  "chain_key_config": null
+
+
+class RegistryDC(TypedDict):
+    id: rollout_types.DCId
+    region: str
+    owner: str
+    # gps: {
+    #   "latitude": 51.219398498535156,
+    #   "longitude": 4.402500152587891
+    # }
+
+
+class RegistryNodeOperatorComputedValues(TypedDict):
+    node_provider_name: str
+    #    "node_provider_name": "Illusions In Art (Pty) Ltd",
+    #    "node_allowance_remaining": 0,
+    #    "node_allowance_total": 6,
+    #    "total_up_nodes": 6,
+    nodes_health: dict[rollout_types.NodeStatus, list[rollout_types.NodeId]]
+    #    "max_rewardable_count": {
+    #      "type3.1": 6
+    #    },
+    #    "nodes_in_subnets": 4,
+    #    "nodes_in_registry": 6
+
+
+class RegistryNodeOperator(TypedDict):
+    node_operator_principal_id: rollout_types.NodeOperatorId
+    node_provider_principal_id: rollout_types.NodeProviderId
+    dc_id: rollout_types.DCId
+    #  "rewardable_nodes": {
+    #    "type3.1": 6
+    #  },
+    #  "node_allowance": 0,
+    #  "ipv6": "",
+    computed: RegistryNodeOperatorComputedValues
+
+
+class RegistryNodeProvider(TypedDict):
+    name: str
+    principal: rollout_types.NodeProviderId
+    #   "reward_account": "",
+    #  "total_nodes": 2,
+    #  "nodes_in_subnet": 0,
+    #  "nodes_per_dc": {
+    #    "zh5": 2
+    #  }
+
+
+class RegistrySnapshot(TypedDict):
+    subnets: list[RegistrySubnet]
+    nodes: list[RegistryNode]
+    # unassigned_nodes_config
+    dcs: list[RegistryDC]
+    node_operators: list[RegistryNodeOperator]
+    # node_rewards_table
+    # api_bns
+    # elected_guest_os_versions
+    # elected_host_os_versions
+    node_providers: list[RegistryNodeProvider]
 
 
 class DRE:
@@ -252,6 +358,15 @@ class DRE:
             and r["payload"].get("replica_version_id") is not None
         ]
 
+    def get_registry(
+        self,
+    ) -> RegistrySnapshot:
+        r = self.run("registry", full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        data = json.loads(r.output)
+        return cast(RegistrySnapshot, data)
+
     def get_ic_os_version_deployment_proposals_for_boundary_nodes_and_revision(
         self,
         git_revision: str,
@@ -282,6 +397,22 @@ class DRE:
             and r["payload"].get("version") is not None
         ]
 
+    def get_ic_os_version_deployment_proposals_for_hostos_nodes(
+        self,
+        limit: int = 1000,
+    ) -> list[ic_types.AbbrevHostOsVersionUpdateProposal]:
+        """
+        Get all proposals that request upgrade of HostOS nodes.
+        """
+        return [
+            cast(ic_types.AbbrevHostOsVersionUpdateProposal, r)
+            for r in self.get_proposals(
+                topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT,
+                limit=limit,
+            )
+            if "hostos_version_id" in r["payload"]
+        ]
+
     def get_subnet_list(self) -> list[str]:
         r = self.run("get", "subnet-list", "--json", full_stdout=True)
         if r.exit_code != 0:
@@ -295,6 +426,11 @@ class DRE:
         return cast(list[str], json.loads(r.output)["value"]["blessed_version_ids"])
 
     def is_replica_version_blessed(self, git_revision: str) -> bool:
+        return git_revision.lower() in [
+            x.lower() for x in self.get_blessed_replica_versions()
+        ]
+
+    def is_hostos_version_blessed(self, git_revision: str) -> bool:
         return git_revision.lower() in [
             x.lower() for x in self.get_blessed_replica_versions()
         ]
@@ -440,6 +576,51 @@ class AuthenticatedDRE(DRE):
                 f"its standard output: {r.output.rstrip()}"
             )
 
+    def propose_to_update_hostos_nodes_version(
+        self,
+        node_ids: list[str],
+        git_revision: str,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create proposal to update some API boundary nodes.
+
+        Args:
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        nodesparms: list[str] = []
+        for n in node_ids:
+            nodesparms.append("--nodes")
+            nodesparms.append(n)
+
+        r = self.run(
+            "host-os",
+            "rollout",
+            "--forum-post-link=omit",
+            "--version",
+            git_revision,
+            *nodesparms,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
+
 
 if __name__ == "__main__":
     network = ic_types.ICNetworkWithPrivateKey(
@@ -456,18 +637,21 @@ AwEHoUQDQgAEyiUJYA7SI/u2Rf8ouND0Ip46gdjKcGB8Vx3VkajFx5+YhtaMfHb1
 -----END EC PRIVATE KEY-----""",
     )
     d = DRE(network, SubprocessHook())
-    p = d.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
-        subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
-        git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
-    )
-    p2 = d.get_proposals(
-        limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
-    )
+    # p = d.get_ic_os_version_deployment_proposals_for_subnet_and_revision(
+    #    subnet_id="pae4o-o6dxf-xki7q-ezclx-znyd6-fnk6w-vkv5z-5lfwh-xym2i-otrrw-fqe",
+    #    git_revision="ec35ebd252d4ffb151d2cfceba3a86c4fb87c6d6",
+    # )
+    # p2 = d.get_proposals(
+    #    limit=1, topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_ELECTION
+    # )
+    p3 = d.get_proposals(topic=ic_types.ProposalTopic.TOPIC_IC_OS_VERSION_DEPLOYMENT)
 
-    pprint.pprint(p)
-    print(len(p))
-    pprint.pprint(p2)
-    print(len(p2))
+    for m in p3:
+        print(m["title"])
+    # pprint.pprint(p3)
+    print(len(p3))
+    # pprint.pprint(p2)
+    # print(len(p2))
     # p = DRE(network, SubprocessHook()).upgrade_unassigned_nodes(dry_run=True)
     # print("Stdout", p.output)
     # print("Return code:", p.exit_code)

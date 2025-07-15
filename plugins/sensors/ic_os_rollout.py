@@ -5,7 +5,7 @@ IC-OS rollout sensors.
 import datetime
 import itertools
 import time
-from typing import Any, TypedDict, cast
+from typing import Any, Sequence, TypedDict, cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
@@ -56,14 +56,20 @@ class ICRolloutSensorBaseOperator(RolloutParams, BaseSensorOperator):
 
 
 class CustomDateTimeSensorAsync(DateTimeSensorAsync):
+    template_fields: Sequence[str] = list(DateTimeSensorAsync.template_fields) + [
+        "simulate"
+    ]
+
     def __init__(  # type:ignore
         self,
         *,
         target_time: str | datetime.datetime,
+        simulate: str | bool,
         _ignored=None,
         **kwargs,
     ) -> None:
         """Exists to work around inability to pass target_time as xcom arg."""
+        self.simulate = simulate
         BaseSensorOperator.__init__(self, **kwargs)
 
         if isinstance(target_time, datetime.datetime):
@@ -72,6 +78,12 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
             self.target_time = target_time
         else:
             self.target_time = target_time
+
+    def execute(self, context: Context) -> None:
+        if self.simulate:
+            print("Nominally we would sleep, but this is a simulation.  Returning now.")
+            return
+        super().execute(context=context)
 
 
 class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):

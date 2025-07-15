@@ -11,11 +11,11 @@ $(VENV_DIR)/lib/*/site-packages/mock: $(VENV_BINDIR)
 	touch $(VENV_DIR)/lib/*/site-packages/mock
 
 $(VENV_BINDIR)/pytest: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install pytest
+	$(VENV_BINDIR)/pip3 install pytest pytest-mock
 	touch $(VENV_BINDIR)/pytest
 
 $(VENV_BINDIR)/mypy: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install mypy types-PyYAML types-requests
+	$(VENV_BINDIR)/pip3 install mypy types-PyYAML types-requests types-mock
 	touch $(VENV_BINDIR)/mypy
 
 $(VENV_BINDIR)/ruff: $(VENV_BINDIR)

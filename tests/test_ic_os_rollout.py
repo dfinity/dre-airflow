@@ -8,6 +8,17 @@ from dfinity.ic_os_rollout import (
     exponential_increase,
     next_day_of_the_week,
 )
+from dfinity.rollout_types import ApiBoundaryNodeRolloutPlanSpec, DaysOfWeek
+
+ALL_DAYS: list[DaysOfWeek] = [
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+]
 
 
 class TestApiBoundaryNodeRolloutPlanSpec(unittest.TestCase):
@@ -41,12 +52,13 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
     maxDiff = None
 
     def test_simple_case(self) -> None:
-        now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        now = datetime.datetime(2025, 6, 12, 6, 33, 16)
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "9:00",
             "suspend_at": "18:00",
+            "allowed_days": ALL_DAYS,
             "minimum_minutes_per_batch": 60,
         }
         exp = [
@@ -76,9 +88,10 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_tight_night_case(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
+            "allowed_days": ALL_DAYS,
             "resume_at": "21:00",
             "suspend_at": "6:59",
             "minimum_minutes_per_batch": 60,
@@ -108,13 +121,48 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
         res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 20, now=now)]
         self.assertListEqual(exp, res)
 
+    def test_defaults_to_only_weekdays(self) -> None:
+        now = datetime.datetime(2025, 6, 12, 14, 33, 16)
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
+            "nodes": ["abc"],
+            "start_day": "Thursday",
+            "resume_at": "21:00",
+            "suspend_at": "6:59",
+            "minimum_minutes_per_batch": 60,
+        }
+        exp = [
+            "Thursday 21:00",
+            "Thursday 22:00",
+            "Thursday 23:00",
+            "Friday 00:00",
+            "Friday 01:00",
+            "Friday 02:00",
+            "Friday 03:00",
+            "Friday 04:00",
+            "Friday 05:00",
+            "Friday 21:00",
+            "Friday 22:00",
+            "Friday 23:00",
+            "Monday 00:00",
+            "Monday 01:00",
+            "Monday 02:00",
+            "Monday 03:00",
+            "Monday 04:00",
+            "Monday 05:00",
+            "Monday 21:00",
+            "Monday 22:00",
+        ]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 20, now=now)]
+        self.assertListEqual(exp, res)
+
     def test_night_case(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
             "suspend_at": "1:00",
+            "allowed_days": ALL_DAYS,
             "minimum_minutes_per_batch": 60,
         }
         exp = [
@@ -132,11 +180,12 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_barely_fits_in_window(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
             "suspend_at": "23:00",
+            "allowed_days": ALL_DAYS,
             "minimum_minutes_per_batch": 120,
         }
         exp = [
@@ -147,9 +196,26 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
         res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 3, now=now)]
         self.assertListEqual(exp, res)
 
+    def test_barely_fits_in_window_with_default_weekdays(self) -> None:
+        now = datetime.datetime(2025, 6, 12, 14, 33, 16)
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
+            "nodes": ["abc"],
+            "start_day": "Thursday",
+            "resume_at": "21:00",
+            "suspend_at": "23:00",
+            "minimum_minutes_per_batch": 120,
+        }
+        exp = [
+            "Thursday 21:00",
+            "Friday 21:00",
+            "Monday 21:00",
+        ]
+        res = [fmtdate(d) for d in api_boundary_node_batch_timetable(plan, 3, now=now)]
+        self.assertListEqual(exp, res)
+
     def test_does_not_fit_in_window(self) -> None:
         now = datetime.datetime(2025, 6, 12, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "start_day": "Thursday",
             "resume_at": "21:00",
@@ -162,7 +228,7 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_absent_start_day(self) -> None:
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "suspend_at": "23:00",
@@ -178,10 +244,11 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
 
     def test_starts_tomorrow(self) -> None:
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "start_day": "Thursday",
+            "allowed_days": ALL_DAYS,
             "suspend_at": "23:00",
             "minimum_minutes_per_batch": 120,
         }
@@ -198,12 +265,13 @@ class TestApiBoundaryNodeBatchTimetable(unittest.TestCase):
         Test that a plan computed Wed 11th for Thu next week starts the 19th.
         """
         now = datetime.datetime(2025, 6, 11, 14, 33, 16)
-        plan = {
+        plan: ApiBoundaryNodeRolloutPlanSpec = {
             "nodes": ["abc"],
             "resume_at": "21:00",
             "start_day": "Thursday next week",
             "suspend_at": "23:00",
             "minimum_minutes_per_batch": 120,
+            "allowed_days": ALL_DAYS,
         }
         exp = [
             "Thursday 19 21:00",

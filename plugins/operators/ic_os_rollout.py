@@ -236,9 +236,17 @@ class RequestProposalVote(slack.SlackAPIPostOperator):
             map_indexes=context["task_instance"].map_index,
         )
         if proposal_creation_result["proposal_id"] == dre.FAKE_PROPOSAL_NUMBER:
-            self.log.info("Fake proposal.  Not requesting vote.")
+            self.log.info(
+                "Fake proposal.  Not requesting vote."
+                "  Here is the text that would be sent: %s",
+                self.text,
+            )
         elif not proposal_creation_result["needs_vote"]:
-            self.log.info("Proposal does not need vote.  Not requesting vote.")
+            self.log.info(
+                "Proposal does not need vote.  Not requesting vote."
+                "  Here is the text that would be sent: %s",
+                self.text,
+            )
         else:
             self.log.info("Requesting vote on proposal with text: %s", self.text)
             slack.SlackAPIPostOperator.execute(self, context=context)

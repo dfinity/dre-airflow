@@ -75,6 +75,7 @@ for network_name, network in IC_NETWORKS.items():
             >> ic_os_sensor.CustomDateTimeSensorAsync(
                 task_id="wait_until_start_time",
                 target_time="{{ params.start_time }}",
+                simulate="{{ params.simulate }}",
             )
             >> ic_os_rollout.CreateSubnetUpdateProposalIdempotently(
                 task_id="create_proposal_if_none_exists",

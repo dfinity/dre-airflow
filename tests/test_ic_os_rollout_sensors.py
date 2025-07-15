@@ -1,7 +1,7 @@
 import unittest
 from typing import Any
 
-import mock  # type:ignore
+import mock
 from dfinity.ic_types import IC_NETWORKS
 from dfinity.prom_api import PrometheusVectorResultEntry
 from sensors.ic_os_rollout import (
@@ -59,11 +59,10 @@ class TestWaitForReplicaRevisionUpdated(unittest.TestCase):
                 timestamp=0.0,
             )
         ]
-        exp = None
         with mock.patch("dfinity.prom_api.query_prometheus_servers") as m:
             m.return_value = inp
-            res = self._exercise().execute({})
-            assert res == exp, f"{res} != {exp}"
+            # Should not raise TaskDeferred.
+            self._exercise().execute({})
 
     def test_halfway_done(self) -> None:
         inp = [

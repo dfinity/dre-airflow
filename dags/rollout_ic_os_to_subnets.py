@@ -5,26 +5,75 @@ Each batch runs in parallel.
 """
 
 import datetime
+import os
+import sys
 from typing import Any, cast
 
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    DEFAULT_GUESTOS_ROLLOUT_PLANS,
     MAX_BATCHES,
-    PLAN_FORM,
     SubnetIdWithRevision,
     SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
 
-from airflow import DAG
+from airflow import DAG, __version__
 from airflow.decorators import task
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
 from airflow.utils.task_group import TaskGroup
+
+# Temporarily add the DAGs folder to import defaults.py.
+sys.path.append(os.path.dirname(__file__))
+try:
+    from defaults import DEFAULT_GUESTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
+finally:
+    sys.path.pop()
+
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
+
+ROLLOUT_PLAN_HELP = """\
+A specification of what subnets to rollout, when, and with which versions.
+
+Remarks:
+* All times are expressed in the UTC time zone.
+* Days refer to dates relative to your current work week
+  if starting a rollout during a workday, or next week if
+  the rollout is started during a weekend.
+* A day name with " next week" added at the end means
+  "add one week to this day".
+* Each date/time can specify a simple list of subnets,
+  or can specify a dict with two keys:
+  * batch: an optional integer 1-30 with the batch number
+           you want to assign to this batch.
+  * subnets: a list of subnets.
+* A subnet may be specified:
+  * as an integer number from 0 to the maximum subnet number,
+  * as a full or abbreviated subnet principal ID,
+  * as a dictionary of {
+       subnet: ID or principal
+       git_revision: revision to deploy to this subnet
+    }
+    with this form being able to override the Git revision
+    that will be targeted to that specific subnet.
+    Example of a batch specified this way:
+      Monday next week:
+        7:00:
+          batch: 30
+          subnets:
+          - subnet: tdb26
+            git_revision: 0123456789012345678901234567890123456789
+"""
+
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
@@ -47,11 +96,11 @@ for network_name, network in IC_NETWORKS.items():
                 " the version must have been elected before but the rollout will check",
             ),
             "plan": Param(
-                default=DEFAULT_GUESTOS_ROLLOUT_PLANS[network_name].strip(),
+                default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
                 title="Rollout plan",
-                description="A YAML-formatted string describing the rollout schedule",
-                custom_html_form=PLAN_FORM,
+                description_md=ROLLOUT_PLAN_HELP,
+                **format,
             ),
             "simulate": Param(
                 True,
@@ -113,6 +162,7 @@ for network_name, network in IC_NETWORKS.items():
                             ti.xcom_pull(task_ids='schedule')["%d"][0] | string
                         }}"""
                     % batch,
+                    simulate="{{ params.simulate }}",
                 ).expand(_ignored=proceed)
                 >> ic_os_sensor.WaitForPreconditions.partial(
                     task_id="wait_for_preconditions",
@@ -221,7 +271,7 @@ if __name__ == "__main__":
     try:
         plan = sys.argv[2]
     except Exception:
-        plan = DEFAULT_GUESTOS_ROLLOUT_PLANS["mainnet"]
+        plan = DEFAULT_ROLLOUT_PLANS["mainnet"]
     dag = DAGS["mainnet"]
     dag.test(
         run_conf={

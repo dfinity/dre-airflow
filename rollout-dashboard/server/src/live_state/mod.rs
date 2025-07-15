@@ -32,7 +32,8 @@ mod plan;
 mod python;
 mod task_sorter;
 
-const TASK_INSTANCE_LIST_LIMIT: usize = 500;
+// Lotsa tasks in the HostOS rollout.
+const TASK_INSTANCE_LIST_LIMIT: usize = 750;
 const LOG_TARGET: &str = "live_state";
 
 /// Compares two Option(DateTimes) and returns the latest one if
