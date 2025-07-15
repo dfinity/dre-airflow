@@ -12,7 +12,6 @@ import typing
 
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-from dfinity.ic_os_rollout import PLAN_FORM
 from dfinity.ic_types import IC_NETWORKS
 from dfinity.rollout_types import HostOSStage
 from operators import hostos_rollout as hostos_operators
@@ -21,6 +20,7 @@ from sensors import hostos_rollout as hostos_sensors
 
 import airflow.operators.python as python_operator
 import airflow.sensors.python as python_sensor
+from airflow import __version__
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -33,6 +33,13 @@ try:
 finally:
     sys.path.pop()
 
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
 
 ROLLOUT_PLAN_HELP = """\
 Represents the plan that the HostOS rollout will follow.
@@ -153,7 +160,7 @@ for network_name, network in IC_NETWORKS.items():
                 type="string",
                 title="Rollout plan",
                 description_md=ROLLOUT_PLAN_HELP,
-                custom_html_form=PLAN_FORM,
+                **format,
             ),
             "simulate": Param(
                 True,

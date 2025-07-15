@@ -11,10 +11,9 @@ import operators.auto_rollout as auto_rollout
 import operators.github_rollout as github_rollout
 import operators.gsheets_rollout as gsheets_rollout
 import pendulum
-from dfinity.ic_os_rollout import PLAN_FORM
 from dfinity.ic_types import IC_NETWORKS
 
-from airflow import DAG
+from airflow import DAG, __version__
 from airflow.models.param import Param
 from airflow.operators.python import BranchPythonOperator
 
@@ -32,6 +31,14 @@ finally:
 DEFAULT_ROLLOUT_PLAN_SHEETS = {
     "mainnet": "1ZcYB0gWjbgg7tFgy2Fhd3llzYlefJIb0Mik75UUrSXM",
 }
+
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():
@@ -80,7 +87,7 @@ for network_name, network in IC_NETWORKS.items():
                 title="GuestOS rollout plan",
                 description="A YAML-formatted string describing the GuestOS"
                 " rollout schedule.",
-                custom_html_form=PLAN_FORM,
+                **format,
             ),
             "api_boundary_nodes_rollout_plan": Param(
                 default=DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS[network_name].strip(),
@@ -88,7 +95,7 @@ for network_name, network in IC_NETWORKS.items():
                 title="API boundary nodes rollout plan",
                 description="A YAML-formatted string describing the API boundary nodes"
                 " rollout schedule.",
-                format="multiline",
+                **format,
             ),
             "start_rollout": Param(
                 default=True,

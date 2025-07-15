@@ -27,6 +27,7 @@ SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 DR_DRE_SLACK_ID = "S05GPUNS7EX"
 MAX_BATCHES: int = 30
 
+# To be deleted when we upgrade to Airflow 2.11.
 PLAN_FORM = """
     <textarea class="form-control" name="{name}" 
            id="{name}" placeholder=""

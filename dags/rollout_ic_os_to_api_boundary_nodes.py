@@ -13,12 +13,12 @@ import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
-    PLAN_FORM,
     api_boundary_node_batch_create,
     api_boundary_node_batch_timetable,
 )
 from dfinity.rollout_types import ProposalInfo, yaml_to_ApiBoundaryNodeRolloutPlanSpec
 
+from airflow import __version__
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -34,6 +34,14 @@ try:
     )
 finally:
     sys.path.pop()
+
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
 
 
 class DagParams(typing.TypedDict):
@@ -98,7 +106,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 type="string",
                 title="Rollout plan",
                 description_md=ROLLOUT_PLAN_HELP,
-                custom_html_form=PLAN_FORM,
+                **format,
             ),
             "simulate": Param(
                 True,

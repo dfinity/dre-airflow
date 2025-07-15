@@ -14,13 +14,12 @@ import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import (
     MAX_BATCHES,
-    PLAN_FORM,
     SubnetIdWithRevision,
     SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
 
-from airflow import DAG
+from airflow import DAG, __version__
 from airflow.decorators import task
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -34,6 +33,13 @@ try:
 finally:
     sys.path.pop()
 
+if "2.9" in __version__:
+    # To be deleted when we upgrade to Airflow 2.11.
+    from dfinity.ic_os_rollout import PLAN_FORM
+
+    format = dict(custom_html_form=PLAN_FORM)
+else:
+    format = {"format": "multiline"}
 
 ROLLOUT_PLAN_HELP = """\
 A specification of what subnets to rollout, when, and with which versions.
@@ -94,7 +100,7 @@ for network_name, network in IC_NETWORKS.items():
                 type="string",
                 title="Rollout plan",
                 description_md=ROLLOUT_PLAN_HELP,
-                custom_html_form=PLAN_FORM,
+                **format,
             ),
             "simulate": Param(
                 True,
