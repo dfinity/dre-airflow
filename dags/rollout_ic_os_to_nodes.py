@@ -276,7 +276,7 @@ for network_name, network in IC_NETWORKS.items():
         )
 
         wait_for_election = python_sensor.PythonSensor(
-            task_id="wait_until_nodes_healthy",
+            task_id="wait_for_revision_to_be_elected",
             python_callable=hostos_sensors.has_network_adopted_hostos_revision,
             poke_interval=300,
             timeout=86400 * 7,
