@@ -214,7 +214,6 @@ for network_name, network in IC_NETWORKS.items():
                         target_time=start_time_xcom_pull,
                         simulate="{{ params.simulate }}",
                     )
-                    # FIXME up number of tasks fetched (max tasks) in rollout dashboard!
                     nodes = python_operator.BranchPythonOperator(
                         task_id="collect_nodes",
                         python_callable=hostos_operators.collect_nodes,
