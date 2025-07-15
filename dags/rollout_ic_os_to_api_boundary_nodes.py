@@ -3,7 +3,9 @@ Rollout IC OS to boundary nodes in batches.
 """
 
 import datetime
+import os
 import pprint
+import sys
 import typing
 
 import dfinity.ic_types as ic_types
@@ -15,12 +17,6 @@ from dfinity.ic_os_rollout import (
     api_boundary_node_batch_create,
     api_boundary_node_batch_timetable,
 )
-from dfinity.rollout_types import (
-    API_BOUNDARY_NODES_ROLLOUT_PLAN_HELP as ROLLOUT_PLAN_HELP,
-)
-from dfinity.rollout_types import (
-    DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS,
-)
 from dfinity.rollout_types import ProposalInfo, yaml_to_ApiBoundaryNodeRolloutPlanSpec
 
 from airflow.decorators import dag, task, task_group
@@ -29,6 +25,15 @@ from airflow.models.param import Param
 from airflow.models.taskinstance import TaskInstance
 from airflow.operators.empty import EmptyOperator
 from airflow.sensors.base import PokeReturnValue
+
+# Temporarily add the DAGs folder to import defaults.py.
+sys.path.append(os.path.dirname(__file__))
+try:
+    from defaults import (
+        DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS,
+    )
+finally:
+    sys.path.pop()
 
 
 class DagParams(typing.TypedDict):
@@ -41,6 +46,31 @@ BatchSpec = tuple[datetime.datetime, list[str]]
 
 
 BATCH_COUNT: int = 20
+
+ROLLOUT_PLAN_HELP = """\
+Represents the shape of the rollout plan for boundary nodes input into Airflow
+by the operator.
+
+All keys are required except for start_day.
+
+Remarks:
+
+* The nodes key contains a list of all boundary nodes to be
+  rolled out to.  These will be batched (in the given order) into
+  batches of one or more, to fit a total maximum of 20 batches.
+  The largest batches will occur at the end.
+* The minimum_minutes_per_batch key indicates how fast we can go.
+  The default 60 minutes ensures batches are spaced a minimum of
+  60 minutes apart.
+* The start_day key indicates the weekday (in English) when the
+  first batch of the rollout should start being rolled out.
+  If left unspecified, it corresponds to today.
+* Batches are rolled out between the times specified in the
+  resume_at and the suspend_at keys (in HH:MM format).  The time
+  window between resume_at and suspend_at must be large enough
+  to fit the minimum_minutes_per_batch value.
+* All times are UTC.
+"""
 
 
 for network_name, network in ic_types.IC_NETWORKS.items():

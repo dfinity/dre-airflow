@@ -1,11 +1,11 @@
 import datetime
 import os
+import sys
 import unittest
 
 import dfinity.ic_types as ic_types
 import operators.ic_os_rollout as ic_os_rollout_operators
 import pendulum
-from dfinity.rollout_types import DEFAULT_GUESTOS_ROLLOUT_PLANS
 
 from airflow import DAG
 from airflow.models import DagBag, DagRun
@@ -26,11 +26,20 @@ def db() -> None:
 
 class TestSchedule(unittest.TestCase):
     dagbag: DagBag
+    DEFAULT_ROLLOUT_PLANS: dict[str, str]
 
     @classmethod
     def setUpClass(cls) -> None:
         db()
         cls.dagbag = DagBag()
+        # Load DAG defaults using trickery to not pollute the Python path.
+        sys.path.append(os.path.dirname(os.path.dirname("{__file__}")))
+        try:
+            from dags.defaults import DEFAULT_GUESTOS_ROLLOUT_PLANS
+
+            cls.DEFAULT_ROLLOUT_PLANS = DEFAULT_GUESTOS_ROLLOUT_PLANS
+        finally:
+            sys.path.pop()
 
     def setUp(self) -> None:
         with DAG(
@@ -47,7 +56,7 @@ class TestSchedule(unittest.TestCase):
                     description="Git revision",
                 ),
                 "plan": Param(
-                    default=DEFAULT_GUESTOS_ROLLOUT_PLANS["mainnet"].strip(),
+                    default=self.DEFAULT_ROLLOUT_PLANS["mainnet"].strip(),
                     type="string",
                     title="Rollout plan",
                     description="YAML-formatted string describing the rollout schedule",
@@ -70,7 +79,6 @@ class TestSchedule(unittest.TestCase):
         self.dagbag.bag_dag(self.dag, None)  # type: ignore
 
     def test_standard_mainnet_schedule(self) -> None:
-        """Tests that the EvenNumberCheckOperator returns True for 10."""
         sess = Session()
         dag = self.dagbag.get_dag(dag_id="test_schedule", session=sess)
         dag.test()

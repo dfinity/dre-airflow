@@ -1,16 +1,14 @@
 import datetime
 import json
 import os
+import sys
 import textwrap
 from typing import Any, cast
 
 import pytest
 from dfinity import dre
 from dfinity.ic_types import IC_NETWORKS
-from dfinity.rollout_types import (
-    DEFAULT_HOSTOS_ROLLOUT_PLANS,
-    yaml_to_HostOSRolloutPlanSpec,
-)
+from dfinity.rollout_types import yaml_to_HostOSRolloutPlanSpec
 from operators.hostos_rollout import DagParams, compute_provisional_plan, schedule
 
 
@@ -57,6 +55,12 @@ def test_simple_plan(registry: dre.RegistrySnapshot) -> None:
 def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     """Tests that the default rollout plan spec produces expected results."""
     now = datetime.datetime(2025, 7, 6, 11, 30)
+
+    sys.path.append(os.path.dirname(os.path.dirname("{__file__}")))
+    try:
+        from dags.defaults import DEFAULT_HOSTOS_ROLLOUT_PLANS
+    finally:
+        sys.path.pop()
 
     spec = yaml_to_HostOSRolloutPlanSpec(DEFAULT_HOSTOS_ROLLOUT_PLANS["mainnet"])
     res = compute_provisional_plan(

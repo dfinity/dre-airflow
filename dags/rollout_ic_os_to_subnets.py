@@ -5,6 +5,8 @@ Each batch runs in parallel.
 """
 
 import datetime
+import os
+import sys
 from typing import Any, cast
 
 import operators.ic_os_rollout as ic_os_rollout
@@ -17,8 +19,6 @@ from dfinity.ic_os_rollout import (
     SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
-from dfinity.rollout_types import DEFAULT_GUESTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
-from dfinity.rollout_types import GUESTOS_ROLLOUT_PLAN_HELP as ROLLOUT_PLAN_HELP
 
 from airflow import DAG
 from airflow.decorators import task
@@ -26,6 +26,48 @@ from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
 from airflow.utils.task_group import TaskGroup
+
+# Temporarily add the DAGs folder to import defaults.py.
+sys.path.append(os.path.dirname(__file__))
+try:
+    from defaults import DEFAULT_GUESTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
+finally:
+    sys.path.pop()
+
+
+ROLLOUT_PLAN_HELP = """\
+A specification of what subnets to rollout, when, and with which versions.
+
+Remarks:
+* All times are expressed in the UTC time zone.
+* Days refer to dates relative to your current work week
+  if starting a rollout during a workday, or next week if
+  the rollout is started during a weekend.
+* A day name with " next week" added at the end means
+  "add one week to this day".
+* Each date/time can specify a simple list of subnets,
+  or can specify a dict with two keys:
+  * batch: an optional integer 1-30 with the batch number
+           you want to assign to this batch.
+  * subnets: a list of subnets.
+* A subnet may be specified:
+  * as an integer number from 0 to the maximum subnet number,
+  * as a full or abbreviated subnet principal ID,
+  * as a dictionary of {
+       subnet: ID or principal
+       git_revision: revision to deploy to this subnet
+    }
+    with this form being able to override the Git revision
+    that will be targeted to that specific subnet.
+    Example of a batch specified this way:
+      Monday next week:
+        7:00:
+          batch: 30
+          subnets:
+          - subnet: tdb26
+            git_revision: 0123456789012345678901234567890123456789
+"""
+
 
 DAGS: dict[str, DAG] = {}
 for network_name, network in IC_NETWORKS.items():

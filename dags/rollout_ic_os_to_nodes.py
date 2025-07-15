@@ -6,14 +6,14 @@ Each batch runs in parallel.
 """
 
 import datetime
+import os
+import sys
 import typing
 
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
 from dfinity.ic_os_rollout import PLAN_FORM
 from dfinity.ic_types import IC_NETWORKS
-from dfinity.rollout_types import DEFAULT_HOSTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
-from dfinity.rollout_types import HOSTOS_ROLLOUT_PLAN_HELP as ROLLOUT_PLAN_HELP
 from dfinity.rollout_types import HostOSStage
 from operators import hostos_rollout as hostos_operators
 from operators.ic_os_rollout import RequestProposalVote
@@ -25,6 +25,108 @@ from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
+
+# Temporarily add the DAGs folder to import defaults.py.
+sys.path.append(os.path.dirname(__file__))
+try:
+    from defaults import DEFAULT_HOSTOS_ROLLOUT_PLANS as DEFAULT_ROLLOUT_PLANS
+finally:
+    sys.path.pop()
+
+
+ROLLOUT_PLAN_HELP = """\
+Represents the plan that the HostOS rollout will follow.
+
+A HostOS rollout proceeds in stages (none mandatory) that each proceed
+batch by batch:
+
+1. `canary` stages (up to `CANARY_BATCH_COUNT` batches which is 5)
+2. `main` stages (up to `MAIN_BATCH_COUNT` batches which is 50)
+3. `unassigned` stages (up to `UNASSIGNED_BATCH_COUNT` batches which is 15)
+4. `stragglers` stage (only one batch)
+
+Which nodes to roll out to is decided by a list of selectors that select
+which nodes are to be rolled out in each batch:
+
+* one list of selectors per `canary` batch,
+* a single list of selectors common to all `main` batches,
+* a single list of selectors common to all `unassigned` batches,
+* a single list of selectors for the single `stragglers` batch
+
+A selector is a dictionary that specifies `assignment` (unassigned or
+assigned), `owner` (DFINITY or others), status (Degraded, Healthy or
+Down).  From those selection keys, a list of nodes is created by the batch,
+and then optionally grouped by a property (either datacenter or subnet,
+specified in key `group_by`).  After the (optional) grouping, a number of
+nodes from each group is selected (up to an absolute number if the key
+`nodes_per_group` is an integer, or a 0-100 percentage if the key is a
+number postfixed by %).  Then the groups (or single group if no `group_by`
+was specified) are collated into a single list, and those are the nodes that
+the batch will target.  Here is an example of a selector that would select
+1 unassigned node per datacenter that is owned by DFINITY:
+
+```
+- assignment: unassigned
+    owner: DFINITY
+    group_by: datacenter
+    nodes_per_group: 1
+```
+
+The application of selectors for each batch happens as follows:
+
+* The batch starts with all nodes not yet rolled out to as candidates.
+* Each selector in the batch's list of selectors is applied iteratively,
+    reducing the list of nodes that the batch will roll out to only the nodes
+    matching the selector as well as all prior selectors.
+
+A list is used rather than a single selector, because this allows for combining
+multiple selectors to achieve a selection of nodes that would otherwise be
+impossible to obtain with a single selector.  Note that an empty list of
+selectors is equivalent to "all nodes".  The rollout has a fuse built-in that
+prevents rolling out to more than 150 nodes at once, so if this error takes
+place, the rollout will abort.  If an empty list of nodes is the result of
+all selectors applied, the batch is simply skipped and the rollout moves to
+the next batch (or the first batch of the next stage, if need be).
+
+If a stage key is not specified, the stage is skipped altogether.
+
+Putting it all together, here is an abridged example of a rollout that would
+only roll out three `canary` batches (to a single node each), and a series
+of unassigned batches, with no `main` or `stragglers` stage:
+
+```
+stages:
+  canary:
+    - selectors: # for batch 1
+      - assignment: unassigned
+        nodes_per_group: 1
+    - selectors: # for batch 2
+      - assignment: unassigned
+        nodes_per_group: 1
+    - selectors: # for batch 3
+      - assignment: unassigned
+        nodes_per_group: 1
+  unassigned:
+    selectors: # for all batches up to the 15th
+    - assignment: unassigned
+      nodes_per_group: 100
+...
+```
+
+There are a few other configuration options -- non-stage configuration keys are
+required except for `start_day` and `allowed_days`.  Some remarks:
+
+* The `minimum_minutes_per_batch` key indicates how fast we can go per batch.
+* The `start_day` key indicates the weekday (in English) when the
+  first batch of the rollout should start being rolled out.
+  If left unspecified, it corresponds to today.
+* Batches are rolled out between the times specified in the
+  `resume_at` and the `suspend_at` keys (in HH:MM format).  The time
+  window between `resume_at` and `suspend_at` must be large enough
+  to fit the `minimum_minutes_per_batch` value.
+* All times are UTC.
+* If not specified, `allowed_days` will default to weekdays (including Friday!).
+"""
 
 for network_name, network in IC_NETWORKS.items():
 
