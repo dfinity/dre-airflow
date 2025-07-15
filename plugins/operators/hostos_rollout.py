@@ -264,8 +264,6 @@ def compute_provisional_plan(
     # general proportion / shape of the rollout.
 
     # Compute a timetable to rely upon.
-    # FIXME: the timetable has to have exclusion days, not just start day,
-    # because the rollout cannot happen during the weekend.
     timetable: list[datetime.datetime] = api_boundary_node_batch_timetable(
         spec,
         batch_count=max_canary_batches
