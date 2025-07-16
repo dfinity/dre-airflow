@@ -72,7 +72,7 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_run_id);
+        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG {} run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::from_str(&schedule) {
                 Ok(plan) => {
@@ -85,7 +85,7 @@ where
                     PlanQueryResult::Found(plan)
                 }
                 Err(e) => {
-                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_run_id, e);
+                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG {} run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id, e);
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -144,7 +144,7 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_run_id);
+        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG {} run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::deserialize(&mut PythonDeserializer::from_str(&schedule)) {
                 Ok(plan) => {
@@ -157,7 +157,7 @@ where
                     PlanQueryResult::Found(plan)
                 }
                 Err(e) => {
-                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_run_id, e);
+                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG {} run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id, e);
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
