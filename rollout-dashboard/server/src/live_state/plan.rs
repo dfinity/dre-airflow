@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{info, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
+use serde::de::DeserializeOwned;
 use std::{fmt::Display, str::FromStr, sync::Arc};
+
+use crate::live_state::python::PythonDeserializer;
 
 const LOG_TARGET: &str = "live_state::plan";
 
@@ -39,6 +42,78 @@ where
 {
     /// Get (or fetch if absent) the rollout plan.
     /// Returns Ok(None) when no plan is found.
+    pub async fn get_from_str(
+        &mut self,
+        associated_task_instance: &TaskInstancesResponseItem,
+        fetcher: impl Future<Output = Result<String, AirflowError>>,
+    ) -> PlanQueryResult<P> {
+        match self {
+            PlanCache::Unretrieved => (),
+            PlanCache::RetrievedAtTaskState {
+                try_number: t,
+                latest_date: l,
+                state: kind,
+            } => {
+                // From this branch we always return early.
+                if *t == associated_task_instance.try_number
+                    && *l == associated_task_instance.latest_date()
+                {
+                    match kind {
+                        PlanStateForTask::Valid(plan) => {
+                            return PlanQueryResult::Found(plan.clone());
+                        }
+                        PlanStateForTask::Invalid => {
+                            return PlanQueryResult::Invalid;
+                        }
+                        PlanStateForTask::Missing => return PlanQueryResult::NotFound,
+                    }
+                }
+            }
+        };
+
+        // Plan is stale or has not yet been retrieved.  Let's go!
+        info!(target: LOG_TARGET, "Plan associated with task {} is outdated; requerying.", associated_task_instance.task_id);
+        match fetcher.await {
+            Ok(schedule) => match P::from_str(&schedule) {
+                Ok(plan) => {
+                    info!(target: LOG_TARGET, "Saving plan to cache.");
+                    *self = Self::RetrievedAtTaskState {
+                        try_number: associated_task_instance.try_number,
+                        latest_date: associated_task_instance.latest_date(),
+                        state: PlanStateForTask::Valid(plan.clone()),
+                    };
+                    PlanQueryResult::Found(plan)
+                }
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "Could not parse plan data: {}", e);
+                    *self = Self::RetrievedAtTaskState {
+                        try_number: associated_task_instance.try_number,
+                        latest_date: associated_task_instance.latest_date(),
+                        state: PlanStateForTask::Invalid,
+                    };
+                    PlanQueryResult::Invalid
+                }
+            },
+            Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND)) => {
+                *self = Self::RetrievedAtTaskState {
+                    try_number: associated_task_instance.try_number,
+                    latest_date: associated_task_instance.latest_date(),
+                    state: PlanStateForTask::Missing,
+                };
+                PlanQueryResult::NotFound
+            }
+            Err(e) => PlanQueryResult::Error(e),
+        }
+    }
+}
+
+impl<P> PlanCache<P>
+where
+    P: Clone,
+    P: DeserializeOwned,
+{
+    /// Get (or fetch if absent) the rollout plan.
+    /// Returns Ok(None) when no plan is found.
     pub async fn get(
         &mut self,
         associated_task_instance: &TaskInstancesResponseItem,
@@ -69,11 +144,11 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        info!(target: LOG_TARGET, "plan is outdated; requerying");
+        info!(target: LOG_TARGET, "Plan associated with task {} is outdated; requerying.", associated_task_instance.task_id);
         match fetcher.await {
-            Ok(schedule) => match P::from_str(&schedule) {
+            Ok(schedule) => match P::deserialize(&mut PythonDeserializer::from_str(&schedule)) {
                 Ok(plan) => {
-                    info!(target: LOG_TARGET, "saving plan to cache");
+                    info!(target: LOG_TARGET, "Saving plan to cache.");
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -82,7 +157,7 @@ where
                     PlanQueryResult::Found(plan)
                 }
                 Err(e) => {
-                    warn!(target: LOG_TARGET, "could not parse plan data: {}", e);
+                    warn!(target: LOG_TARGET, "Could not parse plan data: {}", e);
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),

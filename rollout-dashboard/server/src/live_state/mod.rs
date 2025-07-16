@@ -27,6 +27,7 @@ use tokio::{select, spawn};
 
 mod api_boundary_nodes_rollout;
 mod guestos_rollout;
+mod hostos_rollout;
 mod log_inspector;
 mod plan;
 mod python;
@@ -164,21 +165,21 @@ impl FromStr for DagRunID {
 
 #[derive(Clone)]
 enum Parser {
-    RolloutIcOsToMainnetSubnets(guestos_rollout::Parser),
-    RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes_rollout::Parser),
+    Subnets(guestos_rollout::Parser),
+    ApiBoundaryNodes(api_boundary_nodes_rollout::Parser),
+    Nodes(hostos_rollout::Parser),
 }
 
 impl Parser {
     fn new(dag_id: &str) -> Result<Self, InvalidDagID> {
         match dag_id {
-            "rollout_ic_os_to_mainnet_subnets" => Ok(Parser::RolloutIcOsToMainnetSubnets(
-                guestos_rollout::Parser::new(),
-            )),
-            "rollout_ic_os_to_mainnet_api_boundary_nodes" => {
-                Ok(Parser::RolloutIcOsToMainnetApiBoundaryNodes(
-                    api_boundary_nodes_rollout::Parser::new(),
-                ))
+            "rollout_ic_os_to_mainnet_subnets" => {
+                Ok(Parser::Subnets(guestos_rollout::Parser::new()))
             }
+            "rollout_ic_os_to_mainnet_api_boundary_nodes" => Ok(Parser::ApiBoundaryNodes(
+                api_boundary_nodes_rollout::Parser::new(),
+            )),
+            "rollout_ic_os_to_mainnet_nodes" => Ok(Parser::Nodes(hostos_rollout::Parser::new())),
             _ => Err(InvalidDagID {
                 dag_id: dag_id.to_string(),
             }),
@@ -191,6 +192,8 @@ impl Parser {
                 .expect("Should be convertable to DAG ID"),
             DagID::from_str("rollout_ic_os_to_mainnet_api_boundary_nodes")
                 .expect("Should be convertable to DAG ID"),
+            DagID::from_str("rollout_ic_os_to_mainnet_nodes")
+                .expect("Should be convertable to DAG ID"),
         ]
     }
 
@@ -201,12 +204,9 @@ impl Parser {
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
         match self {
-            Self::RolloutIcOsToMainnetSubnets(r) => {
-                r.reparse(dag_run, airflow_api, linearized_tasks).await
-            }
-            Self::RolloutIcOsToMainnetApiBoundaryNodes(r) => {
-                r.reparse(dag_run, airflow_api, linearized_tasks).await
-            }
+            Self::Subnets(r) => r.reparse(dag_run, airflow_api, linearized_tasks).await,
+            Self::ApiBoundaryNodes(r) => r.reparse(dag_run, airflow_api, linearized_tasks).await,
+            Self::Nodes(r) => r.reparse(dag_run, airflow_api, linearized_tasks).await,
         }
     }
 }

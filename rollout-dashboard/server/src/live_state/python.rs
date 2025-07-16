@@ -1,16 +1,17 @@
 /// Basic Python-formatted data structure parser.
 /// Needed to retrieve the rollout plan and deserialize into a Rust structure.
 /// Python objects are quoted strings -- this parser does not parse them.
-use std::fmt::{self, Display};
-use std::ops::{AddAssign, MulAssign, Neg};
-
 use serde::Deserialize;
 use serde::de;
 use serde::de::{
     DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor,
 };
-use std::error;
+#[cfg(feature = "trace_python")]
+use std::any::type_name;
+use std::fmt::{self, Display};
+use std::ops::{AddAssign, MulAssign, Neg};
 use std::result;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub(crate) enum ErrorCode {
@@ -18,6 +19,7 @@ pub(crate) enum ErrorCode {
     Eof,
     ExpectedBoolean,
     ExpectedInteger,
+    ExpectedFloat,
     ExpectedString,
     Syntax,
     Custom,
@@ -30,25 +32,64 @@ pub(crate) enum ErrorCode {
     ExpectedMapComma,
     ExpectedMapEnd,
     ExpectedEnum,
+    ExpectedDateTime,
 }
 
 impl Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "code {:?}", self)
+        write!(f, "[{:?}]", self)
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct ErrorImpl {
     pub(crate) code: ErrorCode,
-    pub(crate) message: Option<String>,
+    pub(crate) context: String,
+    pub(crate) message: String,
+    pub(crate) cause: Option<Box<dyn std::error::Error>>,
 }
 
-impl From<ErrorCode> for ErrorImpl {
-    fn from(e: ErrorCode) -> Self {
+impl std::error::Error for ErrorImpl {}
+
+impl ErrorImpl {
+    fn with_context(code: ErrorCode, context: String) -> Self {
         Self {
-            code: e,
-            message: None,
+            code,
+            context,
+            message: "".to_string(),
+            cause: None,
+        }
+    }
+
+    fn with_context_str(code: ErrorCode, context: &str) -> Self {
+        let ctx = context.chars().take(40).collect::<String>();
+        Self::with_context(code, ctx)
+    }
+
+    fn with_context_and_cause(
+        code: ErrorCode,
+        context: String,
+        cause: Option<Box<dyn std::error::Error>>,
+    ) -> ErrorImpl {
+        ErrorImpl {
+            code,
+            context,
+            message: "".to_string(),
+            cause,
+        }
+    }
+}
+
+impl serde::de::Error for ErrorImpl {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: Display,
+    {
+        Self {
+            code: ErrorCode::Custom,
+            message: msg.to_string(),
+            cause: None,
+            context: "".to_string(),
         }
     }
 }
@@ -57,55 +98,104 @@ impl Display for ErrorImpl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Error {}{}",
+            "{} error parsing Python {}{}",
             self.code,
-            match &self.message {
-                Some(s) => ": ".to_owned() + s.as_str(),
-                None => "".to_string(),
+            match self.context.as_str() {
+                "" => "".to_string(),
+                _ => format!("around text {}", self.context),
+            },
+            match &self.cause {
+                None => match self.message.as_str() {
+                    "" => "".to_string(),
+                    _ => self.message.to_string(),
+                },
+                Some(s) => format!(": {}", s),
             }
         )
     }
 }
 
-impl de::Error for ErrorImpl {
-    fn custom<T>(msg: T) -> Self
+pub(crate) type Result<T> = result::Result<T, ErrorImpl>;
+
+const DATETIME_FORMATS: [&str; 4] = [
+    "datetime.datetime(%Y, %m, %d, %H, %M, %S)",
+    "datetime.datetime(%Y, %m, %d, %H, %M)",
+    "datetime.datetime(%Y, %m, %d, %H)",
+    "datetime.datetime@version=2(timestamp=%s%.f,tz=None)",
+];
+
+#[derive(Clone, Debug)]
+pub(crate) struct PythonDateTime(chrono::NaiveDateTime);
+
+impl TryFrom<&str> for PythonDateTime {
+    type Error = chrono::ParseError;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        let mut err = None;
+        for k in DATETIME_FORMATS.iter() {
+            let m = chrono::NaiveDateTime::parse_from_str(value, k);
+            match m {
+                Ok(v) => return Ok(PythonDateTime(v)),
+                Err(e) => err = Some(e),
+            }
+        }
+        Err(err.unwrap())
+    }
+}
+
+struct PythonDateVisitor;
+
+impl<'de> Visitor<'de> for PythonDateVisitor {
+    type Value = PythonDateTime;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a datetime.datetime(...)")
+    }
+
+    fn visit_str<E>(self, v: &str) -> std::result::Result<Self::Value, E>
     where
-        T: Display,
+        E: serde::de::Error,
     {
-        ErrorImpl {
-            code: ErrorCode::Custom,
-            message: Some(format!("{}", msg)),
+        match Self::Value::try_from(v) {
+            Ok(vv) => Ok(vv),
+            Err(e) => Err(E::custom(format!(
+                "could not parse {} into a valid date/time: {}",
+                v, e
+            ))),
         }
     }
 }
 
-impl error::Error for ErrorImpl {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-    fn description(&self) -> &str {
-        "parse error"
-    }
-    fn cause(&self) -> Option<&dyn error::Error> {
-        None
+impl<'de> serde::de::Deserialize<'de> for PythonDateTime {
+    fn deserialize<D>(
+        deserializer: D,
+    ) -> std::result::Result<PythonDateTime, <D as serde::Deserializer<'de>>::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_identifier(PythonDateVisitor)
     }
 }
 
-pub(crate) type Result<T> = result::Result<T, ErrorImpl>;
+impl From<PythonDateTime> for chrono::DateTime<chrono::Utc> {
+    fn from(val: PythonDateTime) -> Self {
+        val.0.and_utc()
+    }
+}
 
-pub(crate) struct Deserializer<'de> {
+pub(crate) struct PythonDeserializer<'de> {
     // This string starts with the input data and characters are truncated off
     // the beginning as data is parsed.
     input: &'de str,
 }
 
-impl<'de> Deserializer<'de> {
+impl<'de> PythonDeserializer<'de> {
     // By convention, `Deserializer` constructors are named like `from_xyz`.
     // That way basic use cases are satisfied by something like
     // `serde_json::from_str(...)` while advanced use cases that require a
     // deserializer can make one with `serde_json::Deserializer::from_str(...)`.
-    pub(crate) fn from_str(input: &'de str) -> Self {
-        Deserializer { input }
+    pub(crate) fn from_str(input: &'de str) -> PythonDeserializer<'de> {
+        PythonDeserializer { input }
     }
 }
 
@@ -118,29 +208,42 @@ pub(crate) fn from_str<'a, T>(s: &'a str) -> Result<T>
 where
     T: Deserialize<'a>,
 {
-    let mut deserializer = Deserializer::from_str(s);
+    let mut deserializer = PythonDeserializer::from_str(s);
     let t = T::deserialize(&mut deserializer)?;
+    let _ = deserializer.chomp_whitespace();
     if deserializer.input.is_empty() {
         Ok(t)
     } else {
-        Err(ErrorCode::TrailingCharacters.into())
+        Err(ErrorImpl::with_context_str(
+            ErrorCode::TrailingCharacters,
+            deserializer.input,
+        ))
     }
 }
 
 // SERDE IS NOT A PARSING LIBRARY. This impl block defines a few basic parsing
 // functions from scratch. More complicated formats may wish to use a dedicated
 // parsing library to help implement their Serde deserializer.
-impl<'de> Deserializer<'de> {
+impl<'de> PythonDeserializer<'de> {
     // Look at the first character in the input without consuming it.
     fn peek_char(&mut self) -> Result<char> {
-        self.input.chars().next().ok_or(ErrorCode::Eof.into())
+        self.input
+            .chars()
+            .next()
+            .ok_or(ErrorImpl::with_context_str(ErrorCode::Eof, ""))
+    }
+
+    fn chomp_whitespace(&mut self) -> Result<char> {
+        while self.peek_char()? == ' ' || self.peek_char()? == '\n' {
+            let _ = self.next_char()?;
+        }
+        self.peek_char()
     }
 
     // Consume the first character in the input.
     fn next_char(&mut self) -> Result<char> {
         let ch = self.peek_char()?;
         self.input = &self.input[ch.len_utf8()..];
-        //println!("next char: {:?}", ch);
         Ok(ch)
     }
 
@@ -153,7 +256,10 @@ impl<'de> Deserializer<'de> {
             self.input = &self.input["false".len()..];
             Ok(false)
         } else {
-            Err(ErrorCode::ExpectedBoolean.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedBoolean,
+                self.input,
+            ))
         }
     }
 
@@ -166,10 +272,15 @@ impl<'de> Deserializer<'de> {
     where
         T: AddAssign<T> + MulAssign<T> + From<u8>,
     {
+        self.chomp_whitespace()?;
+
         let mut int = match self.next_char()? {
             ch @ '0'..='9' => T::from(ch as u8 - b'0'),
             _ => {
-                return Err(ErrorCode::ExpectedInteger.into());
+                return Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedInteger,
+                    self.input,
+                ));
             }
         };
         loop {
@@ -192,8 +303,94 @@ impl<'de> Deserializer<'de> {
     where
         T: Neg<Output = T> + AddAssign<T> + MulAssign<T> + From<i8>,
     {
+        self.chomp_whitespace()?;
+
         // Optional minus sign, delegate to `parse_unsigned`, negate if negative.
-        unimplemented!()
+        let neg = match self.peek_char()? {
+            '-' => {
+                let _ = self.next_char()?;
+                true
+            }
+            _ => false,
+        };
+
+        self.chomp_whitespace()?;
+
+        let mut int = match self.next_char()? {
+            ch @ '0'..='9' => T::from((ch as u8 - b'0').try_into().unwrap()),
+            _ => {
+                return Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedInteger,
+                    self.input,
+                ));
+            }
+        };
+        loop {
+            match self.input.chars().next() {
+                Some(ch @ '0'..='9') => {
+                    self.input = &self.input[1..];
+                    int *= T::from(10);
+                    int += T::from((ch as u8 - b'0').try_into().unwrap());
+                }
+                _ => {
+                    if neg {
+                        int = int.neg();
+                    }
+                    return Ok(int);
+                }
+            }
+        }
+    }
+
+    fn parse_float(&mut self) -> Result<f64> {
+        self.chomp_whitespace()?;
+
+        let mut chars: String = "".to_string();
+
+        if self.peek_char()? == '-' {
+            let _ = self.next_char()?;
+            chars += "-";
+        };
+
+        self.chomp_whitespace()?;
+
+        let mut period_already = false;
+
+        loop {
+            match self.input.chars().next() {
+                Some(ch @ '0'..='9') => {
+                    self.input = &self.input[1..];
+                    chars = chars + &ch.to_string();
+                }
+                Some('.') => match period_already {
+                    false => {
+                        self.input = &self.input[1..];
+                        period_already = true;
+                        chars += ".";
+                    }
+                    true => {
+                        return Err(ErrorImpl::with_context_str(
+                            ErrorCode::ExpectedFloat,
+                            self.input,
+                        ));
+                    }
+                },
+                _ => {
+                    break;
+                }
+            }
+        }
+
+        let converted = f64::from_str(&chars);
+
+        match converted {
+            Ok(f) => Ok(f),
+            Err(e) => Err(ErrorImpl::with_context_and_cause(
+                ErrorCode::ExpectedFloat,
+                chars,
+                Some(Box::new(e)),
+            )),
+        }
     }
 
     // Parse a string until the next '\'' character.
@@ -201,13 +398,14 @@ impl<'de> Deserializer<'de> {
     // Makes no attempt to handle escape sequences. What did you expect? This is
     // example code!
     fn parse_string(&mut self) -> Result<&'de str> {
-        let ch = self.next_char()?;
+        self.chomp_whitespace()?;
 
+        let ch = self.next_char()?;
         if ch != '\'' {
-            if ch == ' ' {
-                return self.parse_string();
-            }
-            return Err(ErrorCode::ExpectedString.into());
+            return Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedString,
+                self.input,
+            ));
         }
         match self.input.find('\'') {
             Some(len) => {
@@ -215,12 +413,33 @@ impl<'de> Deserializer<'de> {
                 self.input = &self.input[len + 1..];
                 Ok(s)
             }
-            None => Err(ErrorCode::Eof.into()),
+            None => Err(ErrorImpl::with_context_str(ErrorCode::Eof, "")),
+        }
+    }
+
+    fn parse_datetime(&mut self) -> Result<&'de str> {
+        self.chomp_whitespace()?;
+        if !self.input.starts_with("datetime.datetime(") {
+            return Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedDateTime,
+                self.input,
+            ));
+        }
+        match self.input.find(')') {
+            Some(len) => {
+                let s = &self.input[..len + 1];
+                self.input = &self.input[len + 1..];
+                Ok(s)
+            }
+            None => Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedDateTime,
+                self.input,
+            )),
         }
     }
 }
 
-impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut PythonDeserializer<'de> {
     type Error = ErrorImpl;
 
     // Look at the input data to decide what Serde data model type to
@@ -230,15 +449,42 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing any of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
+
         match self.peek_char()? {
-            'n' => self.deserialize_unit(visitor),
+            'n' | 'N' => self.deserialize_unit(visitor),
             't' | 'f' => self.deserialize_bool(visitor),
             '\'' => self.deserialize_str(visitor),
-            '0'..='9' => self.deserialize_u64(visitor),
-            '-' => self.deserialize_i64(visitor),
+            '0'..='9' | '-' => {
+                let mut is_float = false;
+                let mut is_negative = false;
+                for c in self.input.chars() {
+                    match c {
+                        '0'..='9' => {}
+                        '-' => is_negative = true,
+                        '.' => is_float = true,
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+                if is_float {
+                    self.deserialize_f64(visitor)
+                } else if is_negative {
+                    self.deserialize_i64(visitor)
+                } else {
+                    self.deserialize_u64(visitor)
+                }
+            }
             '[' => self.deserialize_seq(visitor),
             '{' => self.deserialize_map(visitor),
-            _ => Err(ErrorCode::Syntax.into()),
+            _ => Err(ErrorImpl::with_context_str(ErrorCode::Syntax, self.input)),
         }
     }
 
@@ -322,29 +568,32 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     // Float parsing is stupidly hard.
-    fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        unimplemented!()
+        let f = self.parse_float()?;
+        let f2 = f as f32;
+
+        visitor.visit_f32(f2)
     }
 
     // Float parsing is stupidly hard.
-    fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        unimplemented!()
+        visitor.visit_f64(self.parse_float()?)
     }
 
     // The `Serializer` implementation on the previous page serialized chars as
     // single-character strings so handle that representation here.
-    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         // Parse a string, check that it is one character, call `visit_char`.
-        unimplemented!()
+        visitor.visit_char(self.next_char()?)
     }
 
     // Refer to the "Understanding deserializer lifetimes" page for information
@@ -353,6 +602,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing str of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+
         visitor.visit_borrowed_str(self.parse_string()?)
     }
 
@@ -391,6 +647,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing option of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
         if self.input.starts_with("null") {
             self.input = &self.input["null".len()..];
             visitor.visit_none()
@@ -404,11 +667,21 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        if self.input.starts_with("null") {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing unit of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
+        if self.input.starts_with("null") | self.input.starts_with("None") {
             self.input = &self.input["null".len()..];
             visitor.visit_unit()
         } else {
-            Err(ErrorCode::ExpectedNull.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedNull,
+                self.input,
+            ))
         }
     }
 
@@ -417,6 +690,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing unit struct of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
         self.deserialize_unit(visitor)
     }
 
@@ -427,6 +707,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing newtype struct of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
         visitor.visit_newtype_struct(self)
     }
 
@@ -437,21 +724,40 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        // Parse the opening bracket of the sequence.
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing seq of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+        self.chomp_whitespace()?;
         let ch = self.next_char()?;
+
+        // Parse the opening bracket of the sequence.
         if ch == '[' {
+            #[cfg(feature = "trace_python")]
+            eprintln!("open square bracket");
             // Give the visitor access to each element of the sequence.
             let value = visitor.visit_seq(CommaSeparated::new(self))?;
+
+            self.chomp_whitespace()?;
+
             // Parse the closing bracket of the sequence.
             if self.next_char()? == ']' {
+                #[cfg(feature = "trace_python")]
+                eprintln!("close square bracket");
                 Ok(value)
             } else {
-                Err(ErrorCode::ExpectedArrayEnd.into())
+                Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedArrayEnd,
+                    self.input,
+                ))
             }
-        } else if ch == ' ' {
-            self.deserialize_seq(visitor)
         } else {
-            Err(ErrorCode::ExpectedArray.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedArray,
+                self.input,
+            ))
         }
     }
 
@@ -465,6 +771,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing tuple of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
         self.deserialize_seq(visitor)
     }
 
@@ -478,6 +790,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing tuple struct of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
         self.deserialize_seq(visitor)
     }
 
@@ -488,21 +806,49 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        // Parse the opening brace of the map.
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing map of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>(),
+        );
+
+        self.chomp_whitespace()?;
         let ch = self.next_char()?;
+
+        // Parse the opening brace of the map.
         if ch == '{' {
             // Give the visitor access to each entry of the map.
+            #[cfg(feature = "trace_python")]
+            eprintln!(
+                "map start at {}\n{:?}",
+                type_name::<V::Value>(),
+                self.input.chars().take(180).collect::<String>(),
+            );
             let value = visitor.visit_map(CommaSeparated::new(self))?;
+
+            self.chomp_whitespace()?;
+
             // Parse the closing brace of the map.
             if self.next_char()? == '}' {
+                #[cfg(feature = "trace_python")]
+                eprintln!(
+                    "map end at {}\n{:?}",
+                    type_name::<V::Value>(),
+                    self.input.chars().take(180).collect::<String>(),
+                );
                 Ok(value)
             } else {
-                Err(ErrorCode::ExpectedMapEnd.into())
+                Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedMapEnd,
+                    self.input,
+                ))
             }
-        } else if ch == ' ' {
-            self.deserialize_map(visitor)
         } else {
-            Err(ErrorCode::ExpectedMap.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedMap,
+                self.input,
+            ))
         }
     }
 
@@ -521,6 +867,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing struct of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>()
+        );
         self.deserialize_map(visitor)
     }
 
@@ -533,6 +885,15 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing enum of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>()
+        );
+
+        self.chomp_whitespace()?;
+
         if self.peek_char()? == '\'' {
             // Visit a unit variant.
             visitor.visit_enum(self.parse_string()?.into_deserializer())
@@ -543,10 +904,16 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             if self.next_char()? == '}' {
                 Ok(value)
             } else {
-                Err(ErrorCode::ExpectedMapEnd.into())
+                Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedMapEnd,
+                    self.input,
+                ))
             }
         } else {
-            Err(ErrorCode::ExpectedEnum.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedEnum,
+                self.input,
+            ))
         }
     }
 
@@ -558,7 +925,19 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        self.deserialize_str(visitor)
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "deserializing identifier of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.input.chars().take(180).collect::<String>()
+        );
+        self.chomp_whitespace()?;
+        if self.input.starts_with("datetime.datetime(") {
+            let datetime = self.parse_datetime()?;
+            visitor.visit_str(datetime)
+        } else {
+            self.deserialize_str(visitor)
+        }
     }
 
     // Like `deserialize_any` but indicates to the `Deserializer` that it makes
@@ -584,12 +963,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 // we need to track whether we are on the first element or past the first
 // element.
 struct CommaSeparated<'a, 'de: 'a> {
-    de: &'a mut Deserializer<'de>,
+    de: &'a mut PythonDeserializer<'de>,
     first: bool,
 }
 
 impl<'a, 'de> CommaSeparated<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>) -> Self {
+    fn new(de: &'a mut PythonDeserializer<'de>) -> Self {
         CommaSeparated { de, first: true }
     }
 }
@@ -603,20 +982,31 @@ impl<'de, 'a> SeqAccess<'de> for CommaSeparated<'a, 'de> {
     where
         T: DeserializeSeed<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "next element seed of {}\n{:?}",
+            type_name::<T::Value>(),
+            self.de.input.chars().take(180).collect::<String>(),
+        );
         // Check if there are no more elements.
         if self.de.peek_char()? == ']' {
             return Ok(None);
         }
+
+        self.de.chomp_whitespace()?;
+
         // Comma is required before every element except the first.
         if !self.first {
             let ch = self.de.next_char()?;
-            if ch == ' ' {
-                return self.next_element_seed(seed);
-            } else if ch != ',' {
-                return Err(ErrorCode::ExpectedArrayComma.into());
+            if ch != ',' {
+                return Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedArrayComma,
+                    self.de.input,
+                ));
             }
         }
         self.first = false;
+
         // Deserialize an array element.
         seed.deserialize(&mut *self.de).map(Some)
     }
@@ -631,17 +1021,27 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
     where
         K: DeserializeSeed<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "next key seed of {}\n{:?}",
+            type_name::<K::Value>(),
+            self.de.input.chars().take(180).collect::<String>()
+        );
         // Check if there are no more entries.
         if self.de.peek_char()? == '}' {
             return Ok(None);
         }
+
+        self.de.chomp_whitespace()?;
+
         // Comma is required before every entry except the first.
         if !self.first {
             let ch = self.de.next_char()?;
-            if ch == ' ' {
-                return self.next_element_seed(seed);
-            } else if ch != ',' {
-                return Err(ErrorCode::ExpectedMapComma.into());
+            if ch != ',' {
+                return Err(ErrorImpl::with_context_str(
+                    ErrorCode::ExpectedMapComma,
+                    self.de.input,
+                ));
             }
         }
         self.first = false;
@@ -653,11 +1053,22 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
+        #[cfg(feature = "trace_python")]
+        eprintln!(
+            "next value seed of {}\n{:?}",
+            type_name::<V::Value>(),
+            self.de.input.chars().take(180).collect::<String>()
+        );
         // It doesn't make a difference whether the colon is parsed at the end
         // of `next_key_seed` or at the beginning of `next_value_seed`. In this
         // case the code is a bit simpler having it here.
+        self.de.chomp_whitespace()?;
+
         if self.de.next_char()? != ':' {
-            return Err(ErrorCode::ExpectedMapColon.into());
+            return Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedMapColon,
+                self.de.input,
+            ));
         }
         // Deserialize a map value.
         seed.deserialize(&mut *self.de)
@@ -665,11 +1076,11 @@ impl<'de, 'a> MapAccess<'de> for CommaSeparated<'a, 'de> {
 }
 
 struct Enum<'a, 'de: 'a> {
-    de: &'a mut Deserializer<'de>,
+    de: &'a mut PythonDeserializer<'de>,
 }
 
 impl<'a, 'de> Enum<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>) -> Self {
+    fn new(de: &'a mut PythonDeserializer<'de>) -> Self {
         Enum { de }
     }
 }
@@ -695,7 +1106,10 @@ impl<'de, 'a> EnumAccess<'de> for Enum<'a, 'de> {
         if self.de.next_char()? == ':' {
             Ok((val, self))
         } else {
-            Err(ErrorCode::ExpectedMapColon.into())
+            Err(ErrorImpl::with_context_str(
+                ErrorCode::ExpectedMapColon,
+                self.de.input,
+            ))
         }
     }
 }
@@ -708,7 +1122,10 @@ impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
     // If the `Visitor` expected this variant to be a unit variant, the input
     // should have been the plain string case handled in `deserialize_enum`.
     fn unit_variant(self) -> Result<()> {
-        Err(ErrorCode::ExpectedString.into())
+        Err(ErrorImpl::with_context_str(
+            ErrorCode::ExpectedString,
+            self.de.input,
+        ))
     }
 
     // Newtype variants are represented in JSON as `{ NAME: VALUE }` so

@@ -3,6 +3,9 @@ name = "rollout-dashboard"
 version = "0.3.0"
 edition = "2024"
 
+[features]
+trace_python = []
+
 [lib]
 name = "rollout_dashboard"
 path = "src/lib.rs"
