@@ -198,10 +198,10 @@ impl Display for PlanParseError {
 
 #[derive(Debug, Deserialize, Clone)]
 struct ProvisionalHostOSPlan {
-    canary: Vec<ProvisionalPlanBatch>,
-    main: Vec<ProvisionalPlanBatch>,
-    unassigned: Vec<ProvisionalPlanBatch>,
-    stragglers: Vec<ProvisionalPlanBatch>,
+    canary: Option<Vec<ProvisionalPlanBatch>>,
+    main: Option<Vec<ProvisionalPlanBatch>>,
+    unassigned: Option<Vec<ProvisionalPlanBatch>>,
+    stragglers: Option<Vec<ProvisionalPlanBatch>>,
 }
 
 impl FromStr for ProvisionalHostOSPlan {
@@ -221,28 +221,44 @@ impl From<&ProvisionalHostOSPlan> for HostOsStages {
         HostOsStages {
             canary: val
                 .canary
-                .iter()
-                .enumerate()
-                .map(|(n, b)| (n + 1, b.into()))
-                .collect(),
+                .clone()
+                .map(|z| {
+                    z.iter()
+                        .enumerate()
+                        .map(|(n, b)| (n + 1, b.into()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             main: val
                 .main
-                .iter()
-                .enumerate()
-                .map(|(n, b)| (n + 1, b.into()))
-                .collect(),
+                .clone()
+                .map(|z| {
+                    z.iter()
+                        .enumerate()
+                        .map(|(n, b)| (n + 1, b.into()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             unassigned: val
                 .unassigned
-                .iter()
-                .enumerate()
-                .map(|(n, b)| (n + 1, b.into()))
-                .collect(),
+                .clone()
+                .map(|z| {
+                    z.iter()
+                        .enumerate()
+                        .map(|(n, b)| (n + 1, b.into()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             stragglers: val
                 .stragglers
-                .iter()
-                .enumerate()
-                .map(|(n, b)| (n + 1, b.into()))
-                .collect(),
+                .clone()
+                .map(|z| {
+                    z.iter()
+                        .enumerate()
+                        .map(|(n, b)| (n + 1, b.into()))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
