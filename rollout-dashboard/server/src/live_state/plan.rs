@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use futures::Future;
-use log::{info, warn};
+use log::{debug, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use serde::de::DeserializeOwned;
 use std::{fmt::Display, str::FromStr, sync::Arc};
@@ -72,11 +72,11 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        info!(target: LOG_TARGET, "Plan associated with task {} is outdated; requerying.", associated_task_instance.task_id);
+        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::from_str(&schedule) {
                 Ok(plan) => {
-                    info!(target: LOG_TARGET, "Saving plan to cache.");
+                    debug!(target: LOG_TARGET, "Saving plan to cache.");
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -85,7 +85,7 @@ where
                     PlanQueryResult::Found(plan)
                 }
                 Err(e) => {
-                    warn!(target: LOG_TARGET, "Could not parse plan data: {}", e);
+                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_run_id, e);
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -144,11 +144,11 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        info!(target: LOG_TARGET, "Plan associated with task {} is outdated; requerying.", associated_task_instance.task_id);
+        debug!(target: LOG_TARGET, "Plan associated with task {} of DAG run {} is outdated; requerying.", associated_task_instance.task_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::deserialize(&mut PythonDeserializer::from_str(&schedule)) {
                 Ok(plan) => {
-                    info!(target: LOG_TARGET, "Saving plan to cache.");
+                    debug!(target: LOG_TARGET, "Saving plan to cache.");
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -157,7 +157,7 @@ where
                     PlanQueryResult::Found(plan)
                 }
                 Err(e) => {
-                    warn!(target: LOG_TARGET, "Could not parse plan data: {}", e);
+                    warn!(target: LOG_TARGET, "Could not parse plan data from XCom of task {} of DAG run {}: {}", associated_task_instance.task_id, associated_task_instance.dag_run_id, e);
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
