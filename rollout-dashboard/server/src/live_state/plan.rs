@@ -76,7 +76,6 @@ where
         match fetcher.await {
             Ok(schedule) => match P::from_str(&schedule) {
                 Ok(plan) => {
-                    debug!(target: LOG_TARGET, "Saving plan to cache.");
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
@@ -148,7 +147,6 @@ where
         match fetcher.await {
             Ok(schedule) => match P::deserialize(&mut PythonDeserializer::from_str(&schedule)) {
                 Ok(plan) => {
-                    debug!(target: LOG_TARGET, "Saving plan to cache.");
                     *self = Self::RetrievedAtTaskState {
                         try_number: associated_task_instance.try_number,
                         latest_date: associated_task_instance.latest_date(),
