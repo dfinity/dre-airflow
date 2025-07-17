@@ -203,7 +203,7 @@ const HostOsState = {
 export function hostOsStateIcon(rollout: HostOsRollout): String {
     return HostOsState[rollout.state].icon;
 };
-export function HostOsStateName(rollout: HostOsRollout): string {
+export function hostOsStateName(rollout: HostOsRollout): string {
     return HostOsState[rollout.state].name;
 };
 
@@ -273,7 +273,7 @@ export type HostOsStages = {
 
 // types::v2::hostos::Rollout
 export type HostOsRollout = {
-    kind: "rollout_ic_os_to_mainnet_api_boundary_nodes";
+    kind: "rollout_ic_os_to_mainnet_nodes";
     conf: HostOsRolloutConfiguration;
     state: keyof typeof HostOsState;
     stages: HostOsStages | null;
