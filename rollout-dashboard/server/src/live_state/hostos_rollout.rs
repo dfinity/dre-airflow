@@ -582,34 +582,6 @@ impl Parser {
                         }
                         TaskInstanceState::Success => {
                             match task_name {
-                                // Tasks corresponding to a subnet that are in state Success
-                                // require somewhat different handling than tasks in states
-                                // Running et al.  For once, when a task is successful,
-                                // the subnet state must be set to the *next* state it *would*
-                                // have, if the /next/ task had /already begun executing/.
-                                //
-                                // To give an example: if `wait_until_start_time`` is Success,
-                                // the subnet state is no longer "waiting until start time",
-                                // but rather should be "creating proposal", even though
-                                // perhaps `create_proposal_if_none_exists`` /has not yet run/
-                                // because we know certainly that the
-                                // `create_proposal_if_none_exists` task is /about to run/
-                                // anyway.
-                                //
-                                // The same principle applies for all tasks -- if the current
-                                // task is successful, we set the state of the subnet to the
-                                // expected state that corresponds to the successor task.
-                                //
-                                // We could avoid encoding this type of knowledge here, by
-                                // having a table of Airflow tasks vs. expected subnet states,
-                                // and as a special case, on the task Success case, look up the
-                                // successor task on the table to decide what subnet state to
-                                // assign, but this would require a data structure different
-                                // from the current (a vector of ordered task instances) to
-                                // iterate over.  This refactor may happen in the future, and
-                                // it will require extra tests to ensure that invariants have
-                                // been preserved between this code (which works well) and
-                                // the future rewrite.
                                 "plan" => {
                                     trans_min!(BatchState::Waiting);
                                 }
