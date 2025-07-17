@@ -9,11 +9,8 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::v2::{
-    ApiBoundaryNode, ApiBoundaryNodesBatch, ApiBoundaryNodesBatchState as BatchState,
-    RolloutIcOsToMainnetApiBoundaryNodes, RolloutIcOsToMainnetApiBoundaryNodesState as State,
-    RolloutKind,
-};
+use rollout_dashboard::types::v2::RolloutKind;
+use rollout_dashboard::types::v2::api_boundary_nodes::{Batch, BatchState, Node, Rollout, State};
 use std::cmp::max;
 use std::cmp::min;
 use std::fmt::Display;
@@ -39,7 +36,7 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut ApiBoundaryNodesBatch,
+    batch: &mut Batch,
     state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -96,13 +93,13 @@ impl From<PythonFormattedPlan> for Plan {
         };
         for (batch_number, (start_time_str, api_boundary_nodes)) in value.into_iter().enumerate() {
             let start_time: DateTime<Utc> = start_time_str.clone().into();
-            let batch = ApiBoundaryNodesBatch {
+            let batch = Batch {
                 planned_start_time: start_time,
                 actual_start_time: None,
                 end_time: None,
                 api_boundary_nodes: api_boundary_nodes
                     .into_iter()
-                    .map(|i| ApiBoundaryNode { node_id: i.clone() })
+                    .map(|i| Node { node_id: i.clone() })
                     .collect(),
                 state: BatchState::Unknown,
                 comment: "".into(),
@@ -114,7 +111,7 @@ impl From<PythonFormattedPlan> for Plan {
     }
 }
 
-type BatchMap = IndexMap<usize, ApiBoundaryNodesBatch>;
+type BatchMap = IndexMap<usize, Batch>;
 
 #[derive(Clone, Default)]
 pub(super) struct Parser {
@@ -132,7 +129,7 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        let mut rollout = RolloutIcOsToMainnetApiBoundaryNodes {
+        let mut rollout = Rollout {
             state: State::Preparing,
             batches: IndexMap::new(),
             conf: dag_run.conf.clone(),

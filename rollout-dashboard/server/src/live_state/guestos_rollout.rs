@@ -8,10 +8,8 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::v2::{
-    RolloutIcOsToMainnetSubnets, RolloutIcOsToMainnetSubnetsState as State, RolloutKind, Subnet,
-    SubnetRolloutState as SubnetState, SubnetsBatch,
-};
+use rollout_dashboard::types::v2::RolloutKind;
+use rollout_dashboard::types::v2::guestos::{Batch, Rollout, State, Subnet, SubnetState};
 use std::cmp::max;
 use std::cmp::min;
 use std::fmt::{self, Display};
@@ -57,7 +55,7 @@ impl Display for PlanParseError {
     }
 }
 
-type BatchMap = IndexMap<usize, SubnetsBatch>;
+type BatchMap = IndexMap<usize, Batch>;
 
 #[derive(Debug, Clone)]
 struct Plan {
@@ -105,7 +103,7 @@ impl FromStr for Plan {
                     None => return Err(PlanParseError::InvalidSubnet(subnet.clone())),
                 });
             }
-            let batch = SubnetsBatch {
+            let batch = Batch {
                 planned_start_time: start_time,
                 actual_start_time: None,
                 end_time: None,
@@ -128,7 +126,7 @@ where
 }
 
 fn annotate_subnet_state(
-    batch: &mut SubnetsBatch,
+    batch: &mut Batch,
     state: SubnetState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -195,7 +193,7 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        let mut rollout = RolloutIcOsToMainnetSubnets {
+        let mut rollout = Rollout {
             state: State::Preparing,
             batches: IndexMap::new(),
             conf: dag_run.conf.clone(),

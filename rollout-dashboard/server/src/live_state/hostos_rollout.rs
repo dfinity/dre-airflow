@@ -7,10 +7,8 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::v2::{
-    HostOsBatch, HostOsBatchState, HostOsNode, HostOsStages, RolloutIcOsToMainnetNodes,
-    RolloutIcOsToMainnetNodesState as State, RolloutKind,
-};
+use rollout_dashboard::types::v2::RolloutKind;
+use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Node, Rollout, Stages, State};
 use serde::Deserialize;
 use std::cmp::max;
 use std::cmp::min;
@@ -159,19 +157,19 @@ struct ProvisionalPlanBatch {
     start_at: python::PythonDateTime,
 }
 
-impl From<&ProvisionalPlanBatch> for HostOsBatch {
+impl From<&ProvisionalPlanBatch> for Batch {
     fn from(val: &ProvisionalPlanBatch) -> Self {
-        HostOsBatch {
+        Batch {
             planned_start_time: val.start_at.clone().into(),
             actual_start_time: None,
             end_time: None,
-            state: HostOsBatchState::Unknown,
+            state: BatchState::Unknown,
             comment: "".to_string(),
             display_url: "".into(),
             planned_nodes: val
                 .nodes
                 .iter()
-                .map(|n| HostOsNode {
+                .map(|n| Node {
                     node_id: n.node_id.clone(),
                 })
                 .collect(),
@@ -185,12 +183,12 @@ impl From<&ProvisionalPlanBatch> for HostOsBatch {
 /// to any known batch appears.  This can happen when nodes are added mid-rollout,
 /// and therefore the planning logic did not take them into account, but a late
 /// batch in the rollout finds them and goes to town on them.
-fn make_a_discovered_host_os_batch(val: &TaskInstancesResponseItem) -> HostOsBatch {
-    HostOsBatch {
+fn make_a_discovered_host_os_batch(val: &TaskInstancesResponseItem) -> Batch {
+    Batch {
         planned_start_time: val.earliest_date(),
         actual_start_time: None,
         end_time: None,
-        state: HostOsBatchState::Unknown,
+        state: BatchState::Unknown,
         comment: "".to_string(),
         display_url: "".into(),
         planned_nodes: vec![],
@@ -234,9 +232,9 @@ impl FromStr for ProvisionalHostOSPlan {
     }
 }
 
-impl From<&ProvisionalHostOSPlan> for HostOsStages {
+impl From<&ProvisionalHostOSPlan> for Stages {
     fn from(val: &ProvisionalHostOSPlan) -> Self {
-        HostOsStages {
+        Stages {
             canary: val
                 .canary
                 .clone()
@@ -294,12 +292,12 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut HostOsBatch,
-    state: HostOsBatchState,
+    batch: &mut Batch,
+    state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
     only_decrease: bool,
-) -> HostOsBatchState {
+) -> BatchState {
     let tgt = &(LOG_TARGET.to_owned() + "::annotate_batch_state");
     let new_state = state.clone();
     if (only_decrease && new_state < batch.state) || (!only_decrease && new_state != batch.state) {
@@ -354,7 +352,7 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        let mut rollout = RolloutIcOsToMainnetNodes {
+        let mut rollout = Rollout {
             state: State::Preparing,
             stages: None,
             conf: dag_run.conf.clone(),
@@ -369,7 +367,7 @@ impl Parser {
             };
         }
 
-        let rollout_stages: Arc<Mutex<Option<HostOsStages>>> = Arc::new(Mutex::new(None));
+        let rollout_stages: Arc<Mutex<Option<Stages>>> = Arc::new(Mutex::new(None));
 
         // Now update rollout and batch state based on the obtained data.
         // What this process does is fairly straightforward:
@@ -509,7 +507,7 @@ impl Parser {
                 match &task_instance.state {
                     None => {
                         if task_name == "plan" {
-                            trans_exact!(HostOsBatchState::Pending);
+                            trans_exact!(BatchState::Pending);
                         } else {
                             trace!(target: tgt, "{}: ignoring task instance {} {:?} with no state", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index);
                         }
@@ -524,18 +522,18 @@ impl Parser {
                             trace!(target: tgt, "{}: ignoring task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                         }
                         TaskInstanceState::Skipped => {
-                            trans_exact!(HostOsBatchState::Skipped);
+                            trans_exact!(BatchState::Skipped);
                         }
                         TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
-                            trans_min!(HostOsBatchState::Error);
+                            trans_min!(BatchState::Error);
                             rollout.state = min(rollout.state, State::Problem)
                         }
                         TaskInstanceState::Failed => {
-                            trans_min!(HostOsBatchState::Error);
+                            trans_min!(BatchState::Error);
                             rollout.state = min(rollout.state, State::Failed)
                         }
                         TaskInstanceState::UpstreamFailed => {
-                            trans_min!(HostOsBatchState::PredecessorFailed);
+                            trans_min!(BatchState::PredecessorFailed);
                             rollout.state = min(rollout.state, State::Failed)
                         }
                         TaskInstanceState::UpForReschedule
@@ -545,31 +543,31 @@ impl Parser {
                         | TaskInstanceState::Scheduled => {
                             match task_name {
                                 "plan" => {
-                                    trans_min!(HostOsBatchState::Pending);
+                                    trans_min!(BatchState::Pending);
                                 }
                                 "wait_until_start_time" => {
-                                    trans_min!(HostOsBatchState::Waiting);
+                                    trans_min!(BatchState::Waiting);
                                 }
                                 "collect_nodes" => {
-                                    trans_min!(HostOsBatchState::DeterminingTargets);
+                                    trans_min!(BatchState::DeterminingTargets);
                                 }
                                 "create_proposal_if_none_exists" => {
-                                    trans_min!(HostOsBatchState::Proposing);
+                                    trans_min!(BatchState::Proposing);
                                 }
                                 "request_proposal_vote" => {
                                     // We ignore this one for the purposes of rollout state setup.
                                 }
                                 "wait_until_proposal_is_accepted" => {
-                                    trans_min!(HostOsBatchState::WaitingForElection);
+                                    trans_min!(BatchState::WaitingForElection);
                                 }
                                 "wait_for_revision_adoption" => {
-                                    trans_min!(HostOsBatchState::WaitingForAdoption);
+                                    trans_min!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_until_nodes_healthy" => {
-                                    trans_min!(HostOsBatchState::WaitingUntilNodesHealthy);
+                                    trans_min!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {
-                                    trans_min!(HostOsBatchState::Complete);
+                                    trans_min!(BatchState::Complete);
                                 }
                                 &_ => {
                                     warn!(target: tgt, "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
@@ -613,7 +611,7 @@ impl Parser {
                                 // been preserved between this code (which works well) and
                                 // the future rewrite.
                                 "plan" => {
-                                    trans_min!(HostOsBatchState::Waiting);
+                                    trans_min!(BatchState::Waiting);
                                 }
                                 "wait_until_start_time" => {
                                     batch.actual_start_time = match task_instance.end_date {
@@ -627,7 +625,7 @@ impl Parser {
                                             }
                                         }
                                     };
-                                    trans_exact!(HostOsBatchState::DeterminingTargets);
+                                    trans_exact!(BatchState::DeterminingTargets);
                                 }
                                 "collect_nodes" => {
                                     let actual_plan = self
@@ -652,7 +650,7 @@ impl Parser {
                                         PlanQueryResult::Found(plan) => {
                                             batch.actual_nodes = Some(
                                                 plan.iter()
-                                                    .map(|n| HostOsNode {
+                                                    .map(|n| Node {
                                                         node_id: n.node_id.clone(),
                                                     })
                                                     .collect(),
@@ -664,28 +662,28 @@ impl Parser {
                                             return Err(RolloutDataGatherError::AirflowError(e));
                                         }
                                     };
-                                    trans_exact!(HostOsBatchState::Proposing);
+                                    trans_exact!(BatchState::Proposing);
                                 }
                                 "create_proposal_if_none_exists" => {
-                                    trans_exact!(HostOsBatchState::WaitingForElection);
+                                    trans_exact!(BatchState::WaitingForElection);
                                 }
                                 "request_proposal_vote" => {
                                     // We ignore this one for the purposes of rollout state setup.
                                 }
                                 "wait_until_proposal_is_accepted" => {
-                                    trans_exact!(HostOsBatchState::WaitingForAdoption);
+                                    trans_exact!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_for_revision_adoption" => {
-                                    trans_exact!(HostOsBatchState::WaitingUntilNodesHealthy);
+                                    trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
                                     // but the join task is not yet.
-                                    trans_exact!(HostOsBatchState::WaitingUntilNodesHealthy);
+                                    trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {
-                                    if batch.state != HostOsBatchState::Skipped {
-                                        trans_exact!(HostOsBatchState::Complete);
+                                    if batch.state != BatchState::Skipped {
+                                        trans_exact!(BatchState::Complete);
                                     }
                                     batch.end_time = task_instance.end_date;
                                 }
@@ -720,7 +718,7 @@ impl Parser {
         // Now remove all rollout stages not part of the original plan that do not
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
-        fn keep_batches_planned_or_provisional_with_tasks(m: &mut IndexMap<usize, HostOsBatch>) {
+        fn keep_batches_planned_or_provisional_with_tasks(m: &mut IndexMap<usize, Batch>) {
             let _: IndexMap<_, _> = m
                 .extract_if(.., |_, v| {
                     v.actual_nodes.clone().unwrap_or_default().is_empty()
