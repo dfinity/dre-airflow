@@ -2,14 +2,14 @@
     import Time from "svelte-time";
     import SvelteMarkdown from "svelte-markdown";
     import {
-        type RolloutIcOsToMainnetSubnets,
-        rolloutIcOsToMainnetSubnetsStateIcon,
-        rolloutIcOsToMainnetSubnetsStateName,
+        type GuestOsRollout,
+        guestOsStateIcon,
+        GuestOsStateName,
         rolloutKindName,
     } from "./types";
     import { cap, activeClass } from "./lib";
     import SubnetBatch from "./SubnetBatch.svelte";
-    export let rollout: RolloutIcOsToMainnetSubnets;
+    export let rollout: GuestOsRollout;
 
     let rolloutClass: String = activeClass(rollout.state);
 </script>
@@ -20,11 +20,11 @@
             rel="external"
             href={rollout.display_url}
             target="_blank"
-            title={cap(rolloutIcOsToMainnetSubnetsStateName(rollout))}
+            title={cap(GuestOsStateName(rollout))}
             data-sveltekit-preload-data="off"
         >
             <span class="state_icon">
-                {rolloutIcOsToMainnetSubnetsStateIcon(rollout)}
+                {guestOsStateIcon(rollout)}
             </span>
             <span class="kind">
                 {rolloutKindName(rollout)}
@@ -54,7 +54,7 @@
                 relative
                 timestamp={rollout.dispatch_time}
                 format="dddd @ h:mm A · MMMM D, YYYY"
-            />{#if rollout.last_scheduling_decision}, {rolloutIcOsToMainnetSubnetsStateName(
+            />{#if rollout.last_scheduling_decision}, {GuestOsStateName(
                     rollout,
                 )}
                 <Time

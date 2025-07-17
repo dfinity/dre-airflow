@@ -4,8 +4,8 @@
     import { toast } from "@zerodevx/svelte-toast";
     import {
         type ApiBoundaryNodesBatch,
-        apiBoundaryNodesBatchRolloutStateComment,
-        apiBoundaryNodesBatchRolloutStateIcon,
+        apiBoundaryNodesBatchStateComment,
+        apiBoundaryNodesBatchStateIcon,
     } from "./types";
     import { cap, selectTextOnFocus } from "./lib";
     export let batch_num: String;
@@ -23,10 +23,10 @@
                     target="_blank"
                     class="api_boundary_node_batch_state"
                     data-sveltekit-preload-data="off"
-                    title={cap(apiBoundaryNodesBatchRolloutStateComment(batch))}
+                    title={cap(apiBoundaryNodesBatchStateComment(batch))}
                 >
                     <div class="api_boundary_node_batch_state_icon">
-                        {apiBoundaryNodesBatchRolloutStateIcon(batch)}
+                        {apiBoundaryNodesBatchStateIcon(batch)}
                     </div></a
                 >
                 {#if node === batch.api_boundary_nodes[0]}

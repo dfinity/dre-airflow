@@ -2,14 +2,14 @@
     import Time from "svelte-time";
     import SvelteMarkdown from "svelte-markdown";
     import {
-        type RolloutIcOsToMainnetApiBoundaryNodes,
-        rolloutIcOsToMainnetApiBoundaryNodesStateName,
-        rolloutIcOsToMainnetApiBoundaryNodesStateIcon,
+        type ApiBoundaryNodesRollout,
+        apiBoundaryNodesStateName,
+        apiBoundaryNodesStateIcon,
         rolloutKindName,
     } from "./types";
     import { cap, activeClass } from "./lib";
     import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
-    export let rollout: RolloutIcOsToMainnetApiBoundaryNodes;
+    export let rollout: ApiBoundaryNodesRollout;
 
     let rolloutClass: string = rollout.state;
     if (rolloutClass !== "complete" && rolloutClass !== "failed") {
@@ -24,11 +24,11 @@
             rel="external"
             href={rollout.display_url}
             target="_blank"
-            title={cap(rolloutIcOsToMainnetApiBoundaryNodesStateName(rollout))}
+            title={cap(apiBoundaryNodesStateName(rollout))}
             data-sveltekit-preload-data="off"
         >
             <span class="state_icon">
-                {rolloutIcOsToMainnetApiBoundaryNodesStateIcon(rollout)}
+                {apiBoundaryNodesStateIcon(rollout)}
             </span>
             <span class="kind">
                 {rolloutKindName(rollout)}
@@ -58,7 +58,7 @@
                 relative
                 timestamp={rollout.dispatch_time}
                 format="dddd @ h:mm A · MMMM D, YYYY"
-            />{#if rollout.last_scheduling_decision}, {rolloutIcOsToMainnetApiBoundaryNodesStateName(
+            />{#if rollout.last_scheduling_decision}, {apiBoundaryNodesStateName(
                     rollout,
                 )}
                 <Time
