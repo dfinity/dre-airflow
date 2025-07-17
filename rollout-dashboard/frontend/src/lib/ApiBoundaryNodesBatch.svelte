@@ -37,7 +37,7 @@
             </li>
         </ul>
     {/each}
-    <div class="start_time text-gray-500">
+    <div class="time text-gray-500">
         Planned <Time
             live
             relative
@@ -46,7 +46,7 @@
         />
     </div>
     {#if batch.actual_start_time}
-        <div class="start_time text-gray-500">
+        <div class="time text-gray-500">
             Started <Time
                 live
                 relative
@@ -56,7 +56,7 @@
         </div>
     {/if}
     {#if batch.end_time}
-        <div class="start_time text-gray-500">
+        <div class="time text-gray-500">
             Finished <Time
                 live
                 relative
@@ -107,7 +107,8 @@
         text-decoration-style: dotted;
         text-decoration-color: #e4e4e4;
     }
-    .start_time {
+    .time {
         text-align: right;
+        white-space: nowrap; /* prevent breaking spaces */
     }
 </style>

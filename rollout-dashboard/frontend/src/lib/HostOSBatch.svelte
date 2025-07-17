@@ -25,23 +25,23 @@
             {hostOsBatchStateIcon(batch)}
         </div></a
     >
-    {#if batch.actual_nodes !== null && batch.actual_nodes.length != batch.planned_nodes.length}
-        <div class="node_count">
-            {batch.actual_nodes.length} nodes targeted
-        </div>
-        <div class="node_count">
+    {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
+        <div class="nodes">
             {batch.planned_nodes.length} nodes planned
         </div>
-    {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
-        <div class="node_count">
+        <div class="nodes">
             {batch.actual_nodes.length} nodes targeted
         </div>
-    {:else}
-        <div class="node_count">
+    {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}<!-- planned and actual are same nodes -->
+        <div class="nodes">
+            {batch.actual_nodes.length} nodes targeted
+        </div>
+    {:else}<!-- no actual nodes yet -->
+        <div class="nodes">
             {batch.planned_nodes.length} nodes planned
         </div>
     {/if}
-    <div class="start_time text-gray-500">
+    <div class="time text-gray-500">
         Planned <Time
             live
             relative
@@ -50,7 +50,7 @@
         />
     </div>
     {#if batch.actual_start_time}
-        <div class="start_time text-gray-500">
+        <div class="time text-gray-500">
             Started <Time
                 live
                 relative
@@ -60,7 +60,7 @@
         </div>
     {/if}
     {#if batch.end_time}
-        <div class="start_time text-gray-500">
+        <div class="time text-gray-500">
             Finished <Time
                 live
                 relative
@@ -77,14 +77,15 @@
         padding: 0.6em;
         flex-grow: 1;
     }
-    li.batch .hostos_node_batch_state div {
+    li.batch a.hostos_node_batch_state div {
         min-width: 1.8em;
         float: left;
         margin-top: -2px;
         text-align: left;
     }
-    .start_time,
-    .node_count {
+    .time,
+    .nodes {
         text-align: right;
+        white-space: nowrap; /* prevent breaking spaces */
     }
 </style>

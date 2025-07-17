@@ -252,6 +252,10 @@
         text-align: center;
         writing-mode: vertical-lr;
         text-orientation: mixed;
+        padding-top: 1em; /* add padding to the pills on the right side of each stage */
+        padding-bottom: 1em;
+        padding-left: 0.3em;
+        padding-right: 0.3em;
     }
     div.stage-name.stage-canary {
         background-color: #e1e0d2;
