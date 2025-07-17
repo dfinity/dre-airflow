@@ -99,7 +99,7 @@ for network_name, network in IC_NETWORKS.items():
             "plan": Param(
                 default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
-                title="Rollout plan.",
+                title="Rollout plan",
                 description_md=ROLLOUT_PLAN_HELP,
                 **format,
             ),

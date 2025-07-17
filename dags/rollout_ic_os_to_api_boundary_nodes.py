@@ -96,7 +96,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 "0000000000000000000000000000000000000000",
                 type="string",
                 pattern="^[a-f0-9]{40}$",
-                title="Main Git revision",
+                title="Git revision",
                 description="Git revision of the IC OS GuestOS release to roll out to"
                 " subnets, unless specified otherwise directly for a specific subnet;"
                 " the version must have been elected before but the rollout will"
@@ -105,7 +105,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
             "plan": Param(
                 default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
-                title="Rollout plan.",
+                title="Rollout plan",
                 description_md=ROLLOUT_PLAN_HELP,
                 **format,
             ),
