@@ -175,9 +175,27 @@ impl From<&ProvisionalPlanBatch> for HostOsBatch {
                     node_id: n.node_id.clone(),
                 })
                 .collect(),
-            actual_nodes: vec![],
+            actual_nodes: None,
             present_in_provisional_plan: true,
         }
+    }
+}
+
+/// This function is only called when a task instance that does not correspond
+/// to any known batch appears.  This can happen when nodes are added mid-rollout,
+/// and therefore the planning logic did not take them into account, but a late
+/// batch in the rollout finds them and goes to town on them.
+fn make_a_discovered_host_os_batch(val: &TaskInstancesResponseItem) -> HostOsBatch {
+    HostOsBatch {
+        planned_start_time: val.earliest_date(),
+        actual_start_time: None,
+        end_time: None,
+        state: HostOsBatchState::Unknown,
+        comment: "".to_string(),
+        display_url: "".into(),
+        planned_nodes: vec![],
+        actual_nodes: None,
+        present_in_provisional_plan: false,
     }
 }
 
@@ -473,17 +491,9 @@ impl Parser {
                     _ => continue,
                 };
 
-                let batch = stage.entry(stage_number).or_insert(HostOsBatch {
-                    planned_start_time: task_instance.earliest_date(),
-                    actual_start_time: None,
-                    end_time: None,
-                    state: HostOsBatchState::Unknown,
-                    comment: "".to_string(),
-                    display_url: "".to_string(),
-                    planned_nodes: vec![],
-                    actual_nodes: vec![],
-                    present_in_provisional_plan: false,
-                });
+                let batch = stage
+                    .entry(stage_number)
+                    .or_insert(make_a_discovered_host_os_batch(&task_instance));
 
                 macro_rules! trans_min {
                     ($input:expr) => {
@@ -640,12 +650,13 @@ impl Parser {
                                         .await
                                     {
                                         PlanQueryResult::Found(plan) => {
-                                            batch.actual_nodes = plan
-                                                .iter()
-                                                .map(|n| HostOsNode {
-                                                    node_id: n.node_id.clone(),
-                                                })
-                                                .collect()
+                                            batch.actual_nodes = Some(
+                                                plan.iter()
+                                                    .map(|n| HostOsNode {
+                                                        node_id: n.node_id.clone(),
+                                                    })
+                                                    .collect(),
+                                            )
                                         }
                                         PlanQueryResult::Invalid => {}
                                         PlanQueryResult::NotFound => {}
@@ -709,32 +720,20 @@ impl Parser {
         // Now remove all rollout stages not part of the original plan that do not
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
+        fn keep_batches_planned_or_provisional_with_tasks(m: &mut IndexMap<usize, HostOsBatch>) {
+            let _: IndexMap<_, _> = m
+                .extract_if(.., |_, v| {
+                    v.actual_nodes.clone().unwrap_or_default().is_empty()
+                        && !v.present_in_provisional_plan
+                })
+                .collect();
+        }
         rollout.stages = match final_rollout_stages {
             Some(mut stages) => {
-                let _: IndexMap<_, _> = stages
-                    .canary
-                    .extract_if(.., |_, v| {
-                        v.actual_nodes.is_empty() && !v.present_in_provisional_plan
-                    })
-                    .collect();
-                let _: IndexMap<_, _> = stages
-                    .main
-                    .extract_if(.., |_, v| {
-                        v.actual_nodes.is_empty() && !v.present_in_provisional_plan
-                    })
-                    .collect();
-                let _: IndexMap<_, _> = stages
-                    .unassigned
-                    .extract_if(.., |_, v| {
-                        v.actual_nodes.is_empty() && !v.present_in_provisional_plan
-                    })
-                    .collect();
-                let _: IndexMap<_, _> = stages
-                    .stragglers
-                    .extract_if(.., |_, v| {
-                        v.actual_nodes.is_empty() && !v.present_in_provisional_plan
-                    })
-                    .collect();
+                keep_batches_planned_or_provisional_with_tasks(&mut stages.canary);
+                keep_batches_planned_or_provisional_with_tasks(&mut stages.main);
+                keep_batches_planned_or_provisional_with_tasks(&mut stages.unassigned);
+                keep_batches_planned_or_provisional_with_tasks(&mut stages.stragglers);
                 Some(stages)
             }
             None => None,

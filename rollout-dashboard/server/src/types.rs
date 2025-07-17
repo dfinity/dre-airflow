@@ -428,8 +428,11 @@ pub mod v2 {
         pub planned_nodes: Vec<HostOsNode>,
         /// A count of the nodes that actually were or are upgraded as part of this batch.
         /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
-        pub actual_nodes: Vec<HostOsNode>,
+        /// If that phase of the batch has yet to take place, this is usually null.
+        pub actual_nodes: Option<Vec<HostOsNode>>,
         #[serde(skip_serializing)]
+        /// Internal flag used to prune batches that haven't yet run, or have run but
+        /// had no nodes assigned to them.
         pub present_in_provisional_plan: bool,
     }
 
