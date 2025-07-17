@@ -1,5 +1,7 @@
 <script lang="ts">
     import Time from "svelte-time";
+    import { copy } from "svelte-copy";
+    import { toast } from "@zerodevx/svelte-toast";
     import SvelteMarkdown from "svelte-markdown";
     import {
         type ApiBoundaryNodesRollout,
@@ -7,14 +9,11 @@
         apiBoundaryNodesStateIcon,
         rolloutKindName,
     } from "./types";
-    import { cap, activeClass } from "./lib";
+    import { cap, activeClass, selectTextOnFocus } from "./lib";
     import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
     export let rollout: ApiBoundaryNodesRollout;
 
-    let rolloutClass: string = rollout.state;
-    if (rolloutClass !== "complete" && rolloutClass !== "failed") {
-        rolloutClass = "active";
-    }
+    let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
 </script>
 
@@ -74,10 +73,34 @@
             <SvelteMarkdown source={rollout.note} />
         </div>
     {/if}
+    <div class="rollout_info space-y-4 text-gray-500">
+        Git revision:
+        <div
+            class="git_revision"
+            role="link"
+            tabindex="0"
+            use:copy={git_revision}
+            use:selectTextOnFocus
+            on:svelte-copy={(event) =>
+                toast.push("Copied git revision to clipboard")}
+        >
+            <svg
+                class="w-3 h-3 me-1.5"
+                aria-hidden="true"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="currentColor"
+                viewBox="0 0 18 20"
+            >
+                <path
+                    d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
+                />
+            </svg>{git_revision}
+        </div>
+    </div>
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
         <ul>
             {#each Object.entries(rollout.batches) as [batch_num, batch]}
-                <ApiBoundaryNodesBatch {batch_num} {batch} {git_revision} />
+                <ApiBoundaryNodesBatch {batch_num} {batch} />
             {/each}
         </ul>
     {:else}
@@ -131,10 +154,35 @@
     .rollout.failed {
         border-left: 10px solid #b34242;
     }
-    .rollout .general_info {
+    .rollout .general_info,
+    .rollout .rollout_info {
         display: flex;
         gap: 0.3em;
         flex-direction: row;
+    }
+    .rollout .rollout_info {
+        justify-content: flex-end;
+    }
+    .git_revision {
+        display: inline;
+        color: #999;
+        text-overflow: ellipsis;
+        overflow-x: hidden;
+        font-family: monospace;
+        font-size: 120%;
+        text-align: right;
+    }
+    .git_revision {
+        cursor: copy;
+    }
+    .git_revision svg {
+        display: none;
+    }
+    .git_revision:hover svg {
+        display: block;
+        position: absolute;
+        margin-left: -1em;
+        margin-top: 0.35em;
     }
     .rollout a {
         order: 0;
