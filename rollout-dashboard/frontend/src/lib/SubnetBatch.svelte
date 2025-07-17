@@ -4,13 +4,13 @@
     import { toast } from "@zerodevx/svelte-toast";
     import { selectTextOnFocus } from "./lib";
     import {
-        type SubnetBatch,
+        type GuestOsBatch,
         subnetStateComment,
         subnetStateIcon,
     } from "./types";
     import { cap } from "./lib";
     export let batch_num: String;
-    export let batch: SubnetBatch;
+    export let batch: GuestOsBatch;
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">

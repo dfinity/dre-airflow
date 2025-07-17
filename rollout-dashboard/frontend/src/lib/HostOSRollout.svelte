@@ -4,14 +4,14 @@
     import { toast } from "@zerodevx/svelte-toast";
     import SvelteMarkdown from "svelte-markdown";
     import {
-        type ApiBoundaryNodesRollout,
-        apiBoundaryNodesStateName,
-        apiBoundaryNodesStateIcon,
+        type HostOsRollout,
+        hostOsStateName,
+        hostOsStateIcon,
         rolloutKindName,
     } from "./types";
     import { cap, activeClass, selectTextOnFocus } from "./lib";
-    import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
-    export let rollout: ApiBoundaryNodesRollout;
+    import HostOSBatch from "./HostOSBatch.svelte";
+    export let rollout: HostOsRollout;
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
@@ -23,11 +23,11 @@
             rel="external"
             href={rollout.display_url}
             target="_blank"
-            title={cap(apiBoundaryNodesStateName(rollout))}
+            title={cap(hostOsStateName(rollout))}
             data-sveltekit-preload-data="off"
         >
             <span class="state_icon">
-                {apiBoundaryNodesStateIcon(rollout)}
+                {hostOsStateIcon(rollout)}
             </span>
             <span class="kind">
                 {rolloutKindName(rollout)}
@@ -57,9 +57,7 @@
                 relative
                 timestamp={rollout.dispatch_time}
                 format="dddd @ h:mm A · MMMM D, YYYY"
-            />{#if rollout.last_scheduling_decision}, {apiBoundaryNodesStateName(
-                    rollout,
-                )}
+            />{#if rollout.last_scheduling_decision}, {hostOsStateName(rollout)}
                 <Time
                     live
                     relative
@@ -97,12 +95,53 @@
             </svg>{git_revision}
         </div>
     </div>
-    {#if rollout.batches && Object.keys(rollout.batches).length > 0}
-        <ul>
-            {#each Object.entries(rollout.batches) as [batch_num, batch]}
-                <ApiBoundaryNodesBatch {batch_num} {batch} />
-            {/each}
-        </ul>
+    {#if rollout.stages}
+        <div class="stages">
+            {#if rollout.stages.canary["1"] !== undefined}
+                <ul class="stage-canary">
+                    {#each Object.entries(rollout.stages.canary) as [batch_num, batch]}
+                        <HostOSBatch {batch_num} {batch} />
+                    {/each}
+                </ul>
+                <div class="stage-canary stage-name text-gray-500 rounded-lg">
+                    Canary
+                </div>
+            {/if}
+            {#if rollout.stages.main["1"] !== undefined}
+                <ul class="stage-main">
+                    {#each Object.entries(rollout.stages.main) as [batch_num, batch]}
+                        <HostOSBatch {batch_num} {batch} />
+                    {/each}
+                </ul>
+                <div class="stage-main stage-name text-gray-500 rounded-lg">
+                    Main
+                </div>
+            {/if}
+            {#if rollout.stages.unassigned["1"] !== undefined}
+                <ul class="stage-unassigned">
+                    {#each Object.entries(rollout.stages.unassigned) as [batch_num, batch]}
+                        <HostOSBatch {batch_num} {batch} />
+                    {/each}
+                </ul>
+                <div
+                    class="stage-unassigned stage-name text-gray-500 rounded-lg"
+                >
+                    Unassigned
+                </div>
+            {/if}
+            {#if rollout.stages.stragglers["1"] !== undefined}
+                <ul class="stage-stragglers">
+                    {#each Object.entries(rollout.stages.stragglers) as [batch_num, batch]}
+                        <HostOSBatch {batch_num} {batch} />
+                    {/each}
+                </ul>
+                <div
+                    class="stage-stragglers stage-name text-gray-500 rounded-lg"
+                >
+                    Stragglers
+                </div>
+            {/if}
+        </div>
     {:else}
         <div
             class="flex items-center p-4 text-sm text-gray-800 border border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600"
@@ -126,6 +165,10 @@
             </div>
         </div>
     {/if}
+    <!-- 
+    {#if rollout.batches && Object.keys(rollout.batches).length > 0}
+    {:else}
+    {/if}-->
 </section>
 
 <style>
@@ -184,6 +227,7 @@
         margin-left: -1em;
         margin-top: 0.35em;
     }
+
     .rollout a {
         order: 0;
         flex-grow: 1;
@@ -198,5 +242,27 @@
     }
     .rollout .times {
         order: 1;
+    }
+    div.stages {
+        display: grid;
+        grid-template-columns: auto min-content;
+        gap: 0.6em;
+    }
+    div.stage-name {
+        text-align: center;
+        writing-mode: vertical-lr;
+        text-orientation: mixed;
+    }
+    div.stage-name.stage-canary {
+        background-color: #e1e0d2;
+    }
+    div.stage-name.stage-main {
+        background-color: #d2e1d4;
+    }
+    div.stage-name.stage-unassigned {
+        background-color: #d2dce1;
+    }
+    div.stage-name.stage-stragglers {
+        background-color: #dcd2e1;
     }
 </style>

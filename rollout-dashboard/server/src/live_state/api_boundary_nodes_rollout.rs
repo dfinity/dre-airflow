@@ -1,6 +1,6 @@
-use super::{
-    RolloutDataGatherError, plan::PlanCache, plan::PlanQueryResult, plan::fetch_xcom, python,
-};
+use crate::live_state::python::PythonDateTime;
+
+use super::{RolloutDataGatherError, plan::PlanCache, plan::PlanQueryResult, plan::fetch_xcom};
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -9,11 +9,9 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::v2::{
-    ApiBoundaryNode, ApiBoundaryNodesBatch, ApiBoundaryNodesBatchState as BatchState,
-    RolloutIcOsToMainnetApiBoundaryNodes, RolloutIcOsToMainnetApiBoundaryNodesState as State,
-    RolloutKind,
-};
+use rollout_dashboard::types::v2::RolloutKind;
+use rollout_dashboard::types::v2::api_boundary_nodes::{Batch, BatchState, Node, Rollout, State};
+use std::cmp::max;
 use std::cmp::min;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -38,7 +36,7 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut ApiBoundaryNodesBatch,
+    batch: &mut Batch,
     state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -86,41 +84,22 @@ struct Plan {
     batches: BatchMap,
 }
 
-type PythonFormattedPlan = Vec<(String, Vec<String>)>;
+type PythonFormattedPlan = Vec<(PythonDateTime, Vec<String>)>;
 
-impl FromStr for Plan {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
+impl From<PythonFormattedPlan> for Plan {
+    fn from(value: PythonFormattedPlan) -> Plan {
         let mut res = Plan {
             batches: IndexMap::new(),
         };
-        let python_string_plan: PythonFormattedPlan = match python::from_str(value) {
-            Ok(s) => s,
-            Err(e) => return Err(format!("Could not decipher the Python string: {}", e)),
-        };
-        for (batch_number, (start_time_str, api_boundary_nodes)) in
-            python_string_plan.into_iter().enumerate()
-        {
-            let start_time: DateTime<Utc> = match DateTime::parse_from_str(
-                start_time_str.as_str(),
-                "datetime.datetime@version=2(timestamp=%s%.f,tz=None)",
-            ) {
-                Ok(s) => s.with_timezone(&Utc),
-                Err(e) => {
-                    return Err(format!(
-                        "Could not parse date/time {}: {}",
-                        start_time_str, e
-                    ));
-                }
-            };
-            let batch = ApiBoundaryNodesBatch {
+        for (batch_number, (start_time_str, api_boundary_nodes)) in value.into_iter().enumerate() {
+            let start_time: DateTime<Utc> = start_time_str.clone().into();
+            let batch = Batch {
                 planned_start_time: start_time,
                 actual_start_time: None,
                 end_time: None,
                 api_boundary_nodes: api_boundary_nodes
                     .into_iter()
-                    .map(|i| ApiBoundaryNode { node_id: i })
+                    .map(|i| Node { node_id: i.clone() })
                     .collect(),
                 state: BatchState::Unknown,
                 comment: "".into(),
@@ -128,15 +107,15 @@ impl FromStr for Plan {
             };
             res.batches.insert(batch_number + 1, batch);
         }
-        Ok(res)
+        res
     }
 }
 
-type BatchMap = IndexMap<usize, ApiBoundaryNodesBatch>;
+type BatchMap = IndexMap<usize, Batch>;
 
 #[derive(Clone, Default)]
 pub(super) struct Parser {
-    schedule: PlanCache<Plan>,
+    schedule: PlanCache<PythonFormattedPlan>,
 }
 
 impl Parser {
@@ -150,11 +129,20 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        let mut rollout = RolloutIcOsToMainnetApiBoundaryNodes {
-            state: State::Complete,
+        let mut rollout = Rollout {
+            state: State::Preparing,
             batches: IndexMap::new(),
             conf: dag_run.conf.clone(),
         };
+
+        macro_rules! update_state_unless_problem {
+            ($input:expr) => {
+                match &rollout.state {
+                    State::Problem | State::Failed => {}
+                    _ => rollout.state = max(rollout.state, $input),
+                }
+            };
+        }
 
         // Now update rollout and batch state based on the obtained data.
         // What this process does is fairly straightforward:
@@ -186,8 +174,9 @@ impl Parser {
                     | Some(TaskInstanceState::Running)
                     | Some(TaskInstanceState::Deferred)
                     | Some(TaskInstanceState::Queued)
-                    | Some(TaskInstanceState::Scheduled)
-                    | None => rollout.state = min(rollout.state, State::Preparing),
+                    | Some(TaskInstanceState::Scheduled) => {
+                        update_state_unless_problem!(State::Preparing)
+                    }
                     Some(TaskInstanceState::Success) => {
                         rollout.batches = match self
                             .schedule
@@ -204,14 +193,16 @@ impl Parser {
                             )
                             .await
                         {
-                            PlanQueryResult::Found(plan) => plan.batches,
+                            PlanQueryResult::Found(plan) => Plan::from(plan).batches,
                             PlanQueryResult::Invalid => continue,
                             PlanQueryResult::NotFound => continue,
                             PlanQueryResult::Error(e) => {
                                 return Err(RolloutDataGatherError::AirflowError(e));
                             }
                         };
+                        update_state_unless_problem!(State::Waiting)
                     }
+                    None => {}
                 }
             } else if task_instance.task_id == "wait_for_other_rollouts"
                 || task_instance.task_id == "wait_for_revision_to_be_elected"
@@ -229,8 +220,8 @@ impl Parser {
                     | Some(TaskInstanceState::Deferred)
                     | Some(TaskInstanceState::Queued)
                     | Some(TaskInstanceState::Scheduled)
-                    | None => rollout.state = min(rollout.state, State::Waiting),
-                    Some(TaskInstanceState::Success) => {}
+                    | Some(TaskInstanceState::Success)
+                    | None => {}
                 }
             } else if let Some(captured) =
                 BatchIdentificationRe.captures(task_instance.task_id.as_str())
@@ -328,83 +319,60 @@ impl Parser {
                                     trans_min!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {
-                                    trans_min!(BatchState::Complete);
+                                    trans_min!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 &_ => {
                                     warn!(target: tgt, "{}: no info on to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
                                 }
                             }
-                            rollout.state = min(rollout.state, State::UpgradingApiBoundaryNodes)
+                            update_state_unless_problem!(State::UpgradingApiBoundaryNodes)
                         }
-                        TaskInstanceState::Success => match task_name {
-                            // Tasks corresponding to a subnet that are in state Success
-                            // require somewhat different handling than tasks in states
-                            // Running et al.  For once, when a task is successful,
-                            // the subnet state must be set to the *next* state it *would*
-                            // have, if the /next/ task had /already begun executing/.
-                            //
-                            // To give an example: if `wait_until_start_time`` is Success,
-                            // the subnet state is no longer "waiting until start time",
-                            // but rather should be "creating proposal", even though
-                            // perhaps `create_proposal_if_none_exists`` /has not yet run/
-                            // because we know certainly that the
-                            // `create_proposal_if_none_exists` task is /about to run/
-                            // anyway.
-                            //
-                            // The same principle applies for all tasks -- if the current
-                            // task is successful, we set the state of the subnet to the
-                            // expected state that corresponds to the successor task.
-                            //
-                            // We could avoid encoding this type of knowledge here, by
-                            // having a table of Airflow tasks vs. expected subnet states,
-                            // and as a special case, on the task Success case, look up the
-                            // successor task on the table to decide what subnet state to
-                            // assign, but this would require a data structure different
-                            // from the current (a vector of ordered task instances) to
-                            // iterate over.  This refactor may happen in the future, and
-                            // it will require extra tests to ensure that invariants have
-                            // been preserved between this code (which works well) and
-                            // the future rewrite.
-                            "prepare" => {
-                                trans_min!(BatchState::Waiting);
-                            }
-                            "wait_until_start_time" => {
-                                batch.actual_start_time = match task_instance.end_date {
-                                    None => batch.actual_start_time,
-                                    Some(end_date) => {
-                                        if batch.actual_start_time.is_none() {
-                                            Some(end_date)
-                                        } else {
-                                            let stime = batch.actual_start_time.unwrap();
-                                            Some(min(stime, end_date))
+                        TaskInstanceState::Success => {
+                            match task_name {
+                                "prepare" => {
+                                    trans_min!(BatchState::Waiting);
+                                }
+                                "wait_until_start_time" => {
+                                    batch.actual_start_time = match task_instance.end_date {
+                                        None => batch.actual_start_time,
+                                        Some(end_date) => {
+                                            if batch.actual_start_time.is_none() {
+                                                Some(end_date)
+                                            } else {
+                                                let stime = batch.actual_start_time.unwrap();
+                                                Some(min(stime, end_date))
+                                            }
                                         }
-                                    }
-                                };
-                                trans_exact!(BatchState::Waiting);
-                            }
-                            "create_proposal_if_none_exists" => {
-                                trans_exact!(BatchState::WaitingForElection);
-                            }
-                            "request_proposal_vote" => {
-                                // We ignore this one for the purposes of rollout state setup.
-                            }
-                            "wait_until_proposal_is_accepted" => {
-                                trans_exact!(BatchState::WaitingForAdoption);
-                            }
-                            "wait_for_revision_adoption" => {
-                                trans_exact!(BatchState::WaitingUntilNodesHealthy);
-                            }
-                            "wait_until_nodes_healthy" => {
-                                trans_exact!(BatchState::Complete);
-                            }
-                            "join" => {
-                                trans_exact!(BatchState::Complete);
-                                batch.end_time = task_instance.end_date;
-                            }
-                            &_ => {
-                                warn!(target: tgt, "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
-                            }
-                        },
+                                    };
+                                    trans_exact!(BatchState::Waiting);
+                                }
+                                "create_proposal_if_none_exists" => {
+                                    trans_exact!(BatchState::WaitingForElection);
+                                }
+                                "request_proposal_vote" => {
+                                    // We ignore this one for the purposes of rollout state setup.
+                                }
+                                "wait_until_proposal_is_accepted" => {
+                                    trans_exact!(BatchState::WaitingForAdoption);
+                                }
+                                "wait_for_revision_adoption" => {
+                                    trans_exact!(BatchState::WaitingUntilNodesHealthy);
+                                }
+                                "wait_until_nodes_healthy" => {
+                                    // We don't have a state for when this task is completed,
+                                    // but the join task is not yet.
+                                    trans_exact!(BatchState::WaitingUntilNodesHealthy);
+                                }
+                                "join" => {
+                                    trans_exact!(BatchState::Complete);
+                                    batch.end_time = task_instance.end_date;
+                                }
+                                &_ => {
+                                    warn!(target: tgt, "{}: no info on how to handle task instance {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
+                                }
+                            };
+                            update_state_unless_problem!(State::UpgradingApiBoundaryNodes)
+                        }
                     },
                 }
             } else {

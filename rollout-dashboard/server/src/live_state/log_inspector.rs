@@ -66,7 +66,6 @@ impl AirflowIncrementalLogInspector {
         airflow_api: &AirflowClient,
         dag_id: &DagID,
     ) -> Result<(Self, DagRunUpdatesRequired), AirflowError> {
-        // FIXME this needs to be by dag run ID too!
         let tgt = &format!("{}::{}", LOG_TARGET, dag_id);
         let mut task_instances_to_update_per_dag = DagRunUpdatesRequired::new();
 

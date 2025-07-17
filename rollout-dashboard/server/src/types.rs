@@ -56,13 +56,13 @@ pub mod v1 {
         pub subnets: Vec<Subnet>,
     }
 
-    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Deserialize, Default)] // FIXME remove default
+    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Deserialize, Default)]
     #[serde(rename_all = "snake_case")]
     /// Represents the rollout state.
     // Ordering matters here.
     pub enum RolloutState {
         /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
-        #[default] // FIXME remove default
+        #[default]
         Failed,
         /// The rollout is experiencing a retryable issue.  It continues to execute.
         Problem,
@@ -129,7 +129,7 @@ pub mod v1 {
         fn from(rollout: super::v1::Rollout) -> super::v2::Rollout {
             super::v2::Rollout {
                 kind: super::v2::RolloutKind::RolloutIcOsToMainnetSubnets(
-                    super::v2::RolloutIcOsToMainnetSubnets {
+                    super::v2::guestos::Rollout {
                         state: rollout.state,
                         batches: rollout.batches,
                         conf: rollout.conf,
@@ -253,10 +253,7 @@ pub mod v1 {
 }
 
 pub mod v2 {
-    pub use super::v1::{
-        Batch as SubnetsBatch, RolloutState as RolloutIcOsToMainnetSubnetsState, Subnet,
-        SubnetRolloutState,
-    };
+
     use crate::airflow_client::{DagsResponse, DagsResponseItem};
     use chrono::{DateTime, Utc};
     use indexmap::IndexMap;
@@ -264,100 +261,228 @@ pub mod v2 {
     use serde::Serialize;
     use serde::Serializer;
     use std::collections::VecDeque;
-    use strum::Display;
 
-    /// Represents a rollout of GuestOS to mainnet subnets.
-    #[derive(Debug, Serialize, Clone, Default)] // FIXME remove default
-    pub struct RolloutIcOsToMainnetSubnets {
-        pub state: RolloutIcOsToMainnetSubnetsState,
-        /// Associative array of `{batch ID -> Batch}` planned for the rollout.
-        pub batches: IndexMap<usize, SubnetsBatch>,
-        /// Configuration associated to the rollout.
-        pub conf: IndexMap<String, serde_json::Value>,
+    pub mod guestos {
+        pub use super::super::v1::{
+            Batch, RolloutState as State, Subnet, SubnetRolloutState as SubnetState,
+        };
+        use indexmap::IndexMap;
+        use serde::Serialize;
+
+        /// Represents a rollout of GuestOS to mainnet subnets.
+        #[derive(Debug, Serialize, Clone, Default)]
+        pub struct Rollout {
+            pub state: State,
+            /// Associative array of `{batch ID -> Batch}` planned for the rollout.
+            pub batches: IndexMap<usize, Batch>,
+            /// Configuration associated to the rollout.
+            pub conf: IndexMap<String, serde_json::Value>,
+        }
     }
 
-    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
-    #[serde(rename_all = "snake_case")]
-    /// Represents the state of the rollout using this struct.
-    // Ordering matters here.
-    pub enum RolloutIcOsToMainnetApiBoundaryNodesState {
-        /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
-        Failed,
-        /// The rollout is experiencing a retryable issue.  It continues to execute.
-        Problem,
-        /// The rollout is in the planning stage.
-        /// This is true if the rollout is still executing task
-        /// schedule.
-        Preparing,
-        /// The rollout is waiting until all preconditions have been met.
-        /// This is true if the task schedule is done, but the tasks
-        /// wait_for_other_rollouts and wait_for_revision_to_be_elected
-        /// are not finished yet.
-        Waiting,
-        /// The rollout is upgrading API boundary nodes batch by batch.
-        UpgradingApiBoundaryNodes,
-        /// The rollout has finished successfully or was marked as such by the operator.
-        Complete,
+    pub mod api_boundary_nodes {
+        use chrono::{DateTime, Utc};
+        use indexmap::IndexMap;
+        use serde::Serialize;
+        use std::vec::Vec;
+        use strum::Display;
+
+        #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+        #[serde(rename_all = "snake_case")]
+        /// Represents the state of the rollout using this struct.
+        // Ordering matters here.
+        pub enum State {
+            /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
+            Failed,
+            /// The rollout is experiencing a retryable issue.  It continues to execute.
+            Problem,
+            /// The rollout is in the planning stage.
+            /// This is true if the rollout is still executing task
+            /// schedule.
+            Preparing,
+            /// The rollout is waiting until all preconditions have been met.
+            /// This is true if the task schedule is done, but the tasks
+            /// wait_for_other_rollouts and wait_for_revision_to_be_elected
+            /// are not finished yet.
+            Waiting,
+            /// The rollout is upgrading API boundary nodes batch by batch.
+            UpgradingApiBoundaryNodes,
+            /// The rollout has finished successfully or was marked as such by the operator.
+            Complete,
+        }
+
+        /// Represents an API boundary node being targeted by the rollout.
+        #[derive(Serialize, Debug, Clone)]
+        pub struct Node {
+            /// This is the node ID.
+            pub node_id: String,
+        }
+
+        #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
+        #[serde(rename_all = "snake_case")]
+        /// Represents the rollout state of a subnet.
+        // Ordering matters here.
+        pub enum BatchState {
+            Error,
+            PredecessorFailed,
+            Pending,
+            Waiting,
+            Proposing,
+            WaitingForElection,
+            WaitingForAdoption,
+            WaitingUntilNodesHealthy,
+            Complete,
+            Unknown,
+        }
+
+        #[derive(Serialize, Debug, Clone)]
+        /// Represents a batch of subnets to upgrade.
+        pub struct Batch {
+            /// The time the batch was programmed to start at.
+            pub planned_start_time: DateTime<Utc>,
+            /// The actual observed start time of the batch.
+            pub actual_start_time: Option<DateTime<Utc>>,
+            /// The time of the last action associated with this batch, if any.
+            pub end_time: Option<DateTime<Utc>>,
+            pub state: BatchState,
+            /// Shows a comment for the batch if it is available; else it contains an empty string.
+            pub comment: String,
+            /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
+            pub display_url: String,
+            /// A list of API boundary nodes to be upgraded as part of this batch.
+            pub api_boundary_nodes: Vec<Node>,
+        }
+
+        /// Represents a rollout of GuestOS to mainnet API boundary nodes.
+        #[derive(Debug, Serialize, Clone)]
+        pub struct Rollout {
+            pub state: State,
+            /// Associative array of `{batch ID -> Batch}` planned for the rollout.
+            pub batches: IndexMap<usize, Batch>,
+            /// Configuration associated to the rollout.
+            pub conf: IndexMap<String, serde_json::Value>,
+        }
     }
 
-    /// Represents an API boundary node being targeted by the rollout.
-    #[derive(Serialize, Debug, Clone)]
-    pub struct ApiBoundaryNode {
-        /// This is the node ID.
-        pub node_id: String,
-    }
+    pub mod hostos {
 
-    #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
-    #[serde(rename_all = "snake_case")]
-    /// Represents the rollout state of a subnet.
-    // Ordering matters here.
-    pub enum ApiBoundaryNodesBatchState {
-        Error,
-        PredecessorFailed,
-        Pending,
-        Waiting,
-        Proposing,
-        WaitingForElection,
-        WaitingForAdoption,
-        WaitingUntilNodesHealthy,
-        Complete,
-        Unknown,
-    }
+        use chrono::{DateTime, Utc};
+        use indexmap::IndexMap;
+        use serde::Serialize;
+        use strum::Display;
 
-    #[derive(Serialize, Debug, Clone)]
-    /// Represents a batch of subnets to upgrade.
-    pub struct ApiBoundaryNodesBatch {
-        /// The time the batch was programmed to start at.
-        pub planned_start_time: DateTime<Utc>,
-        /// The actual observed start time of the batch.
-        pub actual_start_time: Option<DateTime<Utc>>,
-        /// The time of the last action associated with this batch, if any.
-        pub end_time: Option<DateTime<Utc>>,
-        pub state: ApiBoundaryNodesBatchState,
-        /// Shows a comment for the batch if it is available; else it contains an empty string.
-        pub comment: String,
-        /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
-        pub display_url: String,
-        /// A list of API boundary nodes to be upgraded as part of this batch.
-        pub api_boundary_nodes: Vec<ApiBoundaryNode>,
-    }
+        #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+        #[serde(rename_all = "snake_case")]
+        /// Represents the state of the rollout using this struct.
+        // Ordering matters here.
+        pub enum State {
+            /// The rollout has failed or was abandoned by the operator.  It is not executing any longer.
+            Failed,
+            /// The rollout is experiencing a retryable issue.  It continues to execute.
+            Problem,
+            /// The rollout is in the planning stage.
+            /// This is true if the rollout is still executing task
+            /// schedule.
+            Preparing,
+            /// The rollout is waiting until all preconditions have been met.
+            /// This is true if the task schedule is done, but the tasks
+            /// wait_for_other_rollouts and wait_for_revision_to_be_elected
+            /// are not finished yet.
+            Waiting,
+            /// The rollout is upgrading nodes in the canary stage.
+            Canary,
+            /// The rollout is upgrading nodes in the main stage.
+            Main,
+            /// The rollout is upgrading nodes in the unassigned stage.
+            Unassigned,
+            /// The rollout is updating stragglers.
+            Stragglers,
+            /// The rollout has finished successfully or was marked as such by the operator.
+            Complete,
+        }
 
-    /// Represents a rollout of GuestOS to mainnet API boundary nodes.
-    #[derive(Debug, Serialize, Clone)]
-    pub struct RolloutIcOsToMainnetApiBoundaryNodes {
-        pub state: RolloutIcOsToMainnetApiBoundaryNodesState,
-        /// Associative array of `{batch ID -> Batch}` planned for the rollout.
-        pub batches: IndexMap<usize, ApiBoundaryNodesBatch>,
-        /// Configuration associated to the rollout.
-        pub conf: IndexMap<String, serde_json::Value>,
+        #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
+        #[serde(rename_all = "snake_case")]
+        /// Represents the rollout state of a subnet.
+        // Ordering matters here.
+        pub enum BatchState {
+            Error,
+            PredecessorFailed,
+            Pending,
+            Waiting,
+            DeterminingTargets,
+            Proposing,
+            WaitingForElection,
+            WaitingForAdoption,
+            WaitingUntilNodesHealthy,
+            Complete,
+            /// The state a batch is when plan skips ahead (wait_until_start_time is skipped)
+            /// or collect_nodes skips ahead (create_proposal_if_none_exists is skipped).
+            Skipped,
+            Unknown,
+        }
+
+        /// Represents a HostOS node being targeted by the rollout.
+        #[derive(Serialize, Debug, Clone)]
+        pub struct Node {
+            /// This is the node ID.
+            pub node_id: String,
+        }
+
+        #[derive(Serialize, Debug, Clone)]
+        /// Represents a batch of subnets to upgrade.
+        pub struct Batch {
+            /// The time the batch was programmed to start at.
+            pub planned_start_time: DateTime<Utc>,
+            /// The actual observed start time of the batch.
+            pub actual_start_time: Option<DateTime<Utc>>,
+            /// The time of the last action associated with this batch, if any.
+            pub end_time: Option<DateTime<Utc>>,
+            pub state: BatchState,
+            /// Shows a comment for the batch if it is available; else it contains an empty string.
+            pub comment: String,
+            /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
+            pub display_url: String,
+            /// A count of the nodes planned to be upgraded as part of this batch.
+            pub planned_nodes: Vec<Node>,
+            /// A count of the nodes that actually were or are upgraded as part of this batch.
+            /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
+            /// If that phase of the batch has yet to take place, this is usually null.
+            pub actual_nodes: Option<Vec<Node>>,
+            #[serde(skip_serializing)]
+            /// Internal flag used to prune batches that haven't yet run, or have run but
+            /// had no nodes assigned to them.
+            pub present_in_provisional_plan: bool,
+        }
+
+        ///  Represents a particular stage in the HostOS rollout.
+        #[derive(Debug, Serialize, Clone)]
+        pub struct Stages {
+            pub canary: IndexMap<usize, Batch>,
+            pub main: IndexMap<usize, Batch>,
+            pub unassigned: IndexMap<usize, Batch>,
+            pub stragglers: IndexMap<usize, Batch>,
+        }
+
+        /// Represents a rollout of HostOS to nodes.
+        #[derive(Debug, Serialize, Clone)]
+        pub struct Rollout {
+            pub state: State,
+            /// Is None when the rollout has yet to compute a set of stages (rollout plan).
+            pub stages: Option<Stages>,
+            /// Configuration associated to the rollout.
+            pub conf: IndexMap<String, serde_json::Value>,
+        }
     }
 
     #[derive(Debug, Serialize, Clone)]
     #[serde(tag = "kind")]
     #[serde(rename_all = "snake_case")]
+    #[allow(clippy::large_enum_variant)]
     pub enum RolloutKind {
-        RolloutIcOsToMainnetSubnets(RolloutIcOsToMainnetSubnets),
-        RolloutIcOsToMainnetApiBoundaryNodes(RolloutIcOsToMainnetApiBoundaryNodes),
+        RolloutIcOsToMainnetSubnets(guestos::Rollout),
+        RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes::Rollout),
+        RolloutIcOsToMainnetNodes(hostos::Rollout),
     }
     /// Represents a generic rollout of any kind.
     #[derive(Debug, Serialize, Clone)]
@@ -392,6 +517,9 @@ pub mod v2 {
                 }
                 RolloutKind::RolloutIcOsToMainnetApiBoundaryNodes(_) => {
                     "rollout_ic_os_to_mainnet_api_boundary_nodes".to_string()
+                }
+                RolloutKind::RolloutIcOsToMainnetNodes(_) => {
+                    "rollout_ic_os_to_mainnet_nodes".to_string()
                 }
             }
         }

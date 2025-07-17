@@ -11,7 +11,15 @@ const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v2";
 const url = API_URL + "/sse"
 var evtSource: null | EventSource = null;
 
-const airflow_state = writable<FullState>({ rollouts: [], error: "loading", rollout_engine_states: { "rollout_ic_os_to_mainnet_subnets": "initial", "rollout_ic_os_to_mainnet_api_boundary_nodes": "initial" } })
+const airflow_state = writable<FullState>({
+    rollouts: [],
+    error: "loading",
+    rollout_engine_states: {
+        "rollout_ic_os_to_mainnet_subnets": "initial",
+        "rollout_ic_os_to_mainnet_api_boundary_nodes": "initial",
+        "rollout_ic_os_to_mainnet_nodes": "initial"
+    }
+})
 
 function resetupEventSource() {
     if (null !== evtSource) {
