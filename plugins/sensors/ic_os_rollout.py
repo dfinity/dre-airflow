@@ -24,6 +24,7 @@ from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.dagrun import DagRun
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
+from airflow.serialization.pydantic.dag_run import DagRunPydantic
 from airflow.triggers.temporal import TimeDeltaTrigger
 from airflow.utils.context import Context
 from airflow.utils.state import DagRunState
@@ -568,10 +569,10 @@ class WaitForOtherDAGs(BaseSensorOperator):
         Wait until all concurrently-running wait-for-alerts have reported there
         are no more alerts.
         """
-        # Take all dag runs...
+        # Take all DAG runs...
         source_dag_id = self.source_dag_id or context["dag_run"].dag_id
         dag_runs = DagRun.find(dag_id=source_dag_id)
-        # ...include only running / queued and dags that aren't us.
+        # ...include only running / queued and DAG runs that aren't us.
         dag_runs = [
             d
             for d in dag_runs
@@ -582,21 +583,29 @@ class WaitForOtherDAGs(BaseSensorOperator):
             ]
             and d.run_id != context["dag_run"].run_id
         ]
-        self.log.info(
-            "There are %d other DAGs named %s queued or running.",
-            len(dag_runs),
-            source_dag_id,
-        )
+        if dag_runs:
+            self.log.info(
+                "There are %d other DAGs named %s queued or running.",
+                len(dag_runs),
+                source_dag_id,
+            )
 
         # Exclude dags started the same week as us.
         # (Using weekday that begins on a Sunday since the automatic rollout
         # (computation that dispatches the rollout happens on Sunday.)
-        one_day_shift = datetime.timedelta(days=1)
-        my_weekday = (
-            (context["dag_run"].execution_date + one_day_shift).isocalendar().week
-        )
+        # We use data_interval_end for comparison, which is the date at which
+        # each DAG run was started.
+        def weekday(x: DagRun | DagRunPydantic) -> int:
+            data_interval_end = x.data_interval_end
+            assert isinstance(data_interval_end, datetime.datetime), (
+                data_interval_end,
+                type(data_interval_end),
+            )
+            return data_interval_end.isocalendar().weekday
+
+        my_weekday = weekday(context["dag_run"])
         for d in dag_runs[:]:
-            d_weekday = (d.execution_date + one_day_shift).isocalendar().week
+            d_weekday = weekday(d)
             if my_weekday == d_weekday:
                 self.log.info(
                     "Ignoring %s as it was started the same week as us", d.run_id
@@ -608,7 +617,13 @@ class WaitForOtherDAGs(BaseSensorOperator):
             self.log.info("Waiting %s minutes for other DAGs to complete:", interval)
             for d in dag_runs:
                 self.log.info(
-                    "* %s is %s: execution date %s", d.run_id, d.state, d.execution_date
+                    "* %s is %s: logical date %s data interval start %s data"
+                    " interval end %s",
+                    d.run_id,
+                    d.state,
+                    d.logical_date,
+                    d.data_interval_start,
+                    d.data_interval_end,
                 )
             self.log.info(
                 "If you still want to proceed, mark this task as successful"
@@ -853,29 +868,3 @@ if __name__ == "__main__":
             expected_replica_count=13,
         )
         kn.execute({})
-    if sys.argv[1] == "wait_for_other_rollouts":
-        kn2 = WaitForOtherDAGs(
-            task_id="x",
-            source_dag_id="rollout_ic_os_to_mainnet_subnets",
-        )
-
-        class FakeDagRun:
-            def __init__(
-                self,
-                dag_id: str,
-                run_id: str,
-                execution_date: datetime.datetime,
-            ):
-                self.dag_id = (dag_id,)
-                self.run_id = run_id
-                self.execution_date = execution_date
-
-        kn2.execute(
-            {
-                "dag_run": FakeDagRun(
-                    "rollout_ic_os_to_mainnet_subnets",
-                    "abcd",
-                    datetime.datetime.now(),
-                )  # type: ignore
-            }
-        )

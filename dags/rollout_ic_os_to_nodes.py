@@ -151,14 +151,15 @@ for network_name, network in IC_NETWORKS.items():
                 type="string",
                 pattern="^[a-f0-9]{40}$",
                 title="Main Git revision",
-                description="Git revision of the IC OS GuestOS release to roll out to"
-                " subnets, unless specified otherwise directly for a specific subnet;"
-                " the version must have been elected before but the rollout will check",
+                description="Git revision of the IC OS HostOS release to roll out to"
+                " subnets;"
+                " the version must have been elected before but the rollout will"
+                " verify that before proceeding.",
             ),
             "plan": Param(
                 default=DEFAULT_ROLLOUT_PLANS[network_name].strip(),
                 type="string",
-                title="Rollout plan",
+                title="Rollout plan.",
                 description_md=ROLLOUT_PLAN_HELP,
                 **format,
             ),
@@ -166,8 +167,7 @@ for network_name, network in IC_NETWORKS.items():
                 True,
                 type="boolean",
                 title="Simulate",
-                description="If enabled (the default), the update proposal will be"
-                " simulated but not created, and its acceptance will be simulated too",
+                description="If enabled (the default), all steps will be simulated.",
             ),
         },
     )
