@@ -96,7 +96,7 @@
   {#if $view.error === "loading"}
     <div
       class="flex items-center justify-center w-56 h-56 border border-gray-200 rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
-      style="align-self: center"
+      style="margin-left: auto; margin-right: auto;"
     >
       <div role="status">
         <svg
