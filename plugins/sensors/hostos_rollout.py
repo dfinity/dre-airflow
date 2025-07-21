@@ -113,3 +113,22 @@ def are_hostos_nodes_healthy(
 
     print("There are no more alerts on HostOS nodes.")
     return True
+
+
+if __name__ == "__main__":
+    network = ic_types.ICNetwork(
+        "https://ic0.app/",
+        "https://dashboard.internetcomputer.org/proposal",
+        "https://dashboard.internetcomputer.org/release",
+        [
+            "https://victoria.mainnet.dfinity.network/select/0/prometheus/api/v1/query",
+        ],
+        80,
+        "dfinity.ic_admin.mainnet.proposer_key_file",
+    )
+    params: DagParams = {
+        "simulate": False,
+        "git_revision": "143a635e2af0f574e1ea0f795f8754dfbd86c0c0",
+        "plan": "",
+    }
+    has_network_adopted_hostos_revision(network, params)
