@@ -595,35 +595,38 @@ class WaitForOtherDAGs(BaseSensorOperator):
         # (computation that dispatches the rollout happens on Sunday.)
         # We use data_interval_end for comparison, which is the date at which
         # each DAG run was started.
-        def weekday(x: DagRun | DagRunPydantic) -> int:
+        def week(x: DagRun | DagRunPydantic) -> int:
             data_interval_end = x.data_interval_end
             assert isinstance(data_interval_end, datetime.datetime), (
                 data_interval_end,
                 type(data_interval_end),
             )
-            return data_interval_end.isocalendar().weekday
+            return data_interval_end.isocalendar().week
 
-        my_weekday = weekday(context["dag_run"])
-        for d in dag_runs[:]:
-            d_weekday = weekday(d)
-            if my_weekday == d_weekday:
+        my_week = week(context["dag_run"])
+        for other_run in dag_runs[:]:
+            other_week = week(other_run)
+            if my_week == other_week:
                 self.log.info(
-                    "Ignoring %s as it was started the same week as us", d.run_id
+                    "Ignoring %s as it was started the same week as us (%s == %s)",
+                    other_run.run_id,
+                    my_week,
+                    other_week,
                 )
-                dag_runs.remove(d)
+                dag_runs.remove(other_run)
 
         if dag_runs:
             interval = 3
             self.log.info("Waiting %s minutes for other DAGs to complete:", interval)
-            for d in dag_runs:
+            for other_run in dag_runs:
                 self.log.info(
                     "* %s is %s: logical date %s data interval start %s data"
                     " interval end %s",
-                    d.run_id,
-                    d.state,
-                    d.logical_date,
-                    d.data_interval_start,
-                    d.data_interval_end,
+                    other_run.run_id,
+                    other_run.state,
+                    other_run.logical_date,
+                    other_run.data_interval_start,
+                    other_run.data_interval_end,
                 )
             self.log.info(
                 "If you still want to proceed, mark this task as successful"
