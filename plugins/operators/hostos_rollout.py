@@ -484,23 +484,19 @@ def collect_nodes(
     print("Selectors:\n%s" % pprint.pformat(selectors))
     runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
     registry = runner.get_registry()
-    if params["simulate"]:
-        already_simulated_node_id_batches: list[NodeBatch | None] = [
-            ti.xcom_pull(f"{b}.collect_nodes", key="nodes")
-            for b in precedent_batches(batch_name, batch_index)
-        ]
-        confirmed_batches = [
-            s for s in already_simulated_node_id_batches if s is not None
-        ]
-        already_simulated_node_ids = set(
-            [s["node_id"] for b in confirmed_batches for s in b]
-        )
-        print(f"Simulation -- ignoring {len(already_simulated_node_ids)} nodes")
-        registry["nodes"] = [
-            n
-            for n in registry["nodes"]
-            if n["node_id"] not in already_simulated_node_ids
-        ]
+
+    already_simulated_node_id_batches: list[NodeBatch | None] = [
+        ti.xcom_pull(f"{b}.collect_nodes", key="nodes")
+        for b in precedent_batches(batch_name, batch_index)
+    ]
+    confirmed_batches = [s for s in already_simulated_node_id_batches if s is not None]
+    already_simulated_node_ids = set(
+        [s["node_id"] for b in confirmed_batches for s in b]
+    )
+    print(f"Excluding {len(already_simulated_node_ids)} nodes already rolled out")
+    registry["nodes"] = [
+        n for n in registry["nodes"] if n["node_id"] not in already_simulated_node_ids
+    ]
 
     nodes = compute_actual_plan_for_batch(params["git_revision"], selectors, registry)
     print("Nodes to roll out to:\n%s" % pprint.pformat(nodes))
