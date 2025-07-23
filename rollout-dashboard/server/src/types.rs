@@ -724,7 +724,7 @@ pub mod v2 {
 pub mod unstable {
     use crate::airflow_client::TaskInstancesResponseItem;
     use chrono::{DateTime, Utc};
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize)]
     pub struct FlowCacheResponse {
@@ -734,5 +734,37 @@ pub mod unstable {
         pub last_update_time: Option<DateTime<Utc>>,
         pub update_count: usize,
         pub linearized_task_instances: Vec<TaskInstancesResponseItem>,
+    }
+
+    use strum::EnumString;
+
+    #[derive(Debug, Deserialize, Serialize, Clone, EnumString)]
+    #[strum(serialize_all = "PascalCase")]
+    enum NodeStatus {
+        Healthy,
+        Dead,
+        Degraded,
+    }
+
+    #[derive(Debug, Deserialize, Serialize, Clone)]
+    pub struct NodeInfo {
+        pub node_id: String,
+        pub node_provider_id: String,
+        pub subnet_id: Option<String>,
+        pub dc_id: String,
+        pub status: String,
+    }
+
+    #[derive(Debug, Serialize, Clone)]
+    pub struct ProvisionalPlanBatch {
+        pub nodes: Vec<NodeInfo>,
+        // selectors: Selectors,
+        pub start_at: DateTime<Utc>,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct HostOsRolloutBatchStateResponse {
+        pub provisional_plan: ProvisionalPlanBatch,
+        pub actual_plan: Option<Vec<NodeInfo>>,
     }
 }

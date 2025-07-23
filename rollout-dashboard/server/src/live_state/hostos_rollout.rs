@@ -1,3 +1,5 @@
+use crate::live_state::python::PythonDateTime;
+
 use super::plan::{PlanQueryResult, fetch_xcom};
 use super::{RolloutDataGatherError, plan::PlanCache, python};
 use indexmap::IndexMap;
@@ -7,6 +9,7 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
+use rollout_dashboard::types::unstable::{self, NodeInfo};
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Node, Rollout, Stages, State};
 use serde::Deserialize;
@@ -31,14 +34,6 @@ lazy_static! {
 
 This code will be used later to provide a detail view of the rollout.
 
-use strum::EnumString;
-
-#[derive(Debug, Deserialize, Clone, EnumString)]
-enum NodeStatus {
-    Healthy,
-    Dead,
-    Degraded,
-}
 
 #[derive(Debug, Deserialize, Clone, EnumString)]
 enum NodeAssignment {
@@ -142,19 +137,19 @@ type Selectors = Vec<Selector>;
 */
 
 #[derive(Debug, Deserialize, Clone)]
-struct NodeInfo {
-    node_id: String,
-    // node_provider_id: String
-    // subnet_id: Option<String>
-    // dc_id: String,
-    // status: NodeStatus,
+pub(super) struct ProvisionalPlanBatch {
+    pub(super) nodes: Vec<NodeInfo>,
+    // selectors: Selectors,
+    pub(super) start_at: PythonDateTime,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct ProvisionalPlanBatch {
-    nodes: Vec<NodeInfo>,
-    // selectors: Selectors,
-    start_at: python::PythonDateTime,
+impl From<ProvisionalPlanBatch> for unstable::ProvisionalPlanBatch {
+    fn from(other: ProvisionalPlanBatch) -> unstable::ProvisionalPlanBatch {
+        unstable::ProvisionalPlanBatch {
+            nodes: other.nodes,
+            start_at: other.start_at.into(),
+        }
+    }
 }
 
 impl From<&ProvisionalPlanBatch> for Batch {
@@ -213,11 +208,46 @@ impl Display for PlanParseError {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct ProvisionalHostOSPlan {
-    canary: Option<Vec<ProvisionalPlanBatch>>,
-    main: Option<Vec<ProvisionalPlanBatch>>,
-    unassigned: Option<Vec<ProvisionalPlanBatch>>,
-    stragglers: Option<Vec<ProvisionalPlanBatch>>,
+pub(super) struct ProvisionalHostOSPlan {
+    pub(super) canary: Option<Vec<ProvisionalPlanBatch>>,
+    pub(super) main: Option<Vec<ProvisionalPlanBatch>>,
+    pub(super) unassigned: Option<Vec<ProvisionalPlanBatch>>,
+    pub(super) stragglers: Option<Vec<ProvisionalPlanBatch>>,
+}
+
+#[derive(Clone, PartialEq, Hash, Eq)]
+pub(super) enum StageName {
+    Canary,
+    Main,
+    Unassigned,
+    Stragglers,
+}
+
+pub struct InvalidStageName;
+
+impl FromStr for StageName {
+    type Err = InvalidStageName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "canary" => Ok(StageName::Canary),
+            "main" => Ok(StageName::Main),
+            "unassigned" => Ok(StageName::Unassigned),
+            "stragglers" => Ok(StageName::Stragglers),
+            _ => Err(InvalidStageName {}),
+        }
+    }
+}
+
+impl ProvisionalHostOSPlan {
+    pub(super) fn get_stage(&self, stage: StageName) -> &Option<Vec<ProvisionalPlanBatch>> {
+        match stage {
+            StageName::Canary => &self.canary,
+            StageName::Main => &self.main,
+            StageName::Unassigned => &self.unassigned,
+            StageName::Stragglers => &self.stragglers,
+        }
+    }
 }
 
 impl FromStr for ProvisionalHostOSPlan {
@@ -337,8 +367,8 @@ fn annotate_batch_state(
 
 #[derive(Clone, Default)]
 pub(super) struct Parser {
-    provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    actual_plans: HashMap<String, PlanCache<ActualHostPlan>>,
+    pub(super) provisional_plan: PlanCache<ProvisionalHostOSPlan>,
+    pub(super) actual_plans: HashMap<(StageName, usize), PlanCache<ActualHostPlan>>,
 }
 
 impl Parser {
@@ -466,7 +496,7 @@ impl Parser {
                     None => continue, // No rollout plan, pointless to try to go through this section.
                 };
 
-                let (stage_name, stage_number, task_name) = (
+                let (stage_name, stage_batch_number, task_name) = (
                     &captured[1],
                     str::parse::<usize>(&captured[2]).unwrap(),
                     &captured[3],
@@ -474,23 +504,20 @@ impl Parser {
 
                 trace!(target: tgt, "{}: processing {} {:?} in state {:?}", task_instance.dag_run_id, task_instance.task_id, task_instance.map_index, task_instance.state);
 
-                enum StageName {
-                    Canary,
-                    Main,
-                    Unassigned,
-                    Stragglers,
-                }
-
-                let (stage, stage_name_enum) = match stage_name {
-                    "canary" => (&mut rollout_stages.canary, StageName::Canary),
-                    "main" => (&mut rollout_stages.main, StageName::Main),
-                    "unassigned" => (&mut rollout_stages.unassigned, StageName::Unassigned),
-                    "stragglers" => (&mut rollout_stages.stragglers, StageName::Stragglers),
-                    _ => continue,
+                let (stage, stage_name_enum) = match StageName::from_str(stage_name) {
+                    Ok(StageName::Canary) => (&mut rollout_stages.canary, StageName::Canary),
+                    Ok(StageName::Main) => (&mut rollout_stages.main, StageName::Main),
+                    Ok(StageName::Unassigned) => {
+                        (&mut rollout_stages.unassigned, StageName::Unassigned)
+                    }
+                    Ok(StageName::Stragglers) => {
+                        (&mut rollout_stages.stragglers, StageName::Stragglers)
+                    }
+                    Err(_) => continue,
                 };
 
                 let batch = stage
-                    .entry(stage_number)
+                    .entry(stage_batch_number)
                     .or_insert(make_a_discovered_host_os_batch(&task_instance));
 
                 macro_rules! trans_min {
@@ -602,7 +629,7 @@ impl Parser {
                                 "collect_nodes" => {
                                     let actual_plan = self
                                         .actual_plans
-                                        .entry(task_instance.task_id.clone())
+                                        .entry((stage_name_enum.clone(), stage_batch_number))
                                         .or_insert(PlanCache::Unretrieved);
 
                                     match actual_plan

@@ -1,3 +1,4 @@
+use crate::live_state::HostOsRolloutBatchStateRequestError;
 use crate::live_state::{AirflowStateSyncer, Live, SyncCycleState};
 use async_stream::try_stream;
 use axum::extract::Path;
@@ -78,7 +79,7 @@ impl ApiServer {
 
     // #[debug_handler]
     async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
-        match self.state_syncer.get_current_state().await {
+        match self.state_syncer.get_cycle_state().await {
             SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
             SyncCycleState::State(s) => Ok(Json(
                 s.rollouts
@@ -92,7 +93,7 @@ impl ApiServer {
 
     // #[debug_handler]
     async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
-        match self.state_syncer.get_current_state().await {
+        match self.state_syncer.get_cycle_state().await {
             SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
             SyncCycleState::State(s) => Ok(Json(s.rollout_engine_states.into())),
             SyncCycleState::Error(err) => Err(err.into()),
@@ -100,7 +101,7 @@ impl ApiServer {
     }
 
     async fn get_state(&self) -> Result<Json<SOK>, (StatusCode, String)> {
-        match self.state_syncer.get_current_state().await {
+        match self.state_syncer.get_cycle_state().await {
             SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
             SyncCycleState::State(s) => Ok(Json(s)),
             SyncCycleState::Error(e) => Err(e.into()),
@@ -383,7 +384,7 @@ impl ApiServer {
     }
 
     async fn get_internal_state(&self) -> Result<Json<SyncCycleState>, Infallible> {
-        Ok(Json(self.state_syncer.get_current_state().await))
+        Ok(Json(self.state_syncer.get_cycle_state().await))
     }
 
     fn v1_api(self: Arc<Self>) -> Router {
@@ -433,10 +434,56 @@ impl ApiServer {
             )
     }
 
+    async fn get_hostos_rollout_batch_state(
+        &self,
+        dag_run_id: &str,
+        stage_name: &str,
+        batch_number: usize,
+    ) -> Result<Json<unstable::HostOsRolloutBatchStateResponse>, (StatusCode, String)> {
+        match self
+            .state_syncer
+            .get_hostos_rollout_batch_state(dag_run_id, stage_name, batch_number)
+            .await
+        {
+            Err(HostOsRolloutBatchStateRequestError::NotYetSynced) => {
+                Err((StatusCode::NO_CONTENT, "".to_string()))
+            }
+            Err(HostOsRolloutBatchStateRequestError::NoDataForDagRun) => Err((
+                StatusCode::NOT_FOUND,
+                "Supplied DAG run ID not found.".to_string(),
+            )),
+            Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber) => Err((
+                StatusCode::NOT_FOUND,
+                "No data for supplied batch number.".to_string(),
+            )),
+            Err(HostOsRolloutBatchStateRequestError::InvalidDagID) => {
+                Err((StatusCode::BAD_REQUEST, "Invalid DAG ID.".to_string()))
+            }
+            Err(HostOsRolloutBatchStateRequestError::InvalidDagRunID) => {
+                Err((StatusCode::BAD_REQUEST, "Invalid DAG run ID.".to_string()))
+            }
+            Err(HostOsRolloutBatchStateRequestError::InvalidStageName) => {
+                Err((StatusCode::BAD_REQUEST, "Invalid stage name.".to_string()))
+            }
+            Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber) => {
+                Err((StatusCode::BAD_REQUEST, "Invalid batch number.".to_string()))
+            }
+            Err(HostOsRolloutBatchStateRequestError::InvalidPlanData) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Invalid plan data found for batch.".to_string(),
+            )),
+            Err(HostOsRolloutBatchStateRequestError::RolloutDataGatherError(err)) => {
+                Err(err.into())
+            }
+            Ok(data) => Ok(Json(data)),
+        }
+    }
+
     fn unstable_api(self: Arc<Self>) -> Router {
         let cached_data_handler_ref = self.clone();
         let cached_error_handler_ref = self.clone();
         let get_dag_run_handler_ref = self.clone();
+        let get_hostos_rollout_batch_state_handler_ref = self.clone();
 
         Router::new()
             .route(
@@ -457,6 +504,16 @@ impl ApiServer {
                     move |Path((dag_id, dag_run_id)): Path<(String, String)>| async move {
                         get_dag_run_handler_ref
                             .get_dag_run(dag_id.as_str(), dag_run_id.as_str())
+                            .await
+                    },
+                ),
+            )
+            .route(
+                "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number",
+                get(
+                    move |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>| async move {
+                        get_hostos_rollout_batch_state_handler_ref
+                            .get_hostos_rollout_batch_state(dag_run_id.as_str(), stage_name.as_str(), batch_number)
                             .await
                     },
                 ),
