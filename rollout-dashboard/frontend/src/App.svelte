@@ -214,10 +214,9 @@
         </svg>
         <span class="sr-only">Info</span>
         <div>
-          <span class="font-medium">{rolloutKindName(kind)} engine paused.</span
-          >
-          {rolloutKindName(kind)} has been paused by DRE. Use the <i>Help</i> link
-          below if you want to inquire why.
+          <span class="font-medium">{rolloutKindName(kind)} engine paused</span>
+          by DRE. Use the
+          <i>Help</i> link on the footer to inquire why it was paused.
         </div>
       </div>
     {/if}
