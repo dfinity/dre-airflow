@@ -654,7 +654,7 @@ impl<'de> de::Deserializer<'de> for &mut PythonDeserializer<'de> {
             self.input.chars().take(180).collect::<String>(),
         );
         self.chomp_whitespace()?;
-        if self.input.starts_with("null") {
+        if self.input.starts_with("null") || self.input.starts_with("None") {
             self.input = &self.input["null".len()..];
             visitor.visit_none()
         } else {
@@ -674,7 +674,7 @@ impl<'de> de::Deserializer<'de> for &mut PythonDeserializer<'de> {
             self.input.chars().take(180).collect::<String>(),
         );
         self.chomp_whitespace()?;
-        if self.input.starts_with("null") | self.input.starts_with("None") {
+        if self.input.starts_with("null") || self.input.starts_with("None") {
             self.input = &self.input["null".len()..];
             visitor.visit_unit()
         } else {
