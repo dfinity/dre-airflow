@@ -11,11 +11,7 @@ use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
 use rollout_dashboard::airflow_client::AirflowClient;
-use rollout_dashboard::airflow_client::DagRunsResponseItem;
-use rollout_dashboard::types::{
-    unstable, v1,
-    v2::{DeletedRollout, Error as SError, Rollout, State as SOK, sse as SSE},
-};
+use rollout_dashboard::types::{unstable, v1, v2};
 use serde::{Deserialize, Deserializer, de};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
@@ -38,6 +34,34 @@ where
             .map(Some),
         Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
     }
+}
+
+macro_rules! http_error {
+    ($code:expr) => {{
+        Err((code, format!("{}", code)))
+    }};
+    ($code:expr, $str:expr) => {{
+        Err(($code, format!("{}", $str)))
+    }};
+    ($code:expr, $str:expr, $($arg:tt)*) => {{
+        Err(($code, format!($str, $($arg)*)))
+    }};
+}
+
+macro_rules! bad_request {
+    ($($arg:tt)*) => {{ http_error!(StatusCode::BAD_REQUEST, $($arg)*) }};
+}
+
+macro_rules! internal_server_error {
+    ($($arg:tt)*) => {{ http_error!(StatusCode::INTERNAL_SERVER_ERROR, $($arg)*) }};
+}
+
+macro_rules! not_found {
+    ($($arg:tt)*) => {{ http_error!(StatusCode::NOT_FOUND, $($arg)*) }};
+}
+
+macro_rules! no_content {
+    ($($arg:tt)*) => {{ http_error!(StatusCode::NO_CONTENT, "") }};
 }
 
 #[derive(Deserialize)]
@@ -66,6 +90,21 @@ pub(crate) struct ApiServer {
     airflow_api: Arc<AirflowClient>,
 }
 
+macro_rules! handle {
+    ($self:ident, $ident:ident, $block:block) => {{
+        let $ident = $self.clone();
+        move || async move { $block }
+    }};
+    ($self:ident, $ident:ident, |$parms:ident($($arg:tt)*): $type:ty|, $block:block) => {{
+        let $ident = $self.clone();
+        move |$parms($($arg)*): $type| async move { $block }
+    }};
+    ($self:ident, $ident:ident, |$parms:ident: $type:ty|, $block:block) => {{
+        let $ident = $self.clone();
+        move |$parms: $type| async move { $block }
+    }};
+}
+
 impl ApiServer {
     pub fn new(
         state_syncer: Arc<AirflowStateSyncer<Live>>,
@@ -75,50 +114,6 @@ impl ApiServer {
             state_syncer,
             airflow_api,
         }
-    }
-
-    // #[debug_handler]
-    async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
-            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
-            SyncCycleState::State(s) => Ok(Json(
-                s.rollouts
-                    .into_iter()
-                    .filter_map(|r| r.try_into().ok())
-                    .collect(),
-            )),
-            SyncCycleState::Error(err) => Err(err.into()),
-        }
-    }
-
-    // #[debug_handler]
-    async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
-            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
-            SyncCycleState::State(s) => Ok(Json(s.rollout_engine_states.into())),
-            SyncCycleState::Error(err) => Err(err.into()),
-        }
-    }
-
-    async fn get_state(&self) -> Result<Json<SOK>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
-            SyncCycleState::Initial => Err((StatusCode::NO_CONTENT, "".to_string())),
-            SyncCycleState::State(s) => Ok(Json(s)),
-            SyncCycleState::Error(e) => Err(e.into()),
-        }
-    }
-
-    async fn get_dag_run(
-        &self,
-        dag_id: &str,
-        dag_run_id: &str,
-    ) -> Result<Json<DagRunsResponseItem>, (StatusCode, String)> {
-        Ok(Json(
-            match self.airflow_api.dag_run(dag_id, dag_run_id).await {
-                Ok(val) => val,
-                Err(e) => return Err(e.into()),
-            },
-        ))
     }
 
     /// Given an initial state and a final state, produce
@@ -132,7 +127,7 @@ impl ApiServer {
         current_rollout_data: &SyncCycleState,
         last_rollout_data: &SyncCycleState,
         delta_support: bool,
-    ) -> Vec<SSE::Message> {
+    ) -> Vec<v2::sse::Message> {
         match (current_rollout_data, last_rollout_data, delta_support) {
             // First sync or error before.  Send full sync.
             (SyncCycleState::Initial, _, _) => {
@@ -143,43 +138,43 @@ impl ApiServer {
                 SyncCycleState::Initial | SyncCycleState::Error(_),
                 _,
             ) => {
-                vec![SSE::Message::CompleteState(state.clone())]
+                vec![v2::sse::Message::CompleteState(state.clone())]
             }
             // Error after a good update.  Send error.
             (SyncCycleState::Error(e), SyncCycleState::Initial | SyncCycleState::State(_), _) => {
-                vec![SSE::Message::Error(e.clone().into())]
+                vec![v2::sse::Message::Error(e.clone().into())]
             }
             // Error after an error.  Only send update if errors differ.
             (SyncCycleState::Error(e), SyncCycleState::Error(olde), _) => {
-                let olde: SError = olde.clone().into();
-                let e: SError = e.clone().into();
+                let olde: v2::Error = olde.clone().into();
+                let e: v2::Error = e.clone().into();
                 if e == olde {
                     vec![]
                 } else {
-                    vec![SSE::Message::Error(e)]
+                    vec![v2::sse::Message::Error(e)]
                 }
             }
             // Last time was a good update, but delta support is not requested.  Send full sync.
             (
-                SyncCycleState::State(SOK {
+                SyncCycleState::State(v2::State {
                     rollouts: new_rollouts,
                     rollout_engine_states: new_rollout_engine_states,
                 }),
                 SyncCycleState::State(_),
                 false,
             ) => vec![
-                (SSE::Message::CompleteState(SOK {
+                (v2::sse::Message::CompleteState(v2::State {
                     rollouts: new_rollouts.clone(),
                     rollout_engine_states: new_rollout_engine_states.clone(),
                 })),
             ],
             // Last time was a good update and sync is enabled.  Send differential sync.
             (
-                SyncCycleState::State(SOK {
+                SyncCycleState::State(v2::State {
                     rollouts: new_rollouts,
                     rollout_engine_states: new_rollout_engine_states,
                 }),
-                SyncCycleState::State(SOK {
+                SyncCycleState::State(v2::State {
                     rollouts: old_rollouts,
                     rollout_engine_states: old_rollout_engine_states,
                 }),
@@ -191,7 +186,7 @@ impl ApiServer {
                     .collect::<HashSet<String>>();
                 let old_rollouts_map = old_rollouts.iter().map(|r| (r.key(), r)).collect::<HashMap<
                     String,
-                    &Rollout,
+                    &v2::Rollout,
                 >>(
                 );
                 let updated = new_rollouts
@@ -203,26 +198,26 @@ impl ApiServer {
                             false => None,
                         },
                     })
-                    .collect::<VecDeque<Rollout>>();
+                    .collect::<VecDeque<v2::Rollout>>();
                 let deleted = old_rollouts
                     .iter()
                     .filter_map(|r| match new_names.contains(&r.key()) {
                         true => None,
-                        false => Some(DeletedRollout {
+                        false => Some(v2::DeletedRollout {
                             kind: r.kind(),
                             name: r.name.clone(),
                         }),
                     })
-                    .collect::<VecDeque<DeletedRollout>>();
+                    .collect::<VecDeque<v2::DeletedRollout>>();
                 let mut ret = vec![];
                 if !updated.is_empty() || !deleted.is_empty() {
-                    ret.push(SSE::Message::RolloutsDelta(SSE::RolloutsDelta {
+                    ret.push(v2::sse::Message::RolloutsDelta(v2::sse::RolloutsDelta {
                         updated,
                         deleted,
                     }))
                 }
                 if new_rollout_engine_states != old_rollout_engine_states {
-                    ret.push(SSE::Message::RolloutEngineStatesUpdate(
+                    ret.push(v2::sse::Message::RolloutEngineStatesUpdate(
                         new_rollout_engine_states.clone(),
                     ))
                 }
@@ -231,13 +226,13 @@ impl ApiServer {
         }
     }
 
-    pub fn compat_convert_v2_sse_state_to_v1(
+    fn compat_convert_v2_sse_state_to_v1(
         self: &Arc<Self>,
-        message: SSE::Message,
+        message: v2::sse::Message,
         last_engine_state: &mut v1::RolloutEngineState,
     ) -> v1::DeltaState {
         match message {
-            SSE::Message::CompleteState(SOK {
+            v2::sse::Message::CompleteState(v2::State {
                 rollouts,
                 rollout_engine_states,
             }) => {
@@ -249,10 +244,10 @@ impl ApiServer {
                 *last_engine_state = engine_state.clone();
                 v1::DeltaState::full(&engine_state, &rollouts)
             }
-            SSE::Message::Error(SError { code, message }) => {
+            v2::sse::Message::Error(v2::Error { code, message }) => {
                 v1::DeltaState::error(&(code, message))
             }
-            SSE::Message::RolloutsDelta(SSE::RolloutsDelta { updated, deleted }) => {
+            v2::sse::Message::RolloutsDelta(v2::sse::RolloutsDelta { updated, deleted }) => {
                 let updated: VecDeque<v1::Rollout> = updated
                     .into_iter()
                     .filter_map(|r| v1::Rollout::try_from(r).ok())
@@ -264,7 +259,7 @@ impl ApiServer {
                     .collect();
                 v1::DeltaState::partial(&last_engine_state.clone(), &updated, &deleted)
             }
-            SSE::Message::RolloutEngineStatesUpdate(rollout_engine_states) => {
+            v2::sse::Message::RolloutEngineStatesUpdate(rollout_engine_states) => {
                 let engine_state = match rollout_engine_states.is_empty() {
                     true => last_engine_state.clone(),
                     false => {
@@ -285,7 +280,32 @@ impl ApiServer {
         }
     }
 
-    pub fn compat_stream_state(
+    /* V1 API */
+
+    // #[debug_handler]
+    async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
+        match self.state_syncer.get_cycle_state().await {
+            SyncCycleState::Initial => no_content!(),
+            SyncCycleState::State(s) => Ok(Json(
+                s.rollouts
+                    .into_iter()
+                    .filter_map(|r| r.try_into().ok())
+                    .collect(),
+            )),
+            SyncCycleState::Error(err) => Err(err.into()),
+        }
+    }
+
+    // #[debug_handler]
+    async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
+        match self.state_syncer.get_cycle_state().await {
+            SyncCycleState::Initial => no_content!(),
+            SyncCycleState::State(s) => Ok(Json(s.rollout_engine_states.into())),
+            SyncCycleState::Error(err) => Err(err.into()),
+        }
+    }
+
+    pub fn stream_state_v1(
         self: Arc<Self>,
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
@@ -302,7 +322,7 @@ impl ApiServer {
 
                 loop {
                     let current_rollout_data: SyncCycleState = subscription.borrow_and_update().clone();
-                    let messages: Vec<SSE::Message> = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
+                    let messages: Vec<v2::sse::Message> = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.into_iter() {
                         let mm = self.compat_convert_v2_sse_state_to_v1(message, &mut last_engine_state);
                         yield sse::Event::default().json_data(&mm).unwrap()
@@ -325,6 +345,16 @@ impl ApiServer {
         )
     }
 
+    /* V2 API */
+
+    async fn get_state(&self) -> Result<Json<v2::State>, (StatusCode, String)> {
+        match self.state_syncer.get_cycle_state().await {
+            SyncCycleState::Initial => no_content!(),
+            SyncCycleState::State(s) => Ok(Json(s)),
+            SyncCycleState::Error(e) => Err(e.into()),
+        }
+    }
+
     pub fn stream_state(
         self: Arc<Self>,
         delta_support: bool,
@@ -344,16 +374,16 @@ impl ApiServer {
                     let messages = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.iter() {
                         match message {
-                            SSE::Message::CompleteState(sok) => {
+                            v2::sse::Message::CompleteState(sok) => {
                                 yield sse::Event::default().event("State").json_data(sok).unwrap();
                             }
-                            SSE::Message::Error(serr) => {
+                            v2::sse::Message::Error(serr) => {
                                 yield sse::Event::default().event("Error").json_data(serr).unwrap();
                             }
-                            SSE::Message::RolloutsDelta(sdelta) => {
+                            v2::sse::Message::RolloutsDelta(sdelta) => {
                                 yield sse::Event::default().event("RolloutsDelta").json_data(sdelta).unwrap();
                             }
-                            SSE::Message::RolloutEngineStatesUpdate(sdelta) => {
+                            v2::sse::Message::RolloutEngineStatesUpdate(sdelta) => {
                                 yield sse::Event::default().event("RolloutEngineStates").json_data(sdelta).unwrap();
                             }
                         }
@@ -376,7 +406,8 @@ impl ApiServer {
         )
     }
 
-    // #[debug_handler]
+    /* Unstable API */
+
     async fn get_cache(
         &self,
     ) -> Result<Json<Vec<unstable::FlowCacheResponse>>, (StatusCode, String)> {
@@ -387,51 +418,17 @@ impl ApiServer {
         Ok(Json(self.state_syncer.get_cycle_state().await))
     }
 
-    fn v1_api(self: Arc<Self>) -> Router {
-        let rollouts_handler_ref = self.clone();
-        let engine_state_handler_ref = self.clone();
-        let compat_sse_handler_ref = self.clone();
-        let sse_handler_ref = self.clone();
-        Router::new()
-            .route(
-                "/rollouts",
-                get(move || async move { rollouts_handler_ref.get_rollout_data().await }),
-            )
-            .route(
-                "/engine_state",
-                get(move || async move { engine_state_handler_ref.get_engine_state().await }),
-            )
-            .route(
-                "/rollouts/sse",
-                get(move |options: Query<SseHandlerParameters>| {
-                    let options: SseHandlerParameters = options.0;
-                    async move {
-                        compat_sse_handler_ref
-                            .compat_stream_state(options.incremental.unwrap_or_default())
-                    }
-                }),
-            )
-            .route(
-                "/sse/rollouts_view",
-                get(move || async move { sse_handler_ref.compat_stream_state(true) }),
-            )
-    }
-
-    fn v2_api(self: Arc<Self>) -> Router {
-        let state_handler_ref = self.clone();
-        let sse_handler_ref = self.clone();
-        Router::new()
-            .route(
-                "/state",
-                get(move || async move { state_handler_ref.get_state().await }),
-            )
-            .route(
-                "/sse",
-                get(move |options: Query<SseHandlerParameters>| {
-                    let options: SseHandlerParameters = options.0;
-                    async move { sse_handler_ref.stream_state(options.incremental.unwrap_or(true)) }
-                }),
-            )
+    async fn get_dag_run(
+        &self,
+        dag_id: &str,
+        dag_run_id: &str,
+    ) -> Result<Json<unstable::DagRunsResponseItem>, (StatusCode, String)> {
+        Ok(Json(
+            match self.airflow_api.dag_run(dag_id, dag_run_id).await {
+                Ok(val) => val,
+                Err(e) => return Err(e.into()),
+            },
+        ))
     }
 
     async fn get_hostos_rollout_batch_state(
@@ -445,33 +442,29 @@ impl ApiServer {
             .get_hostos_rollout_batch_state(dag_run_id, stage_name, batch_number)
             .await
         {
-            Err(HostOsRolloutBatchStateRequestError::NotYetSynced) => {
-                Err((StatusCode::NO_CONTENT, "".to_string()))
+            Err(HostOsRolloutBatchStateRequestError::NotYetSynced) => no_content!(),
+            Err(HostOsRolloutBatchStateRequestError::NoDataForDagRun) => {
+                not_found!("Supplied DAG run ID not found.")
             }
-            Err(HostOsRolloutBatchStateRequestError::NoDataForDagRun) => Err((
-                StatusCode::NOT_FOUND,
-                "Supplied DAG run ID not found.".to_string(),
-            )),
-            Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber) => Err((
-                StatusCode::NOT_FOUND,
-                "No data for supplied batch number.".to_string(),
-            )),
+
+            Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber) => {
+                not_found!("No data for supplied batch number.")
+            }
             Err(HostOsRolloutBatchStateRequestError::InvalidDagID) => {
-                Err((StatusCode::BAD_REQUEST, "Invalid DAG ID.".to_string()))
+                bad_request!("Invalid DAG ID.")
             }
             Err(HostOsRolloutBatchStateRequestError::InvalidDagRunID) => {
-                Err((StatusCode::BAD_REQUEST, "Invalid DAG run ID.".to_string()))
+                bad_request!("Invalid DAG run ID.")
             }
             Err(HostOsRolloutBatchStateRequestError::InvalidStageName) => {
-                Err((StatusCode::BAD_REQUEST, "Invalid stage name.".to_string()))
+                bad_request!("Invalid stage name.")
             }
             Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber) => {
-                Err((StatusCode::BAD_REQUEST, "Invalid batch number.".to_string()))
+                bad_request!("Invalid batch number.")
             }
-            Err(HostOsRolloutBatchStateRequestError::InvalidPlanData) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Invalid plan data found for batch.".to_string(),
-            )),
+            Err(HostOsRolloutBatchStateRequestError::InvalidPlanData) => {
+                internal_server_error!("Invalid plan data found for batch.")
+            }
             Err(HostOsRolloutBatchStateRequestError::RolloutDataGatherError(err)) => {
                 Err(err.into())
             }
@@ -479,51 +472,72 @@ impl ApiServer {
         }
     }
 
-    fn unstable_api(self: Arc<Self>) -> Router {
-        let cached_data_handler_ref = self.clone();
-        let cached_error_handler_ref = self.clone();
-        let get_dag_run_handler_ref = self.clone();
-        let get_hostos_rollout_batch_state_handler_ref = self.clone();
-
-        Router::new()
-            .route(
-                "/cache",
-                get(move || async move { cached_data_handler_ref.get_cache().await }),
-            )
-            .route(
-                "/internal_state",
-                get(move || async move { cached_error_handler_ref.get_internal_state().await }),
-            )
-            .route(
-                "/dags",
-                get(move || async move { "Result is great".to_string() }),
-            )
-            .route(
-                "/dags/:dag_id/dag_runs/:dag_run_id",
-                get(
-                    move |Path((dag_id, dag_run_id)): Path<(String, String)>| async move {
-                        get_dag_run_handler_ref
-                            .get_dag_run(dag_id.as_str(), dag_run_id.as_str())
-                            .await
-                    },
-                ),
-            )
-            .route(
-                "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number",
-                get(
-                    move |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>| async move {
-                        get_hostos_rollout_batch_state_handler_ref
-                            .get_hostos_rollout_batch_state(dag_run_id.as_str(), stage_name.as_str(), batch_number)
-                            .await
-                    },
-                ),
-            )
-    }
-
     pub fn routes(self: Arc<Self>) -> Router {
         Router::new()
-            .nest("/api/v1", self.clone().v1_api())
-            .nest("/api/v2", self.clone().v2_api())
-            .nest("/api/unstable", self.unstable_api())
+            .nest("/api/v1", Router::new()
+                // V1 API
+                .route(
+                    "/rollouts",
+                    get(handle!(self, s, { s.get_rollout_data().await })),
+                )
+                .route(
+                    "/engine_state",
+                    get(handle!(self, s, { s.get_engine_state().await })),
+                )
+                .route(
+                    "/rollouts/sse",
+                    get(handle!(self, s, |options: Query<SseHandlerParameters>|, {
+                        let options: SseHandlerParameters = options.0;
+                        s.stream_state_v1(options.incremental.unwrap_or_default())
+                    })),
+                )
+                .route(
+                    "/sse/rollouts_view",
+                    get(handle!(self, s, { s.stream_state_v1(true) })),
+                )
+            )
+            .nest("/api/v2", Router::new()
+                // V2 API
+                .route("/state", get(handle!(self, s, { s.get_state().await })))
+                .route(
+                    "/sse",
+                    get(handle!(self, s, |options: Query<SseHandlerParameters>|, {
+                        let options: SseHandlerParameters = options.0;
+                        s.stream_state(options.incremental.unwrap_or(true))
+                    })),
+                )
+            )
+            .nest(
+                // unstable API
+                "/api/unstable",
+                Router::new().route(
+                    "/cache2",
+                    get(handle!(self, s, { s.get_cache().await} ))
+                )
+                .route(
+                    "/cache",
+                    get(handle!(self, s, { s.get_cache().await }))
+                )
+                .route(
+                    "/internal_state",
+                    get(handle!(self, s, { s.get_internal_state().await }))
+                )
+                .route(
+                    "/dags/:dag_id/dag_runs/:dag_run_id",
+                    get(handle!(self, s, |Path((dag_id, dag_run_id)): Path<(String, String)>|, {
+                        s
+                            .get_dag_run(dag_id.as_str(), dag_run_id.as_str())
+                            .await
+                    }))
+                )
+                .route(
+                    "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number",
+                    get(handle!(self, s, |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>|, {
+                        s
+                            .get_hostos_rollout_batch_state(dag_run_id.as_str(), stage_name.as_str(), batch_number)
+                            .await
+                    }))
+                )
+            )
     }
 }
