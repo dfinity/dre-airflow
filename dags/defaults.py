@@ -87,6 +87,12 @@ stages:
       status: Healthy
       nodes_per_group: 5
   - selectors:
+    - assignment: unassigned
+      owner: others
+      group_by: datacenter
+      status: Healthy
+      nodes_per_group: 1
+  - selectors:
     - assignment: assigned
       owner: DFINITY
       status: Healthy
