@@ -13,34 +13,37 @@
 </script>
 
 <li class="rounded-lg border batch batch-{batch_num}">
-    <a
-        rel="external"
-        href={batch.display_url || ""}
-        target="_blank"
-        class="hostos_node_batch_state"
-        data-sveltekit-preload-data="off"
-        title={cap(hostOsBatchStateComment(batch))}
-    >
-        <div class="hostos_node_batch_state_icon">
-            {hostOsBatchStateIcon(batch)}
-        </div></a
-    >
-    {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
-        <div class="nodes">
-            {batch.planned_nodes.length} nodes planned
+    <div class="hostos_node_batch_state">
+        <a
+            rel="external"
+            href={batch.display_url || ""}
+            target="_blank"
+            data-sveltekit-preload-data="off"
+            title={cap(hostOsBatchStateComment(batch))}
+        >
+            <div class="hostos_node_batch_state_icon">
+                {hostOsBatchStateIcon(batch)}
+            </div></a
+        >
+        <div>
+            {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
+                <div class="nodes">
+                    {batch.planned_nodes.length} nodes planned
+                </div>
+                <div class="nodes">
+                    {batch.actual_nodes.length} nodes targeted
+                </div>
+            {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}<!-- planned and actual are same nodes -->
+                <div class="nodes">
+                    {batch.actual_nodes.length} nodes targeted
+                </div>
+            {:else}<!-- no actual nodes yet -->
+                <div class="nodes">
+                    {batch.planned_nodes.length} nodes planned
+                </div>
+            {/if}
         </div>
-        <div class="nodes">
-            {batch.actual_nodes.length} nodes targeted
-        </div>
-    {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}<!-- planned and actual are same nodes -->
-        <div class="nodes">
-            {batch.actual_nodes.length} nodes targeted
-        </div>
-    {:else}<!-- no actual nodes yet -->
-        <div class="nodes">
-            {batch.planned_nodes.length} nodes planned
-        </div>
-    {/if}
+    </div>
     <div class="time text-gray-500">
         Planned <Time
             live
@@ -77,11 +80,12 @@
         padding: 0.6em;
         flex-grow: 1;
     }
-    li.batch a.hostos_node_batch_state div {
+    .hostos_node_batch_state {
+        display: grid;
+        grid-template-columns: min-content auto;
+    }
+    li.batch .hostos_node_batch_state a {
         min-width: 1.8em;
-        float: left;
-        margin-top: -2px;
-        text-align: left;
     }
     .time,
     .nodes {
