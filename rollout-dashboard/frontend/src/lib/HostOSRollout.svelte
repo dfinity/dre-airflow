@@ -5,6 +5,7 @@
     import SvelteMarkdown from "svelte-markdown";
     import {
         type HostOsRollout,
+        type HostOsStages,
         hostOsStateName,
         hostOsStateIcon,
         rolloutKindName,
@@ -15,6 +16,12 @@
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
+    let stage_names: (keyof HostOsStages)[] = [
+        "canary",
+        "main",
+        "unassigned",
+        "stragglers",
+    ];
 </script>
 
 <section class="rollout {rolloutClass} {rollout.kind}">
@@ -97,50 +104,25 @@
     </div>
     {#if rollout.stages}
         <div class="stages">
-            {#if rollout.stages.canary["1"] !== undefined}
-                <ul class="stage-canary">
-                    {#each Object.entries(rollout.stages.canary) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div class="stage-canary stage-name text-gray-500 rounded-lg">
-                    Canary
-                </div>
-            {/if}
-            {#if rollout.stages.main["1"] !== undefined}
-                <ul class="stage-main">
-                    {#each Object.entries(rollout.stages.main) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div class="stage-main stage-name text-gray-500 rounded-lg">
-                    Main
-                </div>
-            {/if}
-            {#if rollout.stages.unassigned["1"] !== undefined}
-                <ul class="stage-unassigned">
-                    {#each Object.entries(rollout.stages.unassigned) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div
-                    class="stage-unassigned stage-name text-gray-500 rounded-lg"
-                >
-                    Unassigned
-                </div>
-            {/if}
-            {#if rollout.stages.stragglers["1"] !== undefined}
-                <ul class="stage-stragglers">
-                    {#each Object.entries(rollout.stages.stragglers) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div
-                    class="stage-stragglers stage-name text-gray-500 rounded-lg"
-                >
-                    Stragglers
-                </div>
-            {/if}
+            {#each stage_names as stage_name}
+                {#if rollout.stages[stage_name]["1"] !== undefined}
+                    <ul class="stage-{stage_name}">
+                        {#each Object.entries(rollout.stages[stage_name]) as [batch_num, batch]}
+                            <HostOSBatch
+                                dag_run_id={rollout.name.toString()}
+                                {stage_name}
+                                batch_number={batch_num}
+                                {batch}
+                            />
+                        {/each}
+                    </ul>
+                    <div
+                        class="stage-{stage_name} stage-name text-gray-500 rounded-lg"
+                    >
+                        {cap(stage_name)}
+                    </div>
+                {/if}
+            {/each}
         </div>
     {:else}
         <div

@@ -1,5 +1,5 @@
 import { get, writable, type Writable } from 'svelte/store'
-import { type Rollout, type State, type Error, type RolloutsDelta, type RolloutEngineStates, type RolloutKind } from './types'
+import { type Rollout, type State, type Error, type RolloutsDelta, type RolloutEngineStates } from './types'
 
 export type FullState = {
     error: [number, string] | string | null;

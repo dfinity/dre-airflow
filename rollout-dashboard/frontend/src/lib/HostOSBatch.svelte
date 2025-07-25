@@ -1,18 +1,28 @@
 <script lang="ts">
     import Time from "svelte-time";
-    import { copy } from "svelte-copy";
-    import { toast } from "@zerodevx/svelte-toast";
     import {
         type HostOsBatch,
         hostOsBatchStateComment,
         hostOsBatchStateIcon,
     } from "./types";
-    import { cap, selectTextOnFocus } from "./lib";
-    export let batch_num: String;
+    import { cap } from "./lib";
+    export let dag_run_id: string;
+    export let stage_name: string;
+    export let batch_number: string;
     export let batch: HostOsBatch;
+    import { url } from "@roxi/routify";
+
+    const detailsUrl = $url(
+        "../rollouts/rollout_ic_os_to_mainnet_nodes/[dag_run_id]/stages/[stage_name]/batches/[batch_number]",
+        {
+            dag_run_id: dag_run_id,
+            stage_name: stage_name,
+            batch_number: batch_number,
+        },
+    );
 </script>
 
-<li class="rounded-lg border batch batch-{batch_num}">
+<li class="rounded-lg border batch batch-{batch_number}">
     <div class="hostos_node_batch_state">
         <a
             rel="external"
@@ -28,18 +38,27 @@
         <div>
             {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
                 <div class="nodes">
+                    <!-- planned and actual differ -->
                     {batch.planned_nodes.length} nodes planned
                 </div>
                 <div class="nodes">
-                    {batch.actual_nodes.length} nodes targeted
+                    <a href={detailsUrl}
+                        >{batch.actual_nodes.length} nodes targeted</a
+                    >
                 </div>
-            {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}<!-- planned and actual are same nodes -->
+            {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
                 <div class="nodes">
-                    {batch.actual_nodes.length} nodes targeted
+                    <!-- planned and actual are same nodes -->
+                    <a href={detailsUrl}
+                        >{batch.actual_nodes.length} nodes targeted</a
+                    >
                 </div>
-            {:else}<!-- no actual nodes yet -->
+            {:else}
                 <div class="nodes">
-                    {batch.planned_nodes.length} nodes planned
+                    <!-- no actual nodes yet -->
+                    <a href={detailsUrl}
+                        >{batch.planned_nodes.length} nodes planned</a
+                    >
                 </div>
             {/if}
         </div>

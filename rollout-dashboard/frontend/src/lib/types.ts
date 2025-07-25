@@ -330,3 +330,26 @@ export type RolloutsDelta = {
     updated: Rollout[];
     deleted: DeletedRollout[];
 };
+
+/* Unstable types. */
+
+export type NodeInfo = {
+    node_id: string
+    node_provider_id: string
+    subnet_id: string | null
+    dc_id: string
+    status: string
+}
+
+export type HostOsBatchDetail = {
+    stage: keyof HostOsStages
+    batch_number: number
+    planned_start_time: Date;
+    actual_start_time: Date | null;
+    end_time: Date | null;
+    state: keyof typeof HostOsBatchState;
+    comment: String;
+    display_url: string;
+    planned_nodes: NodeInfo[];
+    actual_nodes: NodeInfo[] | null;
+}
