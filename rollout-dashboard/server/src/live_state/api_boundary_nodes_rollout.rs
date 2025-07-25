@@ -114,7 +114,7 @@ impl From<PythonFormattedPlan> for Plan {
 type BatchMap = IndexMap<usize, Batch>;
 
 #[derive(Clone, Default)]
-pub(super) struct Parser {
+pub(crate) struct Parser {
     schedule: PlanCache<PythonFormattedPlan>,
 }
 

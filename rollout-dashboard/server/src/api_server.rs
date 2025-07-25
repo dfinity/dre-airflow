@@ -1,5 +1,5 @@
-use crate::live_state::HostOsRolloutBatchStateRequestError;
-use crate::live_state::{AirflowStateSyncer, Live, SyncCycleState};
+use crate::live_state::{AirflowStateSyncer, Live, Parser, SyncCycleState};
+use crate::live_state::{RolloutDataGatherError, SuccessfulSyncCycleState};
 use async_stream::try_stream;
 use axum::extract::Path;
 use axum::extract::Query;
@@ -11,11 +11,13 @@ use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
 use rollout_dashboard::airflow_client::AirflowClient;
+use rollout_dashboard::types::unstable::StageName;
 use rollout_dashboard::types::{unstable, v1, v2};
 use serde::{Deserialize, Deserializer, de};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt;
+use std::num::NonZero;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -46,18 +48,6 @@ macro_rules! http_error {
     ($code:expr, $str:expr, $($arg:tt)*) => {{
         Err(($code, format!($str, $($arg)*)))
     }};
-}
-
-macro_rules! bad_request {
-    ($($arg:tt)*) => {{ http_error!(StatusCode::BAD_REQUEST, $($arg)*) }};
-}
-
-macro_rules! internal_server_error {
-    ($($arg:tt)*) => {{ http_error!(StatusCode::INTERNAL_SERVER_ERROR, $($arg)*) }};
-}
-
-macro_rules! not_found {
-    ($($arg:tt)*) => {{ http_error!(StatusCode::NOT_FOUND, $($arg)*) }};
 }
 
 macro_rules! no_content {
@@ -105,6 +95,65 @@ macro_rules! handle {
     }};
 }
 
+#[derive(Clone)]
+pub enum HostOsRolloutBatchStateRequestError {
+    InvalidBatchNumber,
+    InvalidStageName,
+    InvalidDagID,
+    InvalidDagRunID,
+    NotYetSynced,
+    RolloutDataGatherError(RolloutDataGatherError),
+    NoSuchDagRun,
+    NoPlanDataYet,
+    NoSuchBatch,
+    WrongDagRunKind,
+}
+
+impl From<HostOsRolloutBatchStateRequestError> for String {
+    fn from(h: HostOsRolloutBatchStateRequestError) -> String {
+        type T = HostOsRolloutBatchStateRequestError;
+        match h {
+            T::NotYetSynced => "Backend has not yet 
+            fetched rollouts"
+                .to_string(),
+            T::NoPlanDataYet => "Rollout has not yet computed a plan".to_string(),
+            T::NoSuchDagRun => "No such DAG run".to_string(),
+            T::InvalidDagID => "Invalid DAG ID".to_string(),
+            T::WrongDagRunKind => "DAG run refers to the wrong kind of rollout".to_string(),
+            T::InvalidDagRunID => "Invalid DAG run ID".to_string(),
+            T::InvalidStageName => "Invalid stage name".to_string(),
+            T::InvalidBatchNumber => "Invalid batch number".to_string(),
+            T::NoSuchBatch => "The batch number is not in the rollout".to_string(),
+            T::RolloutDataGatherError(e) => e.to_string(),
+        }
+    }
+}
+
+impl From<HostOsRolloutBatchStateRequestError> for StatusCode {
+    fn from(h: HostOsRolloutBatchStateRequestError) -> StatusCode {
+        type T = HostOsRolloutBatchStateRequestError;
+        type C = StatusCode;
+        match h {
+            T::NotYetSynced => C::PROCESSING,
+            T::NoPlanDataYet => C::PROCESSING,
+            T::NoSuchDagRun => C::NOT_FOUND,
+            T::InvalidDagID => C::BAD_REQUEST,
+            T::WrongDagRunKind => C::BAD_REQUEST,
+            T::InvalidDagRunID => C::BAD_REQUEST,
+            T::InvalidStageName => C::BAD_REQUEST,
+            T::InvalidBatchNumber => C::BAD_REQUEST,
+            T::NoSuchBatch => C::NOT_FOUND,
+            T::RolloutDataGatherError(_) => C::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<HostOsRolloutBatchStateRequestError> for (StatusCode, String) {
+    fn from(h: HostOsRolloutBatchStateRequestError) -> (StatusCode, String) {
+        (h.clone().into(), h.into())
+    }
+}
+
 impl ApiServer {
     pub fn new(
         state_syncer: Arc<AirflowStateSyncer<Live>>,
@@ -134,14 +183,18 @@ impl ApiServer {
                 vec![]
             }
             (
-                SyncCycleState::State(state),
+                SyncCycleState::Successful(state),
                 SyncCycleState::Initial | SyncCycleState::Error(_),
                 _,
             ) => {
-                vec![v2::sse::Message::CompleteState(state.clone())]
+                vec![v2::sse::Message::CompleteState(state.clone().into())]
             }
             // Error after a good update.  Send error.
-            (SyncCycleState::Error(e), SyncCycleState::Initial | SyncCycleState::State(_), _) => {
+            (
+                SyncCycleState::Error(e),
+                SyncCycleState::Initial | SyncCycleState::Successful(_),
+                _,
+            ) => {
                 vec![v2::sse::Message::Error(e.clone().into())]
             }
             // Error after an error.  Only send update if errors differ.
@@ -155,43 +208,30 @@ impl ApiServer {
                 }
             }
             // Last time was a good update, but delta support is not requested.  Send full sync.
-            (
-                SyncCycleState::State(v2::State {
-                    rollouts: new_rollouts,
-                    rollout_engine_states: new_rollout_engine_states,
-                }),
-                SyncCycleState::State(_),
-                false,
-            ) => vec![
-                (v2::sse::Message::CompleteState(v2::State {
-                    rollouts: new_rollouts.clone(),
-                    rollout_engine_states: new_rollout_engine_states.clone(),
-                })),
-            ],
+            (SyncCycleState::Successful(state), SyncCycleState::Successful(_), false) => {
+                vec![(v2::sse::Message::CompleteState(state.clone().into()))]
+            }
             // Last time was a good update and sync is enabled.  Send differential sync.
             (
-                SyncCycleState::State(v2::State {
+                SyncCycleState::Successful(SuccessfulSyncCycleState {
                     rollouts: new_rollouts,
                     rollout_engine_states: new_rollout_engine_states,
                 }),
-                SyncCycleState::State(v2::State {
+                SyncCycleState::Successful(SuccessfulSyncCycleState {
                     rollouts: old_rollouts,
                     rollout_engine_states: old_rollout_engine_states,
                 }),
                 true,
             ) => {
                 let new_names = new_rollouts
-                    .iter()
-                    .map(|r| r.key())
-                    .collect::<HashSet<String>>();
-                let old_rollouts_map = old_rollouts.iter().map(|r| (r.key(), r)).collect::<HashMap<
-                    String,
-                    &v2::Rollout,
-                >>(
-                );
+                    .clone()
+                    .into_iter()
+                    .map(|(k, _)| k)
+                    .collect::<HashSet<(v2::DagID, v2::DagRunID)>>();
                 let updated = new_rollouts
-                    .iter()
-                    .filter_map(|r| match old_rollouts_map.get(&r.key()) {
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(k, r)| match old_rollouts.get(&k) {
                         None => Some(r.clone()),
                         Some(old_rollout) => match r.update_count != old_rollout.update_count {
                             true => Some(r.clone()),
@@ -200,12 +240,13 @@ impl ApiServer {
                     })
                     .collect::<VecDeque<v2::Rollout>>();
                 let deleted = old_rollouts
-                    .iter()
-                    .filter_map(|r| match new_names.contains(&r.key()) {
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(k, r)| match new_names.contains(&k) {
                         true => None,
                         false => Some(v2::DeletedRollout {
-                            kind: r.kind(),
-                            name: r.name.clone(),
+                            kind: r.kind().to_string(),
+                            name: r.name.to_string(),
                         }),
                     })
                     .collect::<VecDeque<v2::DeletedRollout>>();
@@ -284,24 +325,25 @@ impl ApiServer {
 
     // #[debug_handler]
     async fn get_rollout_data(&self) -> Result<Json<VecDeque<v1::Rollout>>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
+        match &self.state_syncer.get_state().await.cycle_state {
             SyncCycleState::Initial => no_content!(),
-            SyncCycleState::State(s) => Ok(Json(
+            SyncCycleState::Successful(s) => Ok(Json(
                 s.rollouts
+                    .clone()
                     .into_iter()
-                    .filter_map(|r| r.try_into().ok())
+                    .filter_map(|(_, r)| r.try_into().ok())
                     .collect(),
             )),
-            SyncCycleState::Error(err) => Err(err.into()),
+            SyncCycleState::Error(err) => Err(err.clone().into()),
         }
     }
 
     // #[debug_handler]
     async fn get_engine_state(&self) -> Result<Json<v1::RolloutEngineState>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
+        match &self.state_syncer.get_state().await.cycle_state {
             SyncCycleState::Initial => no_content!(),
-            SyncCycleState::State(s) => Ok(Json(s.rollout_engine_states.into())),
-            SyncCycleState::Error(err) => Err(err.into()),
+            SyncCycleState::Successful(s) => Ok(Json(s.rollout_engine_states.clone().into())),
+            SyncCycleState::Error(err) => Err(err.clone().into()),
         }
     }
 
@@ -348,10 +390,10 @@ impl ApiServer {
     /* V2 API */
 
     async fn get_state(&self) -> Result<Json<v2::State>, (StatusCode, String)> {
-        match self.state_syncer.get_cycle_state().await {
+        match &self.state_syncer.get_state().await.cycle_state {
             SyncCycleState::Initial => no_content!(),
-            SyncCycleState::State(s) => Ok(Json(s)),
-            SyncCycleState::Error(e) => Err(e.into()),
+            SyncCycleState::Successful(s) => Ok(Json(s.clone().into())),
+            SyncCycleState::Error(e) => Err(e.clone().into()),
         }
     }
 
@@ -411,11 +453,22 @@ impl ApiServer {
     async fn get_cache(
         &self,
     ) -> Result<Json<Vec<unstable::FlowCacheResponse>>, (StatusCode, String)> {
-        Ok(Json(self.state_syncer.get_cache().await))
+        let cache = self.state_syncer.get_state().await;
+        let mut result: Vec<unstable::FlowCacheResponse> = cache
+            .rollout_states
+            .iter()
+            .map(|(_, v)| (v).into())
+            .collect();
+        drop(cache);
+        result.sort_by_key(|v| v.dispatch_time);
+        result.reverse();
+        Ok(Json(result))
     }
 
     async fn get_internal_state(&self) -> Result<Json<SyncCycleState>, Infallible> {
-        Ok(Json(self.state_syncer.get_cycle_state().await))
+        Ok(Json(
+            self.state_syncer.get_state().await.cycle_state.clone(),
+        ))
     }
 
     async fn get_dag_run(
@@ -436,38 +489,63 @@ impl ApiServer {
         dag_run_id: &str,
         stage_name: &str,
         batch_number: usize,
-    ) -> Result<Json<unstable::HostOsRolloutBatchStateResponse>, (StatusCode, String)> {
-        match self
-            .state_syncer
-            .get_hostos_rollout_batch_state(dag_run_id, stage_name, batch_number)
-            .await
-        {
-            Err(HostOsRolloutBatchStateRequestError::NotYetSynced) => no_content!(),
-            Err(HostOsRolloutBatchStateRequestError::NoDataForDagRun) => {
-                not_found!("Supplied DAG run ID not found.")
-            }
+    ) -> Result<Json<unstable::HostOsBatchDetail>, (StatusCode, String)> {
+        if !(1..=100).contains(&batch_number) {
+            return Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber.into());
+        }
+        let nonzero_batch_number = NonZero::new(batch_number).unwrap();
+        let stage = StageName::from_str(stage_name)
+            .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidStageName)?;
 
-            Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber) => {
-                not_found!("No data for supplied batch number.")
+        let dag_id = v2::DagID::RolloutIcOsToMainnetNodes;
+        let dag_run_id = v2::DagRunID::from_str(dag_run_id)
+            .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidDagRunID)?;
+
+        let cache = self.state_syncer.get_state().await;
+
+        let res = match &cache.cycle_state {
+            SyncCycleState::Initial => Err(HostOsRolloutBatchStateRequestError::NotYetSynced),
+            SyncCycleState::Error(e) => Err(
+                HostOsRolloutBatchStateRequestError::RolloutDataGatherError(e.clone()),
+            ),
+            SyncCycleState::Successful(SuccessfulSyncCycleState { .. }) => {
+                match cache.rollout_states.get(&(dag_id, dag_run_id)) {
+                    None => Err(HostOsRolloutBatchStateRequestError::NoSuchDagRun),
+                    Some(it) => {
+                        match &it.parser {
+                            Parser::Nodes(parser) => {
+                                let stage = {
+                                    match (stage, &parser.stages) {
+                                        (StageName::Canary, Some(stages)) => &stages.canary,
+                                        (StageName::Main, Some(stages)) => &stages.main,
+                                        (StageName::Unassigned, Some(stages)) => &stages.unassigned,
+                                        (StageName::Stragglers, Some(stages)) => &stages.stragglers,
+                                        (_, None) => {
+                                            return Err(
+                                                HostOsRolloutBatchStateRequestError::NoPlanDataYet
+                                                    .into(),
+                                            );
+                                        }
+                                    }
+                                };
+                                match stage.get(&nonzero_batch_number) {
+                                    Some(n) => Ok(n.clone()),
+                                    None => Err(HostOsRolloutBatchStateRequestError::NoSuchBatch),
+                                }
+                            }
+                            _ => {
+                                // There is a rollout with such a DAG run ID, but it's not
+                                // the right type of rollout, so we return early.
+                                Err(HostOsRolloutBatchStateRequestError::WrongDagRunKind)
+                            }
+                        }
+                    }
+                }
             }
-            Err(HostOsRolloutBatchStateRequestError::InvalidDagID) => {
-                bad_request!("Invalid DAG ID.")
-            }
-            Err(HostOsRolloutBatchStateRequestError::InvalidDagRunID) => {
-                bad_request!("Invalid DAG run ID.")
-            }
-            Err(HostOsRolloutBatchStateRequestError::InvalidStageName) => {
-                bad_request!("Invalid stage name.")
-            }
-            Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber) => {
-                bad_request!("Invalid batch number.")
-            }
-            Err(HostOsRolloutBatchStateRequestError::InvalidPlanData) => {
-                internal_server_error!("Invalid plan data found for batch.")
-            }
-            Err(HostOsRolloutBatchStateRequestError::RolloutDataGatherError(err)) => {
-                Err(err.into())
-            }
+        };
+
+        match res {
+            Err(e) => Err(e.into()),
             Ok(data) => Ok(Json(data)),
         }
     }
@@ -511,10 +589,6 @@ impl ApiServer {
                 // unstable API
                 "/api/unstable",
                 Router::new().route(
-                    "/cache2",
-                    get(handle!(self, s, { s.get_cache().await} ))
-                )
-                .route(
                     "/cache",
                     get(handle!(self, s, { s.get_cache().await }))
                 )

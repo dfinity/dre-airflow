@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use derive_more::IntoIterator;
 use futures::future::join_all;
 use indexmap::IndexMap;
 use log::{debug, error, info};
@@ -7,14 +8,12 @@ use rollout_dashboard::airflow_client::{
     AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
     TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::unstable::NodeInfo;
 use rollout_dashboard::types::v2::{Rollout, RolloutKind};
-use rollout_dashboard::types::{unstable, v2};
+use rollout_dashboard::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use serde::Serialize;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::convert::Infallible;
 use std::fmt::{self, Display};
 use std::future::Future;
 use std::str::FromStr;
@@ -25,9 +24,6 @@ use tokio::sync::watch::{self, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, sleep};
 use tokio::{select, spawn};
-
-use crate::live_state::hostos_rollout::{ProvisionalHostOSPlan, StageName};
-use crate::live_state::plan::PlanStateForTask;
 
 mod api_boundary_nodes_rollout;
 mod guestos_rollout;
@@ -53,17 +49,6 @@ where
         (Some(d1), None) => Some(d1),
         (None, Some(d2)) => Some(d2),
         (None, None) => None,
-    }
-}
-
-#[derive(Debug)]
-struct InvalidDagID {
-    dag_id: String,
-}
-
-impl Display for InvalidDagID {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid DAG ID {}", self.dag_id)
     }
 }
 
@@ -126,78 +111,51 @@ impl From<RolloutDataGatherError> for v2::Error {
 }
 
 #[derive(Clone, Serialize)]
+pub struct SuccessfulSyncCycleState {
+    pub rollouts: Rollouts,
+    pub rollout_engine_states: v2::RolloutEngineStates,
+}
+
+impl From<SuccessfulSyncCycleState> for v2::State {
+    fn from(s: SuccessfulSyncCycleState) -> v2::State {
+        v2::State {
+            rollouts: s.rollouts.0.into_values().collect(),
+            rollout_engine_states: s.rollout_engine_states,
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
 pub enum SyncCycleState {
     Initial,
-    State(v2::State),
+    Successful(SuccessfulSyncCycleState),
     Error(RolloutDataGatherError),
 }
 
-// Types to prevent type confusion.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DagID(String);
-
-impl Display for DagID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for DagID {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DagRunID(String);
-
-impl Display for DagRunID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for DagRunID {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
-    }
-}
-
 #[derive(Clone)]
-enum Parser {
+#[allow(clippy::large_enum_variant)]
+pub(super) enum Parser {
     Subnets(guestos_rollout::Parser),
     ApiBoundaryNodes(api_boundary_nodes_rollout::Parser),
     Nodes(hostos_rollout::Parser),
 }
 
 impl Parser {
-    fn new(dag_id: &str) -> Result<Self, InvalidDagID> {
+    fn new(dag_id: DagID) -> Self {
         match dag_id {
-            "rollout_ic_os_to_mainnet_subnets" => {
-                Ok(Parser::Subnets(guestos_rollout::Parser::new()))
+            DagID::RolloutIcOsToMainnetSubnets => Parser::Subnets(guestos_rollout::Parser::new()),
+            DagID::RolloutIcOsToMainnetApiBoundaryNodes => {
+                Parser::ApiBoundaryNodes(api_boundary_nodes_rollout::Parser::new())
             }
-            "rollout_ic_os_to_mainnet_api_boundary_nodes" => Ok(Parser::ApiBoundaryNodes(
-                api_boundary_nodes_rollout::Parser::new(),
-            )),
-            "rollout_ic_os_to_mainnet_nodes" => Ok(Parser::Nodes(hostos_rollout::Parser::new())),
-            _ => Err(InvalidDagID {
-                dag_id: dag_id.to_string(),
-            }),
+            DagID::RolloutIcOsToMainnetNodes => Parser::Nodes(hostos_rollout::Parser::new()),
         }
     }
 
     fn valid_dag_ids() -> Vec<DagID> {
         vec![
-            DagID::from_str("rollout_ic_os_to_mainnet_subnets")
-                .expect("Should be convertable to DAG ID"),
-            DagID::from_str("rollout_ic_os_to_mainnet_api_boundary_nodes")
-                .expect("Should be convertable to DAG ID"),
-            DagID::from_str("rollout_ic_os_to_mainnet_nodes")
-                .expect("Should be convertable to DAG ID"),
+            DagID::RolloutIcOsToMainnetSubnets,
+            DagID::RolloutIcOsToMainnetApiBoundaryNodes,
+            DagID::RolloutIcOsToMainnetNodes,
         ]
     }
 
@@ -216,15 +174,32 @@ impl Parser {
 }
 
 #[derive(Clone)]
-struct RolloutState {
+pub(super) struct RolloutState {
     dag_id: DagID,
     dag_run_id: DagRunID,
-    parser: Parser,
+    pub(super) parser: Parser,
     task_instances: IndexMap<String, HashMap<Option<usize>, TaskInstancesResponseItem>>,
     logical_date: DateTime<Utc>,
     note: Option<String>,
     last_update_time: Option<DateTime<Utc>>,
     update_count: usize,
+}
+
+impl From<&RolloutState> for unstable::FlowCacheResponse {
+    fn from(s: &RolloutState) -> unstable::FlowCacheResponse {
+        unstable::FlowCacheResponse {
+            dag_id: s.dag_id.clone(),
+            rollout_id: s.dag_run_id.clone(),
+            dispatch_time: s.logical_date,
+            linearized_task_instances: s
+                .task_instances
+                .iter()
+                .flat_map(|(_, s)| s.iter().map(|(_, v)| v.clone()))
+                .collect(),
+            last_update_time: s.last_update_time,
+            update_count: s.update_count,
+        }
+    }
 }
 
 impl RolloutState {
@@ -301,7 +276,7 @@ impl RolloutState {
         }
 
         let rollout = Rollout {
-            name: dag_run.dag_run_id.to_string(),
+            name: DagRunID::from_str(dag_run.dag_run_id.as_str()).unwrap(),
             display_url: {
                 let mut display_url = airflow_api
                     .url
@@ -328,7 +303,7 @@ impl RolloutState {
 }
 
 #[derive(Clone)]
-struct RolloutStates(HashMap<(DagID, DagRunID), RolloutState>);
+pub(super) struct RolloutStates(HashMap<(DagID, DagRunID), RolloutState>);
 
 impl RolloutStates {
     fn clone_or_new(
@@ -336,11 +311,11 @@ impl RolloutStates {
         dag_id: DagID,
         dag_run_id: DagRunID,
         logical_date: DateTime<Utc>,
-    ) -> Result<RolloutState, InvalidDagID> {
+    ) -> RolloutState {
         match self.0.get(&(dag_id.clone(), dag_run_id.clone())) {
             Some(updater_state) => match updater_state.logical_date == logical_date {
                 // Same rollout being updated.
-                true => Ok(RolloutState {
+                true => RolloutState {
                     dag_id,
                     dag_run_id,
                     parser: updater_state.parser.clone(),
@@ -349,31 +324,31 @@ impl RolloutStates {
                     last_update_time: updater_state.last_update_time,
                     logical_date: updater_state.logical_date,
                     update_count: updater_state.update_count,
-                }),
+                },
                 // Rollout redispatched with same name, we start blank.
                 // we do preserve the update count.
-                false => Ok(RolloutState {
+                false => RolloutState {
                     dag_id: dag_id.clone(),
                     dag_run_id,
-                    parser: Parser::new(dag_id.to_string().as_str())?,
+                    parser: Parser::new(dag_id),
                     task_instances: IndexMap::new(),
                     note: None,
                     last_update_time: None,
                     logical_date,
                     update_count: updater_state.update_count + 1,
-                }),
+                },
             },
             // Not found, let's create one!
-            None => Ok(RolloutState {
+            None => RolloutState {
                 dag_id: dag_id.clone(),
                 dag_run_id,
-                parser: Parser::new(dag_id.to_string().as_str())?,
+                parser: Parser::new(dag_id),
                 task_instances: IndexMap::new(),
                 note: None,
                 last_update_time: None,
                 logical_date,
                 update_count: 0,
-            }),
+            },
         }
     }
 
@@ -387,14 +362,22 @@ impl RolloutStates {
             updater,
         );
     }
+
+    pub(super) fn get(&self, v: &(DagID, DagRunID)) -> Option<&RolloutState> {
+        self.0.get(v)
+    }
+
+    pub fn iter(&self) -> std::collections::hash_map::Iter<(DagID, DagRunID), RolloutState> {
+        self.0.iter()
+    }
 }
 
 #[derive(Clone)]
-struct SyncerState {
+pub(super) struct SyncerState {
     /// Map from DAG ID and DAG run ID to updater.
-    rollout_states: RolloutStates,
+    pub(super) rollout_states: RolloutStates,
     log_inspectors: HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
-    cycle_state: SyncCycleState,
+    pub(super) cycle_state: SyncCycleState,
 }
 
 pub(crate) struct Initial;
@@ -402,7 +385,7 @@ pub(crate) struct Live;
 
 pub(crate) struct AirflowStateSyncer<S> {
     airflow_api: Arc<AirflowClient>,
-    syncer_state: Arc<Mutex<SyncerState>>,
+    syncer_state: Arc<Mutex<Arc<SyncerState>>>,
     stream_tx: Sender<SyncCycleState>,
     refresh_interval: u64,
     max_rollouts: usize,
@@ -420,11 +403,11 @@ impl AirflowStateSyncer<Initial> {
         let (stream_tx, _stream_rx) = watch::channel::<SyncCycleState>(init.clone());
         Self {
             airflow_api,
-            syncer_state: Arc::new(Mutex::new(SyncerState {
+            syncer_state: Arc::new(Mutex::new(Arc::new(SyncerState {
                 rollout_states: RolloutStates(HashMap::new()),
                 log_inspectors: HashMap::new(),
                 cycle_state: init,
-            })),
+            }))),
             stream_tx,
             refresh_interval,
             max_rollouts,
@@ -456,129 +439,22 @@ impl AirflowStateSyncer<Initial> {
     }
 }
 
-pub enum HostOsRolloutBatchStateRequestError {
-    NotYetSynced,
-    NoDataForDagRun,
-    InvalidDagID,
-    InvalidDagRunID,
-    InvalidStageName,
-    InvalidBatchNumber,
-    NoDataForBatchNumber,
-    InvalidPlanData,
-    RolloutDataGatherError(RolloutDataGatherError),
+#[derive(Clone, IntoIterator, Serialize)]
+pub struct Rollouts(IndexMap<(v2::DagID, v2::DagRunID), Rollout>);
+
+impl Rollouts {
+    pub fn get(&self, q: &(v2::DagID, v2::DagRunID)) -> Option<&Rollout> {
+        self.0.get(q)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
-type HostOsRolloutBatchStateResult =
-    Result<unstable::HostOsRolloutBatchStateResponse, HostOsRolloutBatchStateRequestError>;
-
 impl AirflowStateSyncer<Live> {
-    pub async fn get_cycle_state(&self) -> SyncCycleState {
-        self.syncer_state.lock().await.cycle_state.clone()
-    }
-
-    pub async fn get_cache(&self) -> Vec<unstable::FlowCacheResponse> {
-        let cache = self.syncer_state.lock().await;
-        let mut result: Vec<_> = cache
-            .rollout_states
-            .0
-            .iter()
-            .map(|(k, v)| unstable::FlowCacheResponse {
-                dag_id: k.0.to_string(),
-                rollout_id: k.1.to_string(),
-                dispatch_time: v.logical_date,
-                linearized_task_instances: v
-                    .task_instances
-                    .iter()
-                    .flat_map(|(_, v)| v.iter().map(|(_, v)| v.clone()))
-                    .collect(),
-                last_update_time: v.last_update_time,
-                update_count: v.update_count,
-            })
-            .collect();
-        drop(cache);
-        result.sort_by_key(|v| v.dispatch_time);
-        result.reverse();
-        result
-    }
-
-    pub async fn get_hostos_rollout_batch_state(
-        &self,
-        dag_run_id: &str,
-        stage_name: &str,
-        batch_number: usize,
-    ) -> HostOsRolloutBatchStateResult {
-        let cache = self.syncer_state.lock().await;
-        if !(1..=100).contains(&batch_number) {
-            return Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber);
-        }
-
-        fn get_plan<P>(
-            src: &plan::PlanCache<P>,
-        ) -> Result<&P, HostOsRolloutBatchStateRequestError> {
-            match src {
-                plan::PlanCache::Unretrieved => {
-                    Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber)
-                }
-                plan::PlanCache::RetrievedAtTaskState {
-                    try_number: _,
-                    latest_date: _,
-                    state,
-                } => match state {
-                    PlanStateForTask::Missing => {
-                        Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber)
-                    }
-                    PlanStateForTask::Invalid => {
-                        Err(HostOsRolloutBatchStateRequestError::InvalidPlanData)
-                    }
-                    PlanStateForTask::Valid(plan) => Ok(plan),
-                },
-            }
-        }
-
-        match &cache.cycle_state {
-            SyncCycleState::Initial => Err(HostOsRolloutBatchStateRequestError::NotYetSynced),
-            SyncCycleState::Error(e) => Err(
-                HostOsRolloutBatchStateRequestError::RolloutDataGatherError(e.clone()),
-            ),
-            SyncCycleState::State(_) => {
-                match cache.rollout_states.0.get(&(
-                    DagID::from_str("rollout_ic_os_to_mainnet_nodes")
-                        .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidDagID)?,
-                    DagRunID::from_str(dag_run_id)
-                        .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidDagRunID)?,
-                )) {
-                    None => Err(HostOsRolloutBatchStateRequestError::NoDataForDagRun),
-                    Some(it) => match &it.parser {
-                        Parser::Nodes(parser) => {
-                            let stage = StageName::from_str(stage_name).map_err(|_| {
-                                HostOsRolloutBatchStateRequestError::InvalidStageName
-                            })?;
-                            let provisional_batch = {
-                                let provisional_plan: &ProvisionalHostOSPlan =
-                                    get_plan(&parser.provisional_plan)?;
-                                match provisional_plan.get_stage(stage.clone()) {
-                                    Some(plan) => match plan.get(batch_number - 1) {
-                                        Some(batch) => Ok(batch.clone()),
-                                        None => Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber),
-                                    },
-                                    None => Err(HostOsRolloutBatchStateRequestError::NoDataForBatchNumber)
-                                }
-                            };
-                            let actual_batch: Option<&Vec<NodeInfo>> =
-                                match parser.actual_plans.get(&(stage, batch_number)) {
-                                    None => None,
-                                    Some(actual_plan) => Some(get_plan(actual_plan)?),
-                                };
-                            Ok(unstable::HostOsRolloutBatchStateResponse {
-                                provisional_plan: provisional_batch?.into(),
-                                actual_plan: actual_batch.cloned(),
-                            })
-                        }
-                        _ => Err(HostOsRolloutBatchStateRequestError::InvalidDagID),
-                    },
-                }
-            }
-        }
+    pub async fn get_state(&self) -> Arc<SyncerState> {
+        self.syncer_state.lock().await.clone()
     }
 
     /// Create a channel that will get state updates as soon as they are available.
@@ -610,7 +486,7 @@ impl AirflowStateSyncer<Live> {
     ) -> Result<
         (
             v2::RolloutEngineStates,
-            v2::Rollouts,
+            Rollouts,
             RolloutStates,
             HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
         ),
@@ -721,7 +597,7 @@ impl AirflowStateSyncer<Live> {
         .map(|(dag_id, dag_run_id, last_event_log_update, dag_run_update_type, dag_run, sorter)| {
             // For each DAG run, create / clone its rollout state, then fetch all tasks, or tasks that have been updated.
 
-            let mut rollout_state = rollout_states.clone_or_new(dag_id, dag_run_id, dag_run.logical_date).unwrap(); // FIXME use typing to prevent need for unwrap().
+            let mut rollout_state = rollout_states.clone_or_new(dag_id, dag_run_id, dag_run.logical_date);
 
             async move || {
                 let tgt = &format!("{}::{}", LOG_TARGET, rollout_state.dag_id);
@@ -840,7 +716,12 @@ impl AirflowStateSyncer<Live> {
         // Save the state of the log inspector after everything was successful.
         Ok((
             engine_states,
-            rollouts.into(),
+            Rollouts(
+                rollouts
+                    .into_iter()
+                    .map(|r| ((r.kind(), r.name.clone()), r))
+                    .collect(),
+            ),
             rollout_states,
             log_inspectors,
         ))
@@ -858,14 +739,14 @@ impl AirflowStateSyncer<Live> {
             .await
         {
             Ok((engine_state, rollouts, rollout_states, log_inspectors)) => {
-                *syncer_state = SyncerState {
+                *syncer_state = Arc::new(SyncerState {
                     log_inspectors,
                     rollout_states,
-                    cycle_state: SyncCycleState::State(v2::State {
+                    cycle_state: SyncCycleState::Successful(SuccessfulSyncCycleState {
                         rollout_engine_states: engine_state,
                         rollouts,
                     }),
-                };
+                });
                 syncer_state.cycle_state.clone()
             }
             Err(e) => SyncCycleState::Error(e),
@@ -887,7 +768,7 @@ impl AirflowStateSyncer<Live> {
                 d = self.sync_state(self.max_rollouts) => {
                     match &d {
                         SyncCycleState::Initial => (),
-                        SyncCycleState::State(v2::State {rollouts, ..}) => {
+                        SyncCycleState::Successful(SuccessfulSyncCycleState {rollouts, ..}) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
                             info!(target: tgt, "{} rollouts collected after {}.  Sleeping for {} seconds.", rollouts.len(), loop_delta_time, self.refresh_interval);
                             if errored {

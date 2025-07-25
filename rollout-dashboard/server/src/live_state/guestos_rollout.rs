@@ -178,7 +178,7 @@ fn annotate_subnet_state(
 }
 
 #[derive(Clone, Default)]
-pub(super) struct Parser {
+pub(crate) struct Parser {
     schedule: PlanCache<Plan>,
 }
 

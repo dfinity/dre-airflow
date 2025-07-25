@@ -9,6 +9,7 @@ pub mod v1 {
     use serde::Deserialize;
     use serde::Serialize;
     use std::collections::VecDeque;
+    use std::str::FromStr;
     use std::vec::Vec;
     use strum::Display;
 
@@ -140,7 +141,7 @@ pub mod v1 {
                 last_scheduling_decision: rollout.last_scheduling_decision,
                 note: rollout.note,
                 update_count: rollout.update_count,
-                name: rollout.name,
+                name: super::v2::DagRunID::from_str(rollout.name.as_str()).unwrap(),
             }
         }
     }
@@ -261,6 +262,10 @@ pub mod v2 {
     use serde::Serialize;
     use serde::Serializer;
     use std::collections::VecDeque;
+    use std::convert::Infallible;
+    use std::fmt::Display;
+    use std::str::FromStr;
+    use strum::EnumString;
 
     pub mod guestos {
         pub use super::super::v1::{
@@ -369,6 +374,7 @@ pub mod v2 {
         use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
         use serde::Serialize;
+        use std::num::NonZero;
         use strum::Display;
 
         #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
@@ -429,6 +435,12 @@ pub mod v2 {
             pub node_id: String,
         }
 
+        impl From<super::super::unstable::NodeInfo> for Node {
+            fn from(n: super::super::unstable::NodeInfo) -> Node {
+                Node { node_id: n.node_id }
+            }
+        }
+
         #[derive(Serialize, Debug, Clone)]
         /// Represents a batch of subnets to upgrade.
         pub struct Batch {
@@ -449,19 +461,38 @@ pub mod v2 {
             /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
             /// If that phase of the batch has yet to take place, this is usually null.
             pub actual_nodes: Option<Vec<Node>>,
-            #[serde(skip_serializing)]
-            /// Internal flag used to prune batches that haven't yet run, or have run but
-            /// had no nodes assigned to them.
-            pub present_in_provisional_plan: bool,
+        }
+
+        impl From<&super::super::unstable::HostOsBatchDetail> for Batch {
+            fn from(other: &super::super::unstable::HostOsBatchDetail) -> Batch {
+                Batch {
+                    planned_start_time: other.planned_start_time,
+                    actual_start_time: other.actual_start_time,
+                    end_time: other.end_time,
+                    state: other.state.clone(),
+                    comment: other.comment.clone(),
+                    display_url: other.display_url.clone(),
+                    planned_nodes: other
+                        .planned_nodes
+                        .clone()
+                        .into_iter()
+                        .map(|n| n.into())
+                        .collect(),
+                    actual_nodes: other
+                        .actual_nodes
+                        .clone()
+                        .map(|ns| ns.into_iter().map(|n| n.into()).collect()),
+                }
+            }
         }
 
         ///  Represents a particular stage in the HostOS rollout.
         #[derive(Debug, Serialize, Clone)]
         pub struct Stages {
-            pub canary: IndexMap<usize, Batch>,
-            pub main: IndexMap<usize, Batch>,
-            pub unassigned: IndexMap<usize, Batch>,
-            pub stragglers: IndexMap<usize, Batch>,
+            pub canary: IndexMap<NonZero<usize>, Batch>,
+            pub main: IndexMap<NonZero<usize>, Batch>,
+            pub unassigned: IndexMap<NonZero<usize>, Batch>,
+            pub stragglers: IndexMap<NonZero<usize>, Batch>,
         }
 
         /// Represents a rollout of HostOS to nodes.
@@ -484,11 +515,53 @@ pub mod v2 {
         RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes::Rollout),
         RolloutIcOsToMainnetNodes(hostos::Rollout),
     }
+
+    // Types to prevent type confusion.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, EnumString)]
+    #[strum(serialize_all = "snake_case")]
+    pub enum DagID {
+        RolloutIcOsToMainnetSubnets,
+        RolloutIcOsToMainnetApiBoundaryNodes,
+        RolloutIcOsToMainnetNodes,
+    }
+
+    impl Display for DagID {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}",
+                match self {
+                    Self::RolloutIcOsToMainnetSubnets => "rollout_ic_os_to_mainnet_subnets",
+                    Self::RolloutIcOsToMainnetApiBoundaryNodes =>
+                        "rollout_ic_os_to_mainnet_api_boundary_nodes",
+                    Self::RolloutIcOsToMainnetNodes => "rollout_ic_os_to_mainnet_nodes",
+                }
+            )
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+    pub struct DagRunID(String);
+
+    impl Display for DagRunID {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl FromStr for DagRunID {
+        type Err = Infallible;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            Ok(Self(s.to_string()))
+        }
+    }
+
     /// Represents a generic rollout of any kind.
     #[derive(Debug, Serialize, Clone)]
     pub struct Rollout {
         /// Unique, enforced by Airflow, corresponds to DAG run ID.
-        pub name: String,
+        pub name: DagRunID,
         /// Link to the rollout screen in Airflow.
         pub display_url: String,
         /// Optional note a rollout can have added by the administrator.
@@ -510,21 +583,21 @@ pub mod v2 {
     }
 
     impl Rollout {
-        pub fn kind(&self) -> String {
+        pub fn kind(&self) -> DagID {
             match self.kind {
                 RolloutKind::RolloutIcOsToMainnetSubnets(_) => {
-                    "rollout_ic_os_to_mainnet_subnets".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_subnets").unwrap()
                 }
                 RolloutKind::RolloutIcOsToMainnetApiBoundaryNodes(_) => {
-                    "rollout_ic_os_to_mainnet_api_boundary_nodes".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_api_boundary_nodes").unwrap()
                 }
                 RolloutKind::RolloutIcOsToMainnetNodes(_) => {
-                    "rollout_ic_os_to_mainnet_nodes".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_nodes").unwrap()
                 }
             }
         }
-        pub fn key(&self) -> String {
-            self.kind() + &self.name
+        pub fn key(&self) -> (DagID, DagRunID) {
+            (self.kind(), self.name.clone())
         }
     }
 
@@ -539,7 +612,7 @@ pub mod v2 {
             };
 
             Ok(super::v1::Rollout {
-                name: rollout.name,
+                name: rollout.name.to_string(),
                 display_url: rollout.display_url,
                 update_count: rollout.update_count,
                 note: rollout.note,
@@ -726,18 +799,18 @@ pub mod unstable {
     pub use crate::airflow_client::TaskInstancesResponseItem;
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize};
+    use std::num::NonZero;
+    use strum::EnumString;
 
     #[derive(Serialize)]
     pub struct FlowCacheResponse {
-        pub dag_id: String,
-        pub rollout_id: String,
+        pub dag_id: super::v2::DagID,
+        pub rollout_id: super::v2::DagRunID,
         pub dispatch_time: DateTime<Utc>,
         pub last_update_time: Option<DateTime<Utc>>,
         pub update_count: usize,
         pub linearized_task_instances: Vec<TaskInstancesResponseItem>,
     }
-
-    use strum::EnumString;
 
     #[derive(Debug, Deserialize, Serialize, Clone, EnumString)]
     #[strum(serialize_all = "PascalCase")]
@@ -759,13 +832,47 @@ pub mod unstable {
     #[derive(Debug, Serialize, Clone)]
     pub struct ProvisionalPlanBatch {
         pub nodes: Vec<NodeInfo>,
-        // selectors: Selectors,
-        pub start_at: DateTime<Utc>,
     }
 
-    #[derive(Debug, Serialize)]
-    pub struct HostOsRolloutBatchStateResponse {
-        pub provisional_plan: ProvisionalPlanBatch,
-        pub actual_plan: Option<Vec<NodeInfo>>,
+    pub type ActualPlanBatch = Vec<NodeInfo>;
+
+    #[derive(Clone, PartialEq, Hash, Eq, EnumString, Serialize, Debug)]
+    #[strum(serialize_all = "lowercase")]
+    pub enum StageName {
+        #[serde(rename = "canary")]
+        Canary,
+        #[serde(rename = "main")]
+        Main,
+        #[serde(rename = "unassigned")]
+        Unassigned,
+        #[serde(rename = "stragglers")]
+        Stragglers,
+    }
+
+    #[derive(Serialize, Debug, Clone)]
+    /// Represents a batch of subnets to upgrade.
+    pub struct HostOsBatchDetail {
+        pub stage: StageName,
+        pub batch_number: NonZero<usize>,
+        /// The time the batch was programmed to start at.
+        pub planned_start_time: DateTime<Utc>,
+        /// The actual observed start time of the batch.
+        pub actual_start_time: Option<DateTime<Utc>>,
+        /// The time of the last action associated with this batch, if any.
+        pub end_time: Option<DateTime<Utc>>,
+        pub state: super::v2::hostos::BatchState,
+        /// Shows a comment for the batch if it is available; else it contains an empty string.
+        pub comment: String,
+        /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
+        pub display_url: String,
+        /// A count of the nodes planned to be upgraded as part of this batch.
+        pub planned_nodes: Vec<NodeInfo>,
+        /// A count of the nodes that actually were or are upgraded as part of this batch.
+        /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
+        /// If that phase of the batch has yet to take place, this is usually null.
+        pub actual_nodes: Option<Vec<NodeInfo>>,
+        /// Internal flag used to prune batches that haven't yet run, or have run but
+        /// had no nodes assigned to them.
+        pub present_in_provisional_plan: bool,
     }
 }

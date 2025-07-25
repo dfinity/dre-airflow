@@ -10,14 +10,16 @@ use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
 use rollout_dashboard::types::unstable::{self, NodeInfo};
+use rollout_dashboard::types::unstable::{HostOsBatchDetail, StageName};
 use rollout_dashboard::types::v2::RolloutKind;
-use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Node, Rollout, Stages, State};
+use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Rollout, Stages as V2Stages, State};
 use serde::Deserialize;
 use std::cmp::max;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::num::NonZero;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
@@ -143,34 +145,23 @@ pub(super) struct ProvisionalPlanBatch {
     pub(super) start_at: PythonDateTime,
 }
 
-impl From<ProvisionalPlanBatch> for unstable::ProvisionalPlanBatch {
-    fn from(other: ProvisionalPlanBatch) -> unstable::ProvisionalPlanBatch {
-        unstable::ProvisionalPlanBatch {
-            nodes: other.nodes,
-            start_at: other.start_at.into(),
-        }
-    }
-}
-
-impl From<&ProvisionalPlanBatch> for Batch {
-    fn from(val: &ProvisionalPlanBatch) -> Self {
-        Batch {
-            planned_start_time: val.start_at.clone().into(),
-            actual_start_time: None,
-            end_time: None,
-            state: BatchState::Unknown,
-            comment: "".to_string(),
-            display_url: "".into(),
-            planned_nodes: val
-                .nodes
-                .iter()
-                .map(|n| Node {
-                    node_id: n.node_id.clone(),
-                })
-                .collect(),
-            actual_nodes: None,
-            present_in_provisional_plan: true,
-        }
+fn make_a_planned_host_os_batch(
+    stage: StageName,
+    batch_number: NonZero<usize>,
+    val: &ProvisionalPlanBatch,
+) -> HostOsBatchDetail {
+    HostOsBatchDetail {
+        stage,
+        batch_number,
+        planned_start_time: val.start_at.clone().into(),
+        actual_start_time: None,
+        end_time: None,
+        state: BatchState::Unknown,
+        comment: "".to_string(),
+        display_url: "".into(),
+        planned_nodes: val.nodes.clone(),
+        actual_nodes: None,
+        present_in_provisional_plan: true,
     }
 }
 
@@ -178,8 +169,14 @@ impl From<&ProvisionalPlanBatch> for Batch {
 /// to any known batch appears.  This can happen when nodes are added mid-rollout,
 /// and therefore the planning logic did not take them into account, but a late
 /// batch in the rollout finds them and goes to town on them.
-fn make_a_discovered_host_os_batch(val: &TaskInstancesResponseItem) -> Batch {
-    Batch {
+fn make_a_discovered_host_os_batch(
+    stage: StageName,
+    batch_number: NonZero<usize>,
+    val: &TaskInstancesResponseItem,
+) -> HostOsBatchDetail {
+    HostOsBatchDetail {
+        stage,
+        batch_number,
         planned_start_time: val.earliest_date(),
         actual_start_time: None,
         end_time: None,
@@ -208,46 +205,11 @@ impl Display for PlanParseError {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub(super) struct ProvisionalHostOSPlan {
-    pub(super) canary: Option<Vec<ProvisionalPlanBatch>>,
-    pub(super) main: Option<Vec<ProvisionalPlanBatch>>,
-    pub(super) unassigned: Option<Vec<ProvisionalPlanBatch>>,
-    pub(super) stragglers: Option<Vec<ProvisionalPlanBatch>>,
-}
-
-#[derive(Clone, PartialEq, Hash, Eq)]
-pub(super) enum StageName {
-    Canary,
-    Main,
-    Unassigned,
-    Stragglers,
-}
-
-pub struct InvalidStageName;
-
-impl FromStr for StageName {
-    type Err = InvalidStageName;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "canary" => Ok(StageName::Canary),
-            "main" => Ok(StageName::Main),
-            "unassigned" => Ok(StageName::Unassigned),
-            "stragglers" => Ok(StageName::Stragglers),
-            _ => Err(InvalidStageName {}),
-        }
-    }
-}
-
-impl ProvisionalHostOSPlan {
-    pub(super) fn get_stage(&self, stage: StageName) -> &Option<Vec<ProvisionalPlanBatch>> {
-        match stage {
-            StageName::Canary => &self.canary,
-            StageName::Main => &self.main,
-            StageName::Unassigned => &self.unassigned,
-            StageName::Stragglers => &self.stragglers,
-        }
-    }
+struct ProvisionalHostOSPlan {
+    canary: Option<Vec<ProvisionalPlanBatch>>,
+    main: Option<Vec<ProvisionalPlanBatch>>,
+    unassigned: Option<Vec<ProvisionalPlanBatch>>,
+    stragglers: Option<Vec<ProvisionalPlanBatch>>,
 }
 
 impl FromStr for ProvisionalHostOSPlan {
@@ -262,6 +224,25 @@ impl FromStr for ProvisionalHostOSPlan {
     }
 }
 
+#[derive(Clone, Default, Debug)]
+pub(crate) struct Stages {
+    pub(crate) canary: IndexMap<NonZero<usize>, HostOsBatchDetail>,
+    pub(crate) main: IndexMap<NonZero<usize>, HostOsBatchDetail>,
+    pub(crate) unassigned: IndexMap<NonZero<usize>, HostOsBatchDetail>,
+    pub(crate) stragglers: IndexMap<NonZero<usize>, HostOsBatchDetail>,
+}
+
+impl From<&Stages> for V2Stages {
+    fn from(v: &Stages) -> V2Stages {
+        V2Stages {
+            canary: v.canary.iter().map(|(k, v)| (*k, v.into())).collect(),
+            main: v.main.iter().map(|(k, v)| (*k, v.into())).collect(),
+            unassigned: v.unassigned.iter().map(|(k, v)| (*k, v.into())).collect(),
+            stragglers: v.stragglers.iter().map(|(k, v)| (*k, v.into())).collect(),
+        }
+    }
+}
+
 impl From<&ProvisionalHostOSPlan> for Stages {
     fn from(val: &ProvisionalHostOSPlan) -> Self {
         Stages {
@@ -271,7 +252,16 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                 .map(|z| {
                     z.iter()
                         .enumerate()
-                        .map(|(n, b)| (n + 1, b.into()))
+                        .map(|(n, b)| {
+                            (
+                                NonZero::new(n + 1).unwrap(),
+                                make_a_planned_host_os_batch(
+                                    StageName::Canary,
+                                    NonZero::new(n + 1).unwrap(),
+                                    b,
+                                ),
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -281,7 +271,16 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                 .map(|z| {
                     z.iter()
                         .enumerate()
-                        .map(|(n, b)| (n + 1, b.into()))
+                        .map(|(n, b)| {
+                            (
+                                NonZero::new(n + 1).unwrap(),
+                                make_a_planned_host_os_batch(
+                                    StageName::Main,
+                                    NonZero::new(n + 1).unwrap(),
+                                    b,
+                                ),
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -291,7 +290,16 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                 .map(|z| {
                     z.iter()
                         .enumerate()
-                        .map(|(n, b)| (n + 1, b.into()))
+                        .map(|(n, b)| {
+                            (
+                                NonZero::new(n + 1).unwrap(),
+                                make_a_planned_host_os_batch(
+                                    StageName::Unassigned,
+                                    NonZero::new(n + 1).unwrap(),
+                                    b,
+                                ),
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -301,15 +309,22 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                 .map(|z| {
                     z.iter()
                         .enumerate()
-                        .map(|(n, b)| (n + 1, b.into()))
+                        .map(|(n, b)| {
+                            (
+                                NonZero::new(n + 1).unwrap(),
+                                make_a_planned_host_os_batch(
+                                    StageName::Stragglers,
+                                    NonZero::new(n + 1).unwrap(),
+                                    b,
+                                ),
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
         }
     }
 }
-
-type ActualHostPlan = Vec<NodeInfo>;
 
 fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
 where
@@ -322,7 +337,7 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut Batch,
+    batch: &mut HostOsBatchDetail,
     state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -366,9 +381,11 @@ fn annotate_batch_state(
 }
 
 #[derive(Clone, Default)]
-pub(super) struct Parser {
-    pub(super) provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    pub(super) actual_plans: HashMap<(StageName, usize), PlanCache<ActualHostPlan>>,
+pub(crate) struct Parser {
+    provisional_plan: PlanCache<ProvisionalHostOSPlan>,
+    actual_plans:
+        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::ActualPlanBatch>>,
+    pub(crate) stages: Option<Stages>,
 }
 
 impl Parser {
@@ -382,6 +399,8 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
+        type StageName = unstable::StageName;
+
         let mut rollout = Rollout {
             state: State::Preparing,
             stages: None,
@@ -498,7 +517,7 @@ impl Parser {
 
                 let (stage_name, stage_batch_number, task_name) = (
                     &captured[1],
-                    str::parse::<usize>(&captured[2]).unwrap(),
+                    str::parse::<NonZero<usize>>(&captured[2]).unwrap(),
                     &captured[3],
                 );
 
@@ -516,9 +535,14 @@ impl Parser {
                     Err(_) => continue,
                 };
 
-                let batch = stage
-                    .entry(stage_batch_number)
-                    .or_insert(make_a_discovered_host_os_batch(&task_instance));
+                let batch =
+                    stage
+                        .entry(stage_batch_number)
+                        .or_insert(make_a_discovered_host_os_batch(
+                            stage_name_enum.clone(),
+                            stage_batch_number,
+                            &task_instance,
+                        ));
 
                 macro_rules! trans_min {
                     ($input:expr) => {
@@ -647,13 +671,7 @@ impl Parser {
                                         .await
                                     {
                                         PlanQueryResult::Found(plan) => {
-                                            batch.actual_nodes = Some(
-                                                plan.iter()
-                                                    .map(|n| Node {
-                                                        node_id: n.node_id.clone(),
-                                                    })
-                                                    .collect(),
-                                            )
+                                            batch.actual_nodes = Some(plan.clone())
                                         }
                                         PlanQueryResult::Invalid => {}
                                         PlanQueryResult::NotFound => {}
@@ -717,24 +735,24 @@ impl Parser {
         // Now remove all rollout stages not part of the original plan that do not
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
-        fn keep_batches_planned_or_provisional_with_tasks(m: &mut IndexMap<usize, Batch>) {
-            let _: IndexMap<_, _> = m
-                .extract_if(.., |_, v| {
-                    v.actual_nodes.clone().unwrap_or_default().is_empty()
-                        && !v.present_in_provisional_plan
+        fn keep_batches_planned_or_provisional_with_tasks(
+            m: &IndexMap<NonZero<usize>, HostOsBatchDetail>,
+        ) -> IndexMap<NonZero<usize>, Batch> {
+            m.into_iter()
+                .filter(|(_, v)| {
+                    !v.actual_nodes.clone().unwrap_or_default().is_empty()
+                        || v.present_in_provisional_plan
                 })
-                .collect();
+                .map(|(k, v)| (*k, v.into()))
+                .collect()
         }
-        rollout.stages = match final_rollout_stages {
-            Some(mut stages) => {
-                keep_batches_planned_or_provisional_with_tasks(&mut stages.canary);
-                keep_batches_planned_or_provisional_with_tasks(&mut stages.main);
-                keep_batches_planned_or_provisional_with_tasks(&mut stages.unassigned);
-                keep_batches_planned_or_provisional_with_tasks(&mut stages.stragglers);
-                Some(stages)
-            }
-            None => None,
-        };
+        self.stages = final_rollout_stages;
+        rollout.stages = self.stages.as_ref().map(|stages| V2Stages {
+            canary: keep_batches_planned_or_provisional_with_tasks(&stages.canary),
+            main: keep_batches_planned_or_provisional_with_tasks(&stages.main),
+            unassigned: keep_batches_planned_or_provisional_with_tasks(&stages.unassigned),
+            stragglers: keep_batches_planned_or_provisional_with_tasks(&stages.stragglers),
+        });
 
         Ok(RolloutKind::RolloutIcOsToMainnetNodes(rollout))
     }
