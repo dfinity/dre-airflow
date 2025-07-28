@@ -749,7 +749,14 @@ impl AirflowStateSyncer<Live> {
                 });
                 syncer_state.cycle_state.clone()
             }
-            Err(e) => SyncCycleState::Error(e),
+            Err(e) => {
+                *syncer_state = Arc::new(SyncerState {
+                    log_inspectors: syncer_state.log_inspectors.clone(),
+                    rollout_states: syncer_state.rollout_states.clone(),
+                    cycle_state: SyncCycleState::Error(e),
+                });
+                syncer_state.cycle_state.clone()
+            }
         }
     }
 

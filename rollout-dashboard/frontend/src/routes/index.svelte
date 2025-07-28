@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { run } from "svelte/legacy";
+
     import { rollouts_view } from "../lib/stores.js";
     import { rolloutKindName, getRolloutEngineStates } from "../lib/types.js";
     import GuestOSRollout from "../lib/GuestOSRollout.svelte";
@@ -32,7 +34,7 @@
     let rolloutsState = writable("active");
     let currentUrl = writable("/");
 
-    $: {
+    run(() => {
         let s = "active";
         if ($isActive(".", { state: "failed" })) {
             s = "failed";
@@ -42,8 +44,8 @@
             s = "all";
         }
         rolloutsState.set(s);
-    }
-    $: {
+    });
+    run(() => {
         let c = $url(".");
         if ($rolloutsState === "failed") {
             c = $url(".", { state: "failed" });
@@ -53,7 +55,13 @@
             c = $url(".", { state: "all" });
         }
         currentUrl.set(c);
-    }
+    });
+
+    let activeClass =
+        "text-white bg-orange-700 md:bg-transparent md:text-orange-700 md:dark:text-white dark:bg-orange-600 md:dark:bg-transparent";
+    let nonActiveClass =
+        "text-gray-700 hover:bg-gray-100 md:hover:bg-transparent md:border-0 md:hover:text-orange-700 dark:text-gray-400 md:dark:hover:text-white dark:hover:bg-gray-700 dark:hover:text-white md:dark:hover:bg-transparent";
+    let navClasses = {active: activeClass, nonActive: nonActiveClass};
 </script>
 
 <SvelteToast />
@@ -73,20 +81,24 @@
                 >
             </NavBrand>
             <NavHamburger />
-            <NavUl activeUrl={$currentUrl}>
+            <NavUl activeUrl={$currentUrl} classes={navClasses}>
                 <NavLi class="cursor-pointer"
                     >Resources<ChevronDownOutline
-                        class="w-6 h-6 ms-2 text-primary-800 dark:text-white inline"
+                        class="text-primary-800 dark:text-white inline"
                     />
                 </NavLi>
                 <Dropdown class="w-44 z-20">
                     <DropdownItem
-                        href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
-                        target="_blank">Mainnet versions</DropdownItem
+                        ><a
+                            href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
+                            target="_blank">Mainnet versions</a
+                        ></DropdownItem
                     >
                     <DropdownItem
-                        href="https://grafana.ch1-rel1.dfinity.network/d/release-controller/release-controller?from=now-30m&to=now&timezone=UTC&refresh=30s"
-                        target="_blank">Release controller</DropdownItem
+                        ><a
+                            href="https://grafana.ch1-rel1.dfinity.network/d/release-controller/release-controller?from=now-30m&to=now&timezone=UTC&refresh=30s"
+                            target="_blank">Release controller</a
+                        ></DropdownItem
                     >
                 </Dropdown>
                 <NavLi href={$url(".")}>Active</NavLi>
@@ -158,7 +170,7 @@
                 role="alert"
             >
                 <svg
-                    class="flex-shrink-0 inline w-4 h-4 me-3"
+                    class="shrink-0 inline w-4 h-4 me-3"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     fill="currentColor"
@@ -186,7 +198,7 @@
                 role="alert"
             >
                 <svg
-                    class="flex-shrink-0 inline w-4 h-4 me-3"
+                    class="shrink-0 inline w-4 h-4 me-3"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     fill="currentColor"
@@ -215,7 +227,7 @@
                 role="alert"
             >
                 <svg
-                    class="flex-shrink-0 inline w-4 h-4 me-3"
+                    class="shrink-0 inline w-4 h-4 me-3"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     fill="currentColor"
@@ -244,7 +256,7 @@
                 role="alert"
             >
                 <svg
-                    class="flex-shrink-0 inline w-4 h-4 me-3"
+                    class="shrink-0 inline w-4 h-4 me-3"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     fill="currentColor"
@@ -286,7 +298,7 @@
         <FooterBrand name="Rollout dashboard" src="favicon-512x512.png"
         ></FooterBrand>
         <FooterLinkGroup
-            ulClass="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
+            class="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
         >
             <FooterLink
                 href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"

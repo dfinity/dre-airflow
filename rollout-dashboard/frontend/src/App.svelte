@@ -1,4 +1,8 @@
-<script context="module">
+<script lang="ts">
+	import './app.css';
+</script>
+
+<script module>
   import { Router, createRouter } from "@roxi/routify";
   import routes from "../.routify/routes.default.js";
   const router = createRouter({

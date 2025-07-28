@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { A } from "flowbite-svelte";
     import Time from "svelte-time";
     import {
         type HostOsBatch,
@@ -6,11 +7,15 @@
         hostOsBatchStateIcon,
     } from "./types";
     import { cap } from "./lib";
-    export let dag_run_id: string;
-    export let stage_name: string;
-    export let batch_number: string;
-    export let batch: HostOsBatch;
     import { url } from "@roxi/routify";
+    interface Props {
+        dag_run_id: string;
+        stage_name: string;
+        batch_number: string;
+        batch: HostOsBatch;
+    }
+
+    let { dag_run_id, stage_name, batch_number, batch }: Props = $props();
 
     const detailsUrl = $url(
         "../rollouts/rollout_ic_os_to_mainnet_nodes/[dag_run_id]/stages/[stage_name]/batches/[batch_number]",
@@ -22,7 +27,7 @@
     );
 </script>
 
-<li class="rounded-lg border batch batch-{batch_number}">
+<li class="rounded-lg batch batch-{batch_number}">
     <div class="hostos_node_batch_state">
         <a
             rel="external"
@@ -42,23 +47,23 @@
                     {batch.planned_nodes.length} nodes planned
                 </div>
                 <div class="nodes">
-                    <a href={detailsUrl}
-                        >{batch.actual_nodes.length} nodes targeted</a
-                    >
+                    <A class="text-secondary-600" href={detailsUrl}
+                        >{batch.actual_nodes.length} nodes</A
+                    > targeted
                 </div>
             {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
                 <div class="nodes">
                     <!-- planned and actual are same nodes -->
-                    <a href={detailsUrl}
-                        >{batch.actual_nodes.length} nodes targeted</a
-                    >
+                    <A class="text-secondary-600" href={detailsUrl}
+                        >{batch.actual_nodes.length} nodes</A
+                    > targeted
                 </div>
             {:else}
                 <div class="nodes">
                     <!-- no actual nodes yet -->
-                    <a href={detailsUrl}
-                        >{batch.planned_nodes.length} nodes planned</a
-                    >
+                    <A class="text-secondary-600" href={detailsUrl}
+                        >{batch.planned_nodes.length} nodes</A
+                    > planned
                 </div>
             {/if}
         </div>

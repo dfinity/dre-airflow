@@ -2,7 +2,7 @@
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
-    import SvelteMarkdown from "svelte-markdown";
+    import SvelteMarkdown from "@humanspeak/svelte-markdown";
     import {
         type HostOsRollout,
         type HostOsStages,
@@ -12,7 +12,11 @@
     } from "./types";
     import { cap, activeClass, selectTextOnFocus } from "./lib";
     import HostOSBatch from "./HostOSBatch.svelte";
-    export let rollout: HostOsRollout;
+    interface Props {
+        rollout: HostOsRollout;
+    }
+
+    let { rollout }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
@@ -75,7 +79,7 @@
     </div>
     {#if rollout.note}
         <div class="note space-y-4">
-            <SvelteMarkdown source={rollout.note} />
+            <SvelteMarkdown source={rollout.note.toString()} />
         </div>
     {/if}
     <div class="rollout_info space-y-4 text-gray-500">
@@ -84,10 +88,13 @@
             class="git_revision"
             role="link"
             tabindex="0"
-            use:copy={git_revision}
+            use:copy={{
+                text: git_revision,
+                onCopy({ text, event }) {
+                    toast.push("Copied git revision to clipboard");
+                },
+            }}
             use:selectTextOnFocus
-            on:svelte-copy={(event) =>
-                toast.push("Copied git revision to clipboard")}
         >
             <svg
                 class="w-3 h-3 me-1.5"
@@ -130,7 +137,7 @@
             role="alert"
         >
             <svg
-                class="flex-shrink-0 inline w-4 h-4 me-3"
+                class="shrink-0 inline w-4 h-4 me-3"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="currentColor"

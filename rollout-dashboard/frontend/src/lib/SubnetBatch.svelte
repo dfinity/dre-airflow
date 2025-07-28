@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { A } from "flowbite-svelte";
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
@@ -9,11 +10,15 @@
         subnetStateIcon,
     } from "./types";
     import { cap } from "./lib";
-    export let batch_num: String;
-    export let batch: GuestOsBatch;
+    interface Props {
+        batch_num: String;
+        batch: GuestOsBatch;
+    }
+
+    let { batch_num, batch }: Props = $props();
 </script>
 
-<li class="rounded-lg border batch batch-{batch_num}">
+<li class="rounded-lg batch batch-{batch_num}">
     {#each batch.subnets as subnet}
         <ul>
             <li class="subnet">
@@ -30,7 +35,7 @@
                     </div></a
                 >
                 <a
-                    class="subnet_id"
+                    class="subnet_id text-secondary-600 hover:underline"
                     use:selectTextOnFocus
                     href="https://dashboard.internetcomputer.org/subnet/{subnet.subnet_id}"
                     target="_blank">{subnet.subnet_id}</a
@@ -39,10 +44,13 @@
                     class="git_revision"
                     role="link"
                     tabindex="0"
-                    use:copy={subnet.git_revision}
+                    use:copy={{
+                        text: subnet.git_revision,
+                        onCopy({ text, event }) {
+                            toast.push("Copied git revision to clipboard");
+                        },
+                    }}
                     use:selectTextOnFocus
-                    on:svelte-copy={(event) =>
-                        toast.push("Copied git revision to clipboard")}
                 >
                     <svg
                         class="w-3 h-3 me-1.5"

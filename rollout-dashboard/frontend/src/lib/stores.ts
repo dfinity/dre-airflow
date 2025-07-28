@@ -21,19 +21,12 @@ const airflow_state = writable<FullState>({
     }
 })
 
-function resetupEventSource() {
+function setupEventSource() {
     if (null !== evtSource) {
-        console.log("Dropping existing event source.")
-        try {
-            evtSource.close();
-        }
-        catch (e) {
-            console.log({ message: "Event source already closed.", error: e })
-        }
-        evtSource = null;
+        console.log("Event source already set up.");
+        return;
     }
 
-    // var evtSourceGenerated = new Date();
     evtSource = new EventSource(url);
     evtSource.addEventListener("State", (e) => {
         // Full state update.
@@ -117,11 +110,11 @@ function resetupEventSource() {
             error: errorText,
             rollout_engine_states: get(airflow_state).rollout_engine_states
         })
-        setTimeout(resetupEventSource, 5000)
+        setTimeout(setupEventSource, 5000)
     }
 }
 
 export const rollouts_view = ((): Writable<FullState> => {
-    resetupEventSource()
+    setupEventSource()
     return airflow_state
 });

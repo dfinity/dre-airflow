@@ -30,7 +30,7 @@ set to the correct value (though sometimes the defaults are OK):
 1. `AIRFLOW_URL` set to the complete (with user and password)
    URL of the Airflow server to use.
 2. `FRONTEND_STATIC_DIR` set to the path that contains the built
-   `dist` frontend assets.
+   `dist/client` frontend assets.
 3. `BACKEND_HOST` set to the host and port you want to serve on
    (the default only listens on localhost, which is not good for
    production -- only for development).

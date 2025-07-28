@@ -1,18 +1,20 @@
 <script lang="ts">
     import Time from "svelte-time";
-    import { copy } from "svelte-copy";
-    import { toast } from "@zerodevx/svelte-toast";
     import {
         type ApiBoundaryNodesBatch,
         apiBoundaryNodesBatchStateComment,
         apiBoundaryNodesBatchStateIcon,
     } from "./types";
     import { cap, selectTextOnFocus } from "./lib";
-    export let batch_num: String;
-    export let batch: ApiBoundaryNodesBatch;
+    interface Props {
+        batch_num: String;
+        batch: ApiBoundaryNodesBatch;
+    }
+
+    let { batch_num, batch }: Props = $props();
 </script>
 
-<li class="rounded-lg border batch batch-{batch_num}">
+<li class="rounded-lg batch batch-{batch_num}">
     {#each batch.api_boundary_nodes as node}
         <ul>
             <li class="node">
@@ -29,7 +31,7 @@
                     </div></a
                 >
                 <a
-                    class="node_id"
+                    class="node_id text-secondary-600 hover:underline"
                     use:selectTextOnFocus
                     href="https://dashboard.internetcomputer.org/network/nodes/{node.node_id}"
                     target="_blank">{node.node_id}</a

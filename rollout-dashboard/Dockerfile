@@ -9,7 +9,7 @@ RUN cargo build --release && \
     mv target/release/rollout-dashboard .
 
 FROM docker.io/node:alpine as node
-WORKDIR /
+WORKDIR /workdir
 # The following step copies only the package files so npm install can be cached.
 COPY frontend/package*.json ./
 RUN npm install
@@ -21,7 +21,7 @@ RUN npm run build
 FROM docker.io/debian:bookworm
 WORKDIR /
 COPY --from=rust /usr/src/rollout-dashboard/rollout-dashboard /rollout-dashboard
-COPY --from=node /dist /static
+COPY --from=node /workdir/dist/client /workdir/static
 RUN apt-get update && apt-get upgrade -y && apt install -y openssl ca-certificates
 
 EXPOSE 4174
