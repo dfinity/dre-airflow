@@ -28,8 +28,6 @@ const MAX_BATCH_SIZE: usize = 100;
 /// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
 /// The issue is now fixed but we will have to upgrade to Airflow 2.10.5 (we may have to also upgrade our Helm chart!) for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
-/// Default timeout per request to Airflow.
-const PER_REQUEST_TIMEOUT: u64 = 15;
 // API sub-URL for Airflow.
 const API_SUBURL: &str = "api/v1/";
 
@@ -908,11 +906,14 @@ fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowEr
 }
 
 impl AirflowClient {
-    pub fn new(airflow_url: reqwest::Url) -> Result<Self, AirflowClientCreationError> {
+    pub fn new(
+        airflow_url: reqwest::Url,
+        timeout: Duration,
+    ) -> Result<Self, AirflowClientCreationError> {
         let jar = Jar::default();
         let arcjar = Arc::new(jar);
         let c = reqwest::Client::builder()
-            .timeout(Duration::from_secs(PER_REQUEST_TIMEOUT))
+            .timeout(timeout)
             .cookie_provider(arcjar.clone())
             .build()?;
         let username = decode(airflow_url.username())?.into_owned();
