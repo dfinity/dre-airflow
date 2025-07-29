@@ -770,17 +770,19 @@ impl AirflowStateSyncer<Live> {
     }
 
     async fn sync_state(&self, max_rollouts: usize) -> SyncCycleState {
-        let mut syncer_state = self.syncer_state.lock().await;
+        let syncer_state = self.syncer_state.lock().await;
+        let (rollout_states, log_inspectors) = (
+            syncer_state.rollout_states.clone(),
+            syncer_state.log_inspectors.clone(),
+        );
+        drop(syncer_state);
 
         match self
-            .update(
-                syncer_state.rollout_states.clone(),
-                syncer_state.log_inspectors.clone(),
-                max_rollouts,
-            )
+            .update(rollout_states.clone(), log_inspectors.clone(), max_rollouts)
             .await
         {
             Ok((engine_state, rollouts, rollout_states, log_inspectors)) => {
+                let mut syncer_state = self.syncer_state.lock().await;
                 *syncer_state = Arc::new(SyncerState {
                     log_inspectors,
                     rollout_states,
@@ -792,6 +794,7 @@ impl AirflowStateSyncer<Live> {
                 syncer_state.cycle_state.clone()
             }
             Err(e) => {
+                let mut syncer_state = self.syncer_state.lock().await;
                 *syncer_state = Arc::new(SyncerState {
                     log_inspectors: syncer_state.log_inspectors.clone(),
                     rollout_states: syncer_state.rollout_states.clone(),
