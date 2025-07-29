@@ -80,8 +80,7 @@
         </div>
     </div>
 {:then response}
-    <HostOsBatchDetail {dag_run_id} {stage_name} {batch_number} batch={response}
-    ></HostOsBatchDetail>
+    <HostOsBatchDetail batch={response}></HostOsBatchDetail>
 {:catch error}
     <!-- note use of me-3 in svg icon to ensure icon actually shows not too stuck to the text -->
     <div

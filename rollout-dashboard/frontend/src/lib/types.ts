@@ -341,6 +341,10 @@ export type NodeInfo = {
     status: string
 }
 
+export type UpgradeStatus = "pending" | "upgraded" | "AWOL"
+
+export type AlertStatus = "OK" | "alerting" | "unknown"
+
 export type HostOsBatchDetail = {
     stage: keyof HostOsStages
     batch_number: number
@@ -352,4 +356,6 @@ export type HostOsBatchDetail = {
     display_url: string;
     planned_nodes: NodeInfo[];
     actual_nodes: NodeInfo[] | null;
+    upgraded_nodes: { [key: string]: UpgradeStatus } | null
+    alerting_nodes: { [key: string]: AlertStatus } | null
 }

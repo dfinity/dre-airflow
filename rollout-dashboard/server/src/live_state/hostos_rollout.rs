@@ -13,7 +13,7 @@ use rollout_dashboard::types::unstable::{self, NodeInfo};
 use rollout_dashboard::types::unstable::{HostOsBatchDetail, StageName};
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Rollout, Stages as V2Stages, State};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::max;
 use std::cmp::min;
 use std::collections::HashMap;
@@ -138,7 +138,7 @@ type Selectors = Vec<Selector>;
 
 */
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub(super) struct ProvisionalPlanBatch {
     pub(super) nodes: Vec<NodeInfo>,
     // selectors: Selectors,
@@ -161,6 +161,8 @@ fn make_a_planned_host_os_batch(
         display_url: "".into(),
         planned_nodes: val.nodes.clone(),
         actual_nodes: None,
+        upgraded_nodes: None,
+        alerting_nodes: None,
         present_in_provisional_plan: true,
     }
 }
@@ -185,6 +187,8 @@ fn make_a_discovered_host_os_batch(
         display_url: "".into(),
         planned_nodes: vec![],
         actual_nodes: None,
+        upgraded_nodes: None,
+        alerting_nodes: None,
         present_in_provisional_plan: false,
     }
 }
@@ -204,7 +208,7 @@ impl Display for PlanParseError {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct ProvisionalHostOSPlan {
     canary: Option<Vec<ProvisionalPlanBatch>>,
     main: Option<Vec<ProvisionalPlanBatch>>,
@@ -224,7 +228,7 @@ impl FromStr for ProvisionalHostOSPlan {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct Stages {
     pub(crate) canary: IndexMap<NonZero<usize>, HostOsBatchDetail>,
     pub(crate) main: IndexMap<NonZero<usize>, HostOsBatchDetail>,
@@ -385,7 +389,51 @@ pub(crate) struct Parser {
     provisional_plan: PlanCache<ProvisionalHostOSPlan>,
     actual_plans:
         HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::ActualPlanBatch>>,
+    nodes_upgrade_status:
+        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::NodeUpgradeStatuses>>,
+    nodes_alert_status:
+        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::NodeAlertStatuses>>,
     pub(crate) stages: Option<Stages>,
+}
+
+// The following is necessary because the internal index map is not
+// serializable to JSON.
+impl Serialize for Parser {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct SerializedParser {
+            provisional_plan: PlanCache<ProvisionalHostOSPlan>,
+            actual_plans: HashMap<String, PlanCache<unstable::ActualPlanBatch>>,
+            nodes_upgrade_status: HashMap<String, PlanCache<unstable::NodeUpgradeStatuses>>,
+            nodes_alert_status: HashMap<String, PlanCache<unstable::NodeAlertStatuses>>,
+            stages: Option<Stages>,
+        }
+
+        let p = SerializedParser {
+            provisional_plan: self.provisional_plan.clone(),
+            actual_plans: self
+                .actual_plans
+                .iter()
+                .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
+                .collect(),
+            nodes_upgrade_status: self
+                .nodes_upgrade_status
+                .iter()
+                .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
+                .collect(),
+            nodes_alert_status: self
+                .nodes_alert_status
+                .iter()
+                .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
+                .collect(),
+            stages: self.stages.clone(),
+        };
+
+        p.serialize(serializer)
+    }
 }
 
 impl Parser {
@@ -414,6 +462,37 @@ impl Parser {
                     _ => rollout.state = max(rollout.state, $input),
                 }
             };
+        }
+
+        macro_rules! update_task_xcom_status {
+            ($stage_name_enum:expr, $stage_batch_number:expr, $task_instance:expr, $field:ident) => {{
+                let $field = self
+                    .$field
+                    .entry(($stage_name_enum.clone(), $stage_batch_number))
+                    .or_insert(PlanCache::Unretrieved);
+
+                match $field
+                    .get(
+                        &$task_instance,
+                        fetch_xcom(
+                            airflow_api.clone(),
+                            dag_run.dag_id.as_str(),
+                            dag_run.dag_run_id.as_str(),
+                            $task_instance.task_id.as_str(),
+                            $task_instance.map_index,
+                            "return_value",
+                        ),
+                    )
+                    .await
+                {
+                    PlanQueryResult::Error(e) => {
+                        return Err(RolloutDataGatherError::AirflowError(e));
+                    }
+                    PlanQueryResult::NotFound => None,
+                    PlanQueryResult::Found(plan) => Some(plan),
+                    PlanQueryResult::Invalid => None,
+                }
+            }};
         }
 
         let rollout_stages: Arc<Mutex<Option<Stages>>> = Arc::new(Mutex::new(None));
@@ -612,9 +691,25 @@ impl Parser {
                                     trans_min!(BatchState::WaitingForElection);
                                 }
                                 "wait_for_revision_adoption" => {
+                                    if *state == TaskInstanceState::UpForReschedule {
+                                        batch.upgraded_nodes = update_task_xcom_status!(
+                                            stage_name_enum,
+                                            stage_batch_number,
+                                            task_instance,
+                                            nodes_upgrade_status
+                                        );
+                                    }
                                     trans_min!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_until_nodes_healthy" => {
+                                    if *state == TaskInstanceState::UpForReschedule {
+                                        batch.alerting_nodes = update_task_xcom_status!(
+                                            stage_name_enum,
+                                            stage_batch_number,
+                                            task_instance,
+                                            nodes_alert_status
+                                        );
+                                    }
                                     trans_min!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {
@@ -691,11 +786,23 @@ impl Parser {
                                     trans_exact!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_for_revision_adoption" => {
+                                    batch.upgraded_nodes = update_task_xcom_status!(
+                                        stage_name_enum,
+                                        stage_batch_number,
+                                        task_instance,
+                                        nodes_upgrade_status
+                                    );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
                                     // but the join task is not yet.
+                                    batch.alerting_nodes = update_task_xcom_status!(
+                                        stage_name_enum,
+                                        stage_batch_number,
+                                        task_instance,
+                                        nodes_alert_status
+                                    );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "join" => {

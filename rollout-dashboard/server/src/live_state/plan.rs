@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{debug, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
 use crate::live_state::python::PythonDeserializer;
@@ -16,14 +16,14 @@ pub enum PlanQueryResult<P> {
     Found(P),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub enum PlanStateForTask<P> {
     Missing,
     Invalid,
     Valid(P),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub enum PlanCache<P> {
     #[default]
     Unretrieved,

@@ -799,7 +799,9 @@ pub mod unstable {
     pub use crate::airflow_client::TaskInstancesResponseItem;
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
     use std::num::NonZero;
+    use strum::Display;
     use strum::EnumString;
 
     #[derive(Serialize)]
@@ -836,7 +838,7 @@ pub mod unstable {
 
     pub type ActualPlanBatch = Vec<NodeInfo>;
 
-    #[derive(Clone, PartialEq, Hash, Eq, EnumString, Serialize, Debug)]
+    #[derive(Clone, PartialEq, Hash, Eq, EnumString, Serialize, Debug, Display)]
     #[strum(serialize_all = "lowercase")]
     pub enum StageName {
         #[serde(rename = "canary")]
@@ -848,6 +850,29 @@ pub mod unstable {
         #[serde(rename = "stragglers")]
         Stragglers,
     }
+
+    #[derive(Debug, Deserialize, Serialize, Clone)]
+    pub enum NodeUpgradeStatus {
+        AWOL,
+        #[serde(rename = "pending")]
+        Pending,
+        #[serde(rename = "upgraded")]
+        Upgraded,
+    }
+
+    pub type NodeUpgradeStatuses = HashMap<String, NodeUpgradeStatus>;
+
+    #[derive(Debug, Deserialize, Serialize, Clone)]
+    pub enum NodeAlertStatus {
+        #[serde(rename = "unknown")]
+        Unknown,
+        #[serde(rename = "OK")]
+        OK,
+        #[serde(rename = "alerting")]
+        Alerting,
+    }
+
+    pub type NodeAlertStatuses = HashMap<String, NodeAlertStatus>;
 
     #[derive(Serialize, Debug, Clone)]
     /// Represents a batch of subnets to upgrade.
@@ -871,6 +896,14 @@ pub mod unstable {
         /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
         /// If that phase of the batch has yet to take place, this is usually null.
         pub actual_nodes: Option<Vec<NodeInfo>>,
+        /// A dictionary mapping node ID to node upgrade status.  This might be empty
+        /// if the upgrade phase has not yet been reached, or for very old rollouts
+        /// that did not supply this information.
+        pub upgraded_nodes: Option<NodeUpgradeStatuses>,
+        /// A dictionary mapping node ID to alert status.  This might be empty if the
+        /// waiting for alerts to subside phase has not yet been reached, or for very
+        /// old rollouts that do not have this information.
+        pub alerting_nodes: Option<NodeAlertStatuses>,
         /// Internal flag used to prune batches that haven't yet run, or have run but
         /// had no nodes assigned to them.
         pub present_in_provisional_plan: bool,

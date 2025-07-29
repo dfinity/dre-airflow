@@ -10,7 +10,8 @@ use rollout_dashboard::airflow_client::{
 };
 use rollout_dashboard::types::v2::{Rollout, RolloutKind};
 use rollout_dashboard::types::{unstable, v2, v2::DagID, v2::DagRunID};
-use serde::Serialize;
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
 use std::cmp::max;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -110,7 +111,7 @@ impl From<RolloutDataGatherError> for v2::Error {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug)]
 pub struct SuccessfulSyncCycleState {
     pub rollouts: Rollouts,
     pub rollout_engine_states: v2::RolloutEngineStates,
@@ -125,14 +126,14 @@ impl From<SuccessfulSyncCycleState> for v2::State {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug)]
 pub enum SyncCycleState {
     Initial,
     Successful(SuccessfulSyncCycleState),
     Error(RolloutDataGatherError),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Parser {
     Subnets(guestos_rollout::Parser),
@@ -173,11 +174,12 @@ impl Parser {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub(super) struct RolloutState {
     dag_id: DagID,
     dag_run_id: DagRunID,
     pub(super) parser: Parser,
+    #[serde(skip_serializing)]
     task_instances: IndexMap<String, HashMap<Option<usize>, TaskInstancesResponseItem>>,
     logical_date: DateTime<Utc>,
     note: Option<String>,
@@ -304,6 +306,26 @@ impl RolloutState {
 
 #[derive(Clone)]
 pub(super) struct RolloutStates(HashMap<(DagID, DagRunID), RolloutState>);
+
+// The following is necessary because the internal index map is not
+// serializable to JSON.
+impl Serialize for RolloutStates {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let themap: IndexMap<String, &RolloutState> = self
+            .0
+            .iter()
+            .map(|(k, v)| (format!("{}/{}", k.0, k.1), v))
+            .collect();
+        let mut map = serializer.serialize_map(Some(themap.len()))?;
+        for (k, v) in themap {
+            map.serialize_entry(&k, v)?;
+        }
+        map.end()
+    }
+}
 
 impl RolloutStates {
     fn clone_or_new(
@@ -439,7 +461,7 @@ impl AirflowStateSyncer<Initial> {
     }
 }
 
-#[derive(Clone, IntoIterator, Serialize)]
+#[derive(Clone, IntoIterator, Debug)]
 pub struct Rollouts(IndexMap<(v2::DagID, v2::DagRunID), Rollout>);
 
 impl Rollouts {
@@ -449,6 +471,26 @@ impl Rollouts {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+}
+
+// The following is necessary because the internal index map is not
+// serializable to JSON.
+impl Serialize for Rollouts {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let themap: IndexMap<String, &Rollout> = self
+            .0
+            .iter()
+            .map(|(k, v)| (format!("{}/{}", k.0, k.1), v))
+            .collect();
+        let mut map = serializer.serialize_map(Some(themap.len()))?;
+        for (k, v) in themap {
+            map.serialize_entry(&k, v)?;
+        }
+        map.end()
     }
 }
 

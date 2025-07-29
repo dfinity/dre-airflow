@@ -1,4 +1,4 @@
-use crate::live_state::{AirflowStateSyncer, Live, Parser, SyncCycleState};
+use crate::live_state::{AirflowStateSyncer, Live, Parser, RolloutStates, SyncCycleState};
 use crate::live_state::{RolloutDataGatherError, SuccessfulSyncCycleState};
 use async_stream::try_stream;
 use axum::extract::Path;
@@ -13,7 +13,7 @@ use log::debug;
 use rollout_dashboard::airflow_client::AirflowClient;
 use rollout_dashboard::types::unstable::StageName;
 use rollout_dashboard::types::{unstable, v1, v2};
-use serde::{Deserialize, Deserializer, de};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt;
@@ -152,6 +152,12 @@ impl From<HostOsRolloutBatchStateRequestError> for (StatusCode, String) {
     fn from(h: HostOsRolloutBatchStateRequestError) -> (StatusCode, String) {
         (h.clone().into(), h.into())
     }
+}
+
+#[derive(Serialize)]
+struct InternalState {
+    cycle_state: SyncCycleState,
+    rollout_states: RolloutStates,
 }
 
 impl ApiServer {
@@ -465,10 +471,15 @@ impl ApiServer {
         Ok(Json(result))
     }
 
-    async fn get_internal_state(&self) -> Result<Json<SyncCycleState>, Infallible> {
-        Ok(Json(
-            self.state_syncer.get_state().await.cycle_state.clone(),
-        ))
+    async fn get_internal_state(&self) -> Result<Json<InternalState>, Infallible> {
+        let state = self.state_syncer.get_state().await;
+        let cycle_state = state.cycle_state.clone();
+        let rollout_states = state.rollout_states.clone();
+        let internal_state = InternalState {
+            cycle_state,
+            rollout_states,
+        };
+        Ok(Json(internal_state))
     }
 
     async fn get_dag_run(

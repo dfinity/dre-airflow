@@ -11,6 +11,7 @@ use rollout_dashboard::airflow_client::{
 };
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::api_boundary_nodes::{Batch, BatchState, Node, Rollout, State};
+use serde::Serialize;
 use std::cmp::max;
 use std::cmp::min;
 use std::fmt::Display;
@@ -113,7 +114,7 @@ impl From<PythonFormattedPlan> for Plan {
 
 type BatchMap = IndexMap<usize, Batch>;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub(crate) struct Parser {
     schedule: PlanCache<PythonFormattedPlan>,
 }

@@ -10,6 +10,7 @@ use rollout_dashboard::airflow_client::{
 };
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::guestos::{Batch, Rollout, State, Subnet, SubnetState};
+use serde::Serialize;
 use std::cmp::max;
 use std::cmp::min;
 use std::fmt::{self, Display};
@@ -57,7 +58,7 @@ impl Display for PlanParseError {
 
 type BatchMap = IndexMap<usize, Batch>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct Plan {
     batches: BatchMap,
 }
@@ -177,7 +178,7 @@ fn annotate_subnet_state(
     state
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub(crate) struct Parser {
     schedule: PlanCache<Plan>,
 }

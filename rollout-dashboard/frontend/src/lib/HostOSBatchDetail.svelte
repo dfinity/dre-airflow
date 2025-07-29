@@ -4,13 +4,10 @@
     import { Tabs, TabItem } from "flowbite-svelte";
 
     interface Props {
-        dag_run_id: string;
-        stage_name: string;
-        batch_number: string;
         batch: HostOsBatchDetail;
     }
 
-    let { dag_run_id, stage_name, batch_number, batch }: Props = $props();
+    let { batch }: Props = $props();
 
     let planned_items = batch.planned_nodes.map((val) => ({
         Node: val.node_id,
@@ -20,14 +17,38 @@
         Subnet: val.subnet_id === null ? "—" : val.subnet_id,
     }));
 
+    function getUpgradeStatus(node_id: string): string {
+        if (batch.upgraded_nodes !== null) {
+            if (batch.upgraded_nodes[node_id]) {
+                return batch.upgraded_nodes[node_id];
+            } else {
+                return "—";
+            }
+        } else {
+            return "—";
+        }
+    }
+
+    function getAlertStatus(node_id: string): string {
+        if (batch.alerting_nodes !== null) {
+            if (batch.alerting_nodes[node_id]) {
+                return batch.alerting_nodes[node_id];
+            } else {
+                return "—";
+            }
+        } else {
+            return "—";
+        }
+    }
+
     let actual_items =
         batch.actual_nodes !== null
             ? batch.actual_nodes.map((val) => ({
                   Node: val.node_id,
                   Provider: val.node_provider_id,
                   DC: val.dc_id,
-                  Status: val.status,
-                  Subnet: val.subnet_id === null ? "—" : val.subnet_id,
+                  "Upgraded?": getUpgradeStatus(val.node_id),
+                  "Alerting?": getAlertStatus(val.node_id),
               }))
             : null;
 
