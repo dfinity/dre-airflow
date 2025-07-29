@@ -348,7 +348,7 @@ export type UpgradeStatus = "pending" | "upgraded" | "AWOL"
 
 export type AlertStatus = "OK" | "alerting" | "unknown"
 
-export type HostOsBatchDetail = {
+export type HostOsBatchResponse = {
     stage: keyof HostOsStages
     batch_number: number
     planned_start_time: Date;

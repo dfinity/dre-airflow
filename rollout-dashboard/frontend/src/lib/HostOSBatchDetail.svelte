@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { hostOsBatchStateIcon, type HostOsBatchDetail } from "./types";
+    import { hostOsBatchStateIcon, type HostOsBatchResponse } from "./types";
     import { Table } from "@flowbite-svelte-plugins/datatable";
     import {
         Table as RegularTable,
@@ -12,7 +12,7 @@
 
     interface Props {
         dag_run_id: string;
-        batch: HostOsBatchDetail;
+        batch: HostOsBatchResponse;
     }
 
     let { dag_run_id, batch }: Props = $props();
@@ -62,16 +62,12 @@
             : null;
 
     function reducer(akku: Record<string, number>, val: string) {
-        console.log("Reducing " + val);
         let old_count = akku[val];
         if (old_count === undefined) {
-            console.log("undefined");
             akku[val] = 1;
         } else {
-            console.log("defined");
             akku[val] = old_count + 1;
         }
-        console.log("Reduced " + JSON.stringify(akku));
         return akku;
     }
 

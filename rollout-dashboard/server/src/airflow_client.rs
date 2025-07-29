@@ -622,7 +622,7 @@ impl Pageable for EventLogsResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum AirflowError {
     #[serde(serialize_with = "serialize_status_code")]
     StatusCode(reqwest::StatusCode),

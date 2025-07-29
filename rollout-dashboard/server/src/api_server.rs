@@ -1,4 +1,6 @@
-use crate::live_state::{AirflowStateSyncer, Live, Parser, RolloutStates, SyncCycleState};
+use crate::live_state::{
+    AirflowStateSyncer, Live, Parser, RolloutStates, SyncCycleState, SyncerState,
+};
 use crate::live_state::{RolloutDataGatherError, SuccessfulSyncCycleState};
 use async_stream::try_stream;
 use axum::extract::Path;
@@ -95,7 +97,7 @@ macro_rules! handle {
     }};
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostOsRolloutBatchStateRequestError {
     InvalidBatchNumber,
     InvalidStageName,
@@ -113,9 +115,7 @@ impl From<HostOsRolloutBatchStateRequestError> for String {
     fn from(h: HostOsRolloutBatchStateRequestError) -> String {
         type T = HostOsRolloutBatchStateRequestError;
         match h {
-            T::NotYetSynced => "Backend has not yet 
-            fetched rollouts"
-                .to_string(),
+            T::NotYetSynced => "Backend has not yet fetched rollouts".to_string(),
             T::NoPlanDataYet => "Rollout has not yet computed a plan".to_string(),
             T::NoSuchDagRun => "No such DAG run".to_string(),
             T::InvalidDagID => "Invalid DAG ID".to_string(),
@@ -134,8 +134,8 @@ impl From<HostOsRolloutBatchStateRequestError> for StatusCode {
         type T = HostOsRolloutBatchStateRequestError;
         type C = StatusCode;
         match h {
-            T::NotYetSynced => C::PROCESSING,
-            T::NoPlanDataYet => C::PROCESSING,
+            T::NotYetSynced => C::NO_CONTENT,
+            T::NoPlanDataYet => C::NO_CONTENT,
             T::NoSuchDagRun => C::NOT_FOUND,
             T::InvalidDagID => C::BAD_REQUEST,
             T::WrongDagRunKind => C::BAD_REQUEST,
@@ -151,6 +151,13 @@ impl From<HostOsRolloutBatchStateRequestError> for StatusCode {
 impl From<HostOsRolloutBatchStateRequestError> for (StatusCode, String) {
     fn from(h: HostOsRolloutBatchStateRequestError) -> (StatusCode, String) {
         (h.clone().into(), h.into())
+    }
+}
+
+impl From<HostOsRolloutBatchStateRequestError> for v2::Error {
+    fn from(h: HostOsRolloutBatchStateRequestError) -> v2::Error {
+        let t: (StatusCode, String) = h.into();
+        t.into()
     }
 }
 
@@ -186,7 +193,10 @@ impl ApiServer {
         match (current_rollout_data, last_rollout_data, delta_support) {
             // First sync or error before.  Send full sync.
             (SyncCycleState::Initial, _, _) => {
-                vec![]
+                vec![v2::sse::Message::Error(v2::Error {
+                    code: StatusCode::NO_CONTENT,
+                    message: "Backend has not yet fetched rollouts".to_string(),
+                })]
             }
             (
                 SyncCycleState::Successful(state),
@@ -357,7 +367,7 @@ impl ApiServer {
         self: Arc<Self>,
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
-        let mut subscription = self.state_syncer.subscribe_to_state_updates();
+        let mut subscription = self.state_syncer.subscribe_to_syncer_updates();
 
         let stream = {
             try_stream! {
@@ -369,7 +379,7 @@ impl ApiServer {
                 let mut last_engine_state: v1::RolloutEngineState = v1::RolloutEngineState::Active;
 
                 loop {
-                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().clone();
+                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().cycle_state.clone();
                     let messages: Vec<v2::sse::Message> = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.into_iter() {
                         let mm = self.compat_convert_v2_sse_state_to_v1(message, &mut last_engine_state);
@@ -403,11 +413,11 @@ impl ApiServer {
         }
     }
 
-    pub fn stream_state(
+    fn stream_state(
         self: Arc<Self>,
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
-        let mut subscription = self.state_syncer.subscribe_to_state_updates();
+        let mut subscription = self.state_syncer.subscribe_to_syncer_updates();
 
         let stream = {
             try_stream! {
@@ -418,7 +428,7 @@ impl ApiServer {
                 let mut last_rollout_data = SyncCycleState::Initial;
 
                 loop {
-                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().clone();
+                    let current_rollout_data: SyncCycleState = subscription.borrow_and_update().cycle_state.clone();
                     let messages = self.clone().produce_sse_messages(&current_rollout_data, &last_rollout_data, delta_support);
                     for message in messages.iter() {
                         match message {
@@ -495,14 +505,15 @@ impl ApiServer {
         ))
     }
 
-    async fn get_hostos_rollout_batch_state(
+    fn get_hostos_rollout_batch(
         &self,
         dag_run_id: &str,
         stage_name: &str,
         batch_number: usize,
-    ) -> Result<Json<unstable::HostOsBatchDetail>, (StatusCode, String)> {
+        syncer_state: Arc<SyncerState>,
+    ) -> Result<unstable::HostOsBatchResponse, HostOsRolloutBatchStateRequestError> {
         if !(1..=100).contains(&batch_number) {
-            return Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber.into());
+            return Err(HostOsRolloutBatchStateRequestError::InvalidBatchNumber);
         }
         let nonzero_batch_number = NonZero::new(batch_number).unwrap();
         let stage = StageName::from_str(stage_name)
@@ -512,15 +523,13 @@ impl ApiServer {
         let dag_run_id = v2::DagRunID::from_str(dag_run_id)
             .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidDagRunID)?;
 
-        let cache = self.state_syncer.get_state().await;
-
-        let res = match &cache.cycle_state {
+        let res = match &syncer_state.cycle_state {
             SyncCycleState::Initial => Err(HostOsRolloutBatchStateRequestError::NotYetSynced),
             SyncCycleState::Error(e) => Err(
                 HostOsRolloutBatchStateRequestError::RolloutDataGatherError(e.clone()),
             ),
             SyncCycleState::Successful(SuccessfulSyncCycleState { .. }) => {
-                match cache.rollout_states.get(&(dag_id, dag_run_id)) {
+                match syncer_state.rollout_states.get(&(dag_id, dag_run_id)) {
                     None => Err(HostOsRolloutBatchStateRequestError::NoSuchDagRun),
                     Some(it) => {
                         match &it.parser {
@@ -533,8 +542,7 @@ impl ApiServer {
                                         (StageName::Stragglers, Some(stages)) => &stages.stragglers,
                                         (_, None) => {
                                             return Err(
-                                                HostOsRolloutBatchStateRequestError::NoPlanDataYet
-                                                    .into(),
+                                                HostOsRolloutBatchStateRequestError::NoPlanDataYet,
                                             );
                                         }
                                     }
@@ -556,9 +564,56 @@ impl ApiServer {
         };
 
         match res {
-            Err(e) => Err(e.into()),
-            Ok(data) => Ok(Json(data)),
+            Err(e) => Err(e),
+            Ok(data) => Ok(data),
         }
+    }
+
+    fn stream_get_hostos_rollout_batch(
+        self: Arc<Self>,
+        dag_run_id: String,
+        stage_name: String,
+        batch_number: usize,
+    ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
+        let mut subscription = self.state_syncer.subscribe_to_syncer_updates();
+
+        let stream = {
+            try_stream! {
+                // Set up something that will be dropped (thus log) when SSE is disconnected.
+                let disconnection_guard = DisconnectionGuard::default();
+
+                // Set an initial message to diff the first broadcast message against.
+                let mut last: Option<Result<unstable::HostOsBatchResponse, HostOsRolloutBatchStateRequestError>> = None;
+
+                loop {
+                    let current = Some(self.get_hostos_rollout_batch(&dag_run_id, &stage_name, batch_number, subscription.borrow_and_update().clone()));
+                    if current != last {
+                        match &current {
+                            Some(Ok(sok)) => {
+                                yield sse::Event::default().event("HostOsBatchResponse").json_data(sok).unwrap();
+                            }
+                            Some(Err(e)) => {
+                                yield sse::Event::default().event("Error").json_data(v2::Error::from(e.clone())).unwrap();
+                            }
+                            None => {}
+                        }
+                        last = current;
+                    }
+                    if subscription.changed().await.is_err() {
+                        break;
+                    }
+                }
+
+                // Drop the disconnection guard to log the message that the client disconnected.
+                drop(disconnection_guard);
+            }
+        };
+
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keepalive"),
+        )
     }
 
     pub fn routes(self: Arc<Self>) -> Router {
@@ -618,9 +673,20 @@ impl ApiServer {
                 .route(
                     "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number",
                     get(handle!(self, s, |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>|, {
-                        s
-                            .get_hostos_rollout_batch_state(dag_run_id.as_str(), stage_name.as_str(), batch_number)
-                            .await
+                        let cycle_state = s.state_syncer.get_state().await;
+                        match s
+                            .get_hostos_rollout_batch(dag_run_id.as_str(), stage_name.as_str(), batch_number, cycle_state) {
+                                Ok(k) => Ok(Json(k)),
+                                Err(e) => {
+                                    Err(<(StatusCode, String)>::from(e))
+                                }
+                            }
+                    }))
+                )
+                .route(
+                    "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number/sse",
+                    get(handle!(self, s, |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>|, {
+                        s.stream_get_hostos_rollout_batch(dag_run_id, stage_name, batch_number)
                     }))
                 )
             )

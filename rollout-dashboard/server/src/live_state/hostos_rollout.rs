@@ -10,7 +10,7 @@ use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
 use rollout_dashboard::types::unstable::{self, NodeInfo};
-use rollout_dashboard::types::unstable::{HostOsBatchDetail, StageName};
+use rollout_dashboard::types::unstable::{HostOsBatchResponse, StageName};
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::hostos::{Batch, BatchState, Rollout, Stages as V2Stages, State};
 use serde::{Deserialize, Serialize, Serializer};
@@ -149,8 +149,8 @@ fn make_a_planned_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
     val: &ProvisionalPlanBatch,
-) -> HostOsBatchDetail {
-    HostOsBatchDetail {
+) -> HostOsBatchResponse {
+    HostOsBatchResponse {
         stage,
         batch_number,
         planned_start_time: val.start_at.clone().into(),
@@ -175,8 +175,8 @@ fn make_a_discovered_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
     val: &TaskInstancesResponseItem,
-) -> HostOsBatchDetail {
-    HostOsBatchDetail {
+) -> HostOsBatchResponse {
+    HostOsBatchResponse {
         stage,
         batch_number,
         planned_start_time: val.earliest_date(),
@@ -230,10 +230,10 @@ impl FromStr for ProvisionalHostOSPlan {
 
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct Stages {
-    pub(crate) canary: IndexMap<NonZero<usize>, HostOsBatchDetail>,
-    pub(crate) main: IndexMap<NonZero<usize>, HostOsBatchDetail>,
-    pub(crate) unassigned: IndexMap<NonZero<usize>, HostOsBatchDetail>,
-    pub(crate) stragglers: IndexMap<NonZero<usize>, HostOsBatchDetail>,
+    pub(crate) canary: IndexMap<NonZero<usize>, HostOsBatchResponse>,
+    pub(crate) main: IndexMap<NonZero<usize>, HostOsBatchResponse>,
+    pub(crate) unassigned: IndexMap<NonZero<usize>, HostOsBatchResponse>,
+    pub(crate) stragglers: IndexMap<NonZero<usize>, HostOsBatchResponse>,
 }
 
 impl From<&Stages> for V2Stages {
@@ -341,7 +341,7 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut HostOsBatchDetail,
+    batch: &mut HostOsBatchResponse,
     state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -843,7 +843,7 @@ impl Parser {
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
         fn keep_batches_planned_or_provisional_with_tasks(
-            m: &IndexMap<NonZero<usize>, HostOsBatchDetail>,
+            m: &IndexMap<NonZero<usize>, HostOsBatchResponse>,
         ) -> IndexMap<NonZero<usize>, Batch> {
             m.into_iter()
                 .filter(|(_, v)| {

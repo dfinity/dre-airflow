@@ -463,8 +463,8 @@ pub mod v2 {
             pub actual_nodes: Option<Vec<Node>>,
         }
 
-        impl From<&super::super::unstable::HostOsBatchDetail> for Batch {
-            fn from(other: &super::super::unstable::HostOsBatchDetail) -> Batch {
+        impl From<&super::super::unstable::HostOsBatchResponse> for Batch {
+            fn from(other: &super::super::unstable::HostOsBatchResponse) -> Batch {
                 Batch {
                     planned_start_time: other.planned_start_time,
                     actual_start_time: other.actual_start_time,
@@ -727,6 +727,12 @@ pub mod v2 {
         pub message: String,
     }
 
+    impl From<(StatusCode, String)> for Error {
+        fn from((code, message): (StatusCode, String)) -> Self {
+            Self { code, message }
+        }
+    }
+
     /// The two variants of full state that can be sent by
     /// non-SSE endpoints, and also stored internally.
     /// Contains either a list of rollouts ordered from newest to oldest,
@@ -822,7 +828,7 @@ pub mod unstable {
         Degraded,
     }
 
-    #[derive(Debug, Deserialize, Serialize, Clone)]
+    #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
     pub struct NodeInfo {
         pub node_id: String,
         pub node_provider_id: String,
@@ -851,7 +857,7 @@ pub mod unstable {
         Stragglers,
     }
 
-    #[derive(Debug, Deserialize, Serialize, Clone)]
+    #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
     pub enum NodeUpgradeStatus {
         AWOL,
         #[serde(rename = "pending")]
@@ -862,7 +868,7 @@ pub mod unstable {
 
     pub type NodeUpgradeStatuses = HashMap<String, NodeUpgradeStatus>;
 
-    #[derive(Debug, Deserialize, Serialize, Clone)]
+    #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
     pub enum NodeAlertStatus {
         #[serde(rename = "unknown")]
         Unknown,
@@ -874,9 +880,9 @@ pub mod unstable {
 
     pub type NodeAlertStatuses = HashMap<String, NodeAlertStatus>;
 
-    #[derive(Serialize, Debug, Clone)]
+    #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
     /// Represents a batch of subnets to upgrade.
-    pub struct HostOsBatchDetail {
+    pub struct HostOsBatchResponse {
         pub stage: StageName,
         pub batch_number: NonZero<usize>,
         /// The time the batch was programmed to start at.

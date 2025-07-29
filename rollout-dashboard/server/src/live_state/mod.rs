@@ -53,7 +53,7 @@ where
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub enum RolloutDataGatherError {
     AirflowError(AirflowError),
     CyclicDependency(task_sorter::CyclicDependencyError),
@@ -408,7 +408,7 @@ pub(crate) struct Live;
 pub(crate) struct AirflowStateSyncer<S> {
     airflow_api: Arc<AirflowClient>,
     syncer_state: Arc<Mutex<Arc<SyncerState>>>,
-    stream_tx: Sender<SyncCycleState>,
+    stream_tx: Sender<Arc<SyncerState>>,
     refresh_interval: u64,
     max_rollouts: usize,
     #[allow(dead_code)]
@@ -422,14 +422,15 @@ impl AirflowStateSyncer<Initial> {
         refresh_interval: u64,
     ) -> Self {
         let init: SyncCycleState = SyncCycleState::Initial;
-        let (stream_tx, _stream_rx) = watch::channel::<SyncCycleState>(init.clone());
+        let init_syncer_state = Arc::new(SyncerState {
+            rollout_states: RolloutStates(HashMap::new()),
+            log_inspectors: HashMap::new(),
+            cycle_state: init,
+        });
+        let (stream_tx, _stream_rx) = watch::channel::<Arc<SyncerState>>(init_syncer_state.clone());
         Self {
             airflow_api,
-            syncer_state: Arc::new(Mutex::new(Arc::new(SyncerState {
-                rollout_states: RolloutStates(HashMap::new()),
-                log_inspectors: HashMap::new(),
-                cycle_state: init,
-            }))),
+            syncer_state: Arc::new(Mutex::new(init_syncer_state)),
             stream_tx,
             refresh_interval,
             max_rollouts,
@@ -502,7 +503,7 @@ impl AirflowStateSyncer<Live> {
     /// Create a channel that will get state updates as soon as they are available.
     /// This needs `periodically_sync_state` running in a coroutine.  That is
     /// statically ensured by the different type of this impl.
-    pub fn subscribe_to_state_updates(&self) -> watch::Receiver<SyncCycleState> {
+    pub fn subscribe_to_syncer_updates(&self) -> watch::Receiver<Arc<SyncerState>> {
         self.stream_tx.subscribe()
     }
 
@@ -769,7 +770,7 @@ impl AirflowStateSyncer<Live> {
         ))
     }
 
-    async fn sync_state(&self, max_rollouts: usize) -> SyncCycleState {
+    async fn sync_state(&self, max_rollouts: usize) -> Arc<SyncerState> {
         let syncer_state = self.syncer_state.lock().await;
         let (rollout_states, log_inspectors) = (
             syncer_state.rollout_states.clone(),
@@ -791,7 +792,7 @@ impl AirflowStateSyncer<Live> {
                         rollouts,
                     }),
                 });
-                syncer_state.cycle_state.clone()
+                syncer_state.clone()
             }
             Err(e) => {
                 let mut syncer_state = self.syncer_state.lock().await;
@@ -800,7 +801,7 @@ impl AirflowStateSyncer<Live> {
                     rollout_states: syncer_state.rollout_states.clone(),
                     cycle_state: SyncCycleState::Error(e),
                 });
-                syncer_state.cycle_state.clone()
+                syncer_state.clone()
             }
         }
     }
@@ -818,7 +819,7 @@ impl AirflowStateSyncer<Live> {
 
             let d = select! {
                 d = self.sync_state(self.max_rollouts) => {
-                    match &d {
+                    match &d.cycle_state {
                         SyncCycleState::Initial => (),
                         SyncCycleState::Successful(SuccessfulSyncCycleState {rollouts, ..}) => {
                             let loop_delta_time = Utc::now() - loop_start_time;
