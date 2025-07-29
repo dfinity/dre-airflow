@@ -47,7 +47,9 @@ def have_hostos_nodes_adopted_revision(
     print("::endgroup::")
     res = prom.query_prometheus_servers(network.prometheus_urls, query)
 
-    nodes_versions = {r["metric"]["ic_node"]: r["metric"]["version"] for r in res}
+    nodes_versions: dict[str, str | None] = {
+        r["metric"]["ic_node"]: r["metric"]["version"] for r in res
+    }
     for node in nodes:
         if node["node_id"] not in nodes_versions:
             nodes_versions[node["node_id"]] = None
