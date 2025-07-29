@@ -11,17 +11,18 @@
     import { hostOsBatchStateName } from "./types";
 
     interface Props {
+        dag_run_id: string;
         batch: HostOsBatchDetail;
     }
 
-    let { batch }: Props = $props();
+    let { dag_run_id, batch }: Props = $props();
 
     let planned_items = batch.planned_nodes.map((val) => ({
         Node: val.node_id,
         Provider: val.node_provider_id,
         DC: val.dc_id,
-        Status: val.status,
         Subnet: val.subnet_id === null ? "—" : val.subnet_id,
+        Status: val.status,
     }));
 
     function getUpgradeStatus(node_id: string): string {
@@ -54,6 +55,7 @@
                   Node: val.node_id,
                   Provider: val.node_provider_id,
                   DC: val.dc_id,
+                  Subnet: val.subnet_id === null ? "—" : val.subnet_id,
                   "Upgraded?": getUpgradeStatus(val.node_id),
                   "Alerting?": getAlertStatus(val.node_id),
               }))
@@ -111,7 +113,7 @@
                 },
             },
             {
-                select: [4],
+                select: [3],
                 type: "string",
                 render: function (cellData: string, td: Node) {
                     if (cellData != "—") {
@@ -128,6 +130,10 @@
     <Tabs tabStyle="underline">
         <TabItem open title="Batch information">
             <RegularTable striped={true}>
+                <TableBodyRow
+                    ><TableHeadCell>Part of rollout</TableHeadCell
+                    ><TableBodyCell>{dag_run_id}</TableBodyCell></TableBodyRow
+                >
                 <TableBodyRow
                     ><TableHeadCell>Stage</TableHeadCell><TableBodyCell
                         >{batch.stage}</TableBodyCell

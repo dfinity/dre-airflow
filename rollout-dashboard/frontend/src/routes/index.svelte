@@ -6,13 +6,7 @@
     import GuestOSRollout from "../lib/GuestOSRollout.svelte";
     import ApiBoundaryNodesRollout from "../lib/ApiBoundaryNodesRollout.svelte";
     import HostOsRollout from "../lib/HostOSRollout.svelte";
-    import { FooterCopyright } from "flowbite-svelte";
-    import {
-        Footer,
-        FooterLink,
-        FooterLinkGroup,
-        FooterBrand,
-    } from "flowbite-svelte";
+
     import { SvelteToast } from "@zerodevx/svelte-toast";
     import { ChevronDownOutline } from "flowbite-svelte-icons";
 
@@ -61,7 +55,7 @@
         "text-white bg-orange-700 md:bg-transparent md:text-orange-700 md:dark:text-white dark:bg-orange-600 md:dark:bg-transparent";
     let nonActiveClass =
         "text-gray-700 hover:bg-gray-100 md:hover:bg-transparent md:border-0 md:hover:text-orange-700 dark:text-gray-400 md:dark:hover:text-white dark:hover:bg-gray-700 dark:hover:text-white md:dark:hover:bg-transparent";
-    let navClasses = {active: activeClass, nonActive: nonActiveClass};
+    let navClasses = { active: activeClass, nonActive: nonActiveClass };
 </script>
 
 <SvelteToast />
@@ -290,24 +284,3 @@
         {/if}
     {/if}
 {/each}
-
-<Footer>
-    <div class="sm:flex sm:items-center sm:justify-between">
-        <FooterCopyright by="DFINITY Foundation" copyrightMessage="/ Apache 2.0"
-        ></FooterCopyright>
-        <FooterBrand name="Rollout dashboard" src="favicon-512x512.png"
-        ></FooterBrand>
-        <FooterLinkGroup
-            class="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
-        >
-            <FooterLink
-                href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
-                target="_blank">Documentation</FooterLink
-            >
-            <FooterLink
-                href="https://dfinity.enterprise.slack.com/archives/C01DB8MQ5M1"
-                target="_blank">Help</FooterLink
-            >
-        </FooterLinkGroup>
-    </div>
-</Footer>
