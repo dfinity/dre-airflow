@@ -329,6 +329,14 @@ class NodeInfo(TypedDict):
 
 type NodeBatch = list[NodeInfo]
 
+type NodeUpgradeStatus = Literal["upgraded"] | Literal["pending"] | Literal["AWOL"]
+
+type NodeUpgradeStatuses = dict[NodeId, NodeUpgradeStatus]
+
+type NodeAlertStatus = Literal["alerting"] | Literal["OK"] | Literal["unknown"]
+
+type NodeAlertStatuses = dict[NodeId, NodeAlertStatus]
+
 
 class ComputedBatch(TypedDict):
     nodes: NodeBatch
