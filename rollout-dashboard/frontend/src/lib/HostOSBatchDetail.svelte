@@ -9,6 +9,7 @@
     } from "flowbite-svelte";
     import { Tabs, TabItem } from "flowbite-svelte";
     import { hostOsBatchStateName } from "./types";
+    import { cap } from "./lib";
 
     interface Props {
         dag_run_id: string;
@@ -132,7 +133,7 @@
                 >
                 <TableBodyRow
                     ><TableHeadCell>Stage</TableHeadCell><TableBodyCell
-                        >{batch.stage}</TableBodyCell
+                        >{cap(batch.stage)}</TableBodyCell
                     ></TableBodyRow
                 >
                 <TableBodyRow
@@ -158,14 +159,17 @@
                     ><TableHeadCell>State</TableHeadCell><TableBodyCell
                         >{#if batch.display_url}<a
                                 rel="external"
+                                title="Open Airflow logs for the most recently updated task"
                                 href={batch.display_url || ""}
                                 target="_blank"
                                 class="text-secondary-600"
                                 data-sveltekit-preload-data="off"
                                 >{hostOsBatchStateIcon(batch)}
-                                {hostOsBatchStateName(batch)}</a
+                                {cap(hostOsBatchStateName(batch))}</a
                             >{:else}{hostOsBatchStateIcon(batch)}
-                            {hostOsBatchStateName(batch)}{/if}</TableBodyCell
+                            {cap(
+                                hostOsBatchStateName(batch),
+                            )}{/if}</TableBodyCell
                     ></TableBodyRow
                 >
                 {#if batch.comment !== null && batch.comment !== ""}
