@@ -1,7 +1,14 @@
 <script lang="ts">
-    import { type HostOsBatchDetail } from "./types";
+    import { hostOsBatchStateIcon, type HostOsBatchDetail } from "./types";
     import { Table } from "@flowbite-svelte-plugins/datatable";
+    import {
+        Table as RegularTable,
+        TableBodyCell,
+        TableBodyRow,
+        TableHeadCell,
+    } from "flowbite-svelte";
     import { Tabs, TabItem } from "flowbite-svelte";
+    import { hostOsBatchStateName } from "./types";
 
     interface Props {
         batch: HostOsBatchDetail;
@@ -52,6 +59,34 @@
               }))
             : null;
 
+    function reducer(akku: Record<string, number>, val: string) {
+        console.log("Reducing " + val);
+        let old_count = akku[val];
+        if (old_count === undefined) {
+            console.log("undefined");
+            akku[val] = 1;
+        } else {
+            console.log("defined");
+            akku[val] = old_count + 1;
+        }
+        console.log("Reduced " + JSON.stringify(akku));
+        return akku;
+    }
+
+    let upgraded_nodes_summary =
+        batch.upgraded_nodes === null
+            ? null
+            : Object.entries(batch.upgraded_nodes)
+                  .map(([k, v]) => v)
+                  .reduce(reducer, {});
+
+    let alerting_nodes_summary =
+        batch.alerting_nodes === null
+            ? null
+            : Object.entries(batch.alerting_nodes)
+                  .map(([k, v]) => v)
+                  .reduce(reducer, {});
+
     let options = {
         columns: [
             {
@@ -89,17 +124,101 @@
     };
 </script>
 
-<Tabs tabStyle="underline">
-    {#if actual_items !== null}
-        <TabItem open title="Actual nodes">
-            <Table items={actual_items} dataTableOptions={options} />
+<div>
+    <Tabs tabStyle="underline">
+        <TabItem open title="Batch information">
+            <RegularTable striped={true}>
+                <TableBodyRow
+                    ><TableHeadCell>Stage</TableHeadCell><TableBodyCell
+                        >{batch.stage}</TableBodyCell
+                    ></TableBodyRow
+                >
+                <TableBodyRow
+                    ><TableHeadCell>Planned at</TableHeadCell><TableBodyCell
+                        >{batch.planned_start_time.toString()}</TableBodyCell
+                    ></TableBodyRow
+                >
+                {#if batch.actual_start_time !== null}
+                    <TableBodyRow
+                        ><TableHeadCell>Started at</TableHeadCell><TableBodyCell
+                            >{batch.actual_start_time.toString()}</TableBodyCell
+                        ></TableBodyRow
+                    >
+                {/if}
+                {#if batch.end_time !== null}
+                    <TableBodyRow
+                        ><TableHeadCell>Started at</TableHeadCell><TableBodyCell
+                            >{batch.end_time.toString()}</TableBodyCell
+                        ></TableBodyRow
+                    >
+                {/if}
+                <TableBodyRow
+                    ><TableHeadCell>State</TableHeadCell><TableBodyCell
+                        >{#if batch.display_url}<a
+                                rel="external"
+                                href={batch.display_url || ""}
+                                target="_blank"
+                                class="text-secondary-600"
+                                data-sveltekit-preload-data="off"
+                                >{hostOsBatchStateIcon(batch)}
+                                {hostOsBatchStateName(batch)}</a
+                            >{:else}{hostOsBatchStateIcon(batch)}
+                            {hostOsBatchStateName(batch)}{/if}</TableBodyCell
+                    ></TableBodyRow
+                >
+                {#if batch.comment !== null && batch.comment !== ""}
+                    <TableBodyRow
+                        ><TableHeadCell>Comment</TableHeadCell><TableBodyCell
+                            >{batch.comment}</TableBodyCell
+                        ></TableBodyRow
+                    >
+                {/if}
+                <TableBodyRow
+                    ><TableHeadCell>Targets</TableHeadCell>
+                    {#if actual_items !== null}
+                        <TableBodyCell
+                            >{planned_items.length} nodes planned, {actual_items.length}
+                            actually targeted</TableBodyCell
+                        >
+                    {:else}
+                        <TableBodyCell
+                            >{planned_items.length} nodes planned</TableBodyCell
+                        >
+                    {/if}</TableBodyRow
+                >
+                {#if upgraded_nodes_summary}
+                    <TableBodyRow
+                        ><TableHeadCell>Upgrade status</TableHeadCell
+                        ><TableBodyCell
+                            >{Object.entries(upgraded_nodes_summary)
+                                .map(([k, v]) => `${v} nodes ${k}`)
+                                .join(", ")}</TableBodyCell
+                        ></TableBodyRow
+                    >
+                {/if}
+                {#if alerting_nodes_summary}
+                    <TableBodyRow
+                        ><TableHeadCell>Health status</TableHeadCell
+                        ><TableBodyCell
+                            >{Object.entries(alerting_nodes_summary)
+                                .map(([k, v]) => `${v} nodes ${k}`)
+                                .join(", ")}</TableBodyCell
+                        ></TableBodyRow
+                    >
+                {/if}
+            </RegularTable>
         </TabItem>
-        <TabItem title="Planned nodes">
-            <Table items={planned_items} dataTableOptions={options} />
-        </TabItem>
-    {:else}
-        <TabItem open title="Planned nodes">
-            <Table items={planned_items} dataTableOptions={options} />
-        </TabItem>
-    {/if}
-</Tabs>
+        {#if actual_items !== null}
+            <TabItem title="Actual nodes">
+                <Table items={actual_items} dataTableOptions={options} />
+            </TabItem>
+            <TabItem title="Planned nodes">
+                <Table items={planned_items} dataTableOptions={options} />
+            </TabItem>
+        {:else}
+            <TabItem title="Planned nodes">
+                <Table items={planned_items} dataTableOptions={options} />
+            </TabItem>
+        {/if}
+    </Tabs>
+</div>

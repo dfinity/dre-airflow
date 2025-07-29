@@ -231,6 +231,9 @@ const HostOsBatchState = {
     skipped: { icon: "⏩", name: "skipped" },
     unknown: { icon: "❓", name: "does not appear in Airflow" },
 };
+export function hostOsBatchStateName(batch: HostOsBatch): String {
+    return HostOsBatchState[batch.state].name;
+}
 export function hostOsBatchStateIcon(batch: HostOsBatch): String {
     return HostOsBatchState[batch.state].icon;
 }
