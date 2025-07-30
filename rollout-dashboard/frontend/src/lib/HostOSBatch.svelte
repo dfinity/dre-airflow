@@ -5,6 +5,7 @@
         type HostOsBatch,
         hostOsBatchStateComment,
         hostOsBatchStateIcon,
+        formatSelectors,
     } from "./types";
     import { cap } from "./lib";
     import { url } from "@roxi/routify";
@@ -28,74 +29,77 @@
 </script>
 
 <li class="rounded-lg batch batch-{batch_number}">
-    <div class="hostos_node_batch_state">
-        <a
-            rel="external"
-            href={batch.display_url || ""}
-            target="_blank"
-            data-sveltekit-preload-data="off"
-            title={cap(hostOsBatchStateComment(batch))}
-        >
-            <div class="hostos_node_batch_state_icon">
+    <a href={detailsUrl}>
+        <div class="hostos_node_batch_state">
+            <div
+                title={cap(hostOsBatchStateComment(batch))}
+                class="hostos_node_batch_state_icon"
+            >
                 {hostOsBatchStateIcon(batch)}
-            </div></a
-        >
-        <div>
-            {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
-                <div class="nodes">
-                    <!-- planned and actual differ -->
-                    {batch.planned_nodes.length} nodes planned
-                </div>
-                <div class="nodes">
-                    <A class="text-secondary-600" href={detailsUrl}
-                        >{batch.actual_nodes.length} nodes</A
-                    > targeted
-                </div>
-            {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
-                <div class="nodes">
-                    <!-- planned and actual are same nodes -->
-                    <A class="text-secondary-600" href={detailsUrl}
-                        >{batch.actual_nodes.length} nodes</A
-                    > targeted
-                </div>
-            {:else}
-                <div class="nodes">
-                    <!-- no actual nodes yet -->
-                    <A class="text-secondary-600" href={detailsUrl}
-                        >{batch.planned_nodes.length} nodes</A
-                    > planned
-                </div>
-            {/if}
+            </div>
+            <div>
+                {#if batch.actual_nodes !== null && JSON.stringify(batch.actual_nodes) != JSON.stringify(batch.planned_nodes)}<!-- planned and actual are different -->
+                    <div class="nodes">
+                        <!-- planned and actual differ -->
+                        <span
+                            class="tooltip"
+                            title={formatSelectors(batch.selectors)}
+                            >{batch.planned_nodes.length} nodes planned</span
+                        >
+                    </div>
+                    <div class="nodes">
+                        {batch.actual_nodes.length} nodes targeted
+                    </div>
+                {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
+                    <div class="nodes">
+                        <!-- planned and actual are same nodes -->
+                        <span
+                            class="tooltip"
+                            title={formatSelectors(batch.selectors)}
+                            >{batch.actual_nodes.length} nodes targeted</span
+                        >
+                    </div>
+                {:else}
+                    <div class="nodes">
+                        <!-- no actual nodes yet -->
+                        <span
+                            class="tooltip"
+                            title={formatSelectors(batch.selectors)}
+                            >{batch.planned_nodes.length} nodes planned</span
+                        >
+                    </div>
+                {/if}
+            </div>
         </div>
-    </div>
-    <div class="time text-gray-500">
-        Planned <Time
-            live
-            relative
-            timestamp={batch.planned_start_time}
-            format="dddd @ h:mm A · MMMM D, YYYY"
-        />
-    </div>
-    {#if batch.actual_start_time}
         <div class="time text-gray-500">
-            Started <Time
+            Planned <Time
                 live
                 relative
-                timestamp={batch.actual_start_time}
+                timestamp={batch.planned_start_time}
                 format="dddd @ h:mm A · MMMM D, YYYY"
             />
         </div>
-    {/if}
-    {#if batch.end_time}
-        <div class="time text-gray-500">
-            Finished <Time
-                live
-                relative
-                timestamp={batch.end_time}
-                format="dddd @ h:mm A · MMMM D, YYYY"
-            />
-        </div>
-    {/if}
+        {#if batch.actual_start_time}
+            <div class="time text-gray-500">
+                Started <Time
+                    live
+                    relative
+                    timestamp={batch.actual_start_time}
+                    format="dddd @ h:mm A · MMMM D, YYYY"
+                />
+            </div>
+        {/if}
+        {#if batch.end_time}
+            <div class="time text-gray-500">
+                Finished <Time
+                    live
+                    relative
+                    timestamp={batch.end_time}
+                    format="dddd @ h:mm A · MMMM D, YYYY"
+                />
+            </div>
+        {/if}
+    </a>
 </li>
 
 <style>
@@ -108,7 +112,7 @@
         display: grid;
         grid-template-columns: min-content auto;
     }
-    li.batch .hostos_node_batch_state a {
+    li.batch .hostos_node_batch_state .hostos_node_batch_state_icon {
         min-width: 1.8em;
     }
     .time,

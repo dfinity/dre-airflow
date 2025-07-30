@@ -97,6 +97,9 @@ macro_rules! handle {
     }};
 }
 
+// FIXME: this and other error return types need to gain a distinction between
+// temporary errors and permanent ones (permanent ones should cause a disconnection).
+// Then that distinction needs to be implemented for the SSE endpoints.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostOsRolloutBatchStateRequestError {
     InvalidBatchNumber,

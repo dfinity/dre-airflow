@@ -78,7 +78,7 @@
             >
         </NavBrand>
         <NavUl>
-            <NavLi href={$url("/")}
+            <NavLi href="javascript:window.history.back();"
                 ><AngleLeftOutline
                     class="text-primary-800 dark:text-white inline"
                 />Go back to main screen</NavLi

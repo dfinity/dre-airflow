@@ -373,9 +373,9 @@ pub mod v2 {
 
         use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
-        use serde::Serialize;
-        use std::num::NonZero;
-        use strum::Display;
+        use serde::{Deserialize, Serialize, Serializer};
+        use std::{fmt, num::NonZero};
+        use strum::{Display, EnumString};
 
         #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
         #[serde(rename_all = "snake_case")]
@@ -441,6 +441,129 @@ pub mod v2 {
             }
         }
 
+        #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
+        pub enum NodeAssignment {
+            #[serde(rename = "assigned")]
+            Assigned,
+            #[serde(rename = "unassigned")]
+            Unassigned,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
+        pub enum NodeOwner {
+            #[serde(rename = "DFINITY")]
+            Dfinity,
+            #[serde(rename = "others")]
+            Others,
+        }
+
+        fn deserialize_nodes_per_group<'de, D>(
+            deserializer: D,
+        ) -> Result<Option<NodesPerGroup>, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            struct CustomVisitor;
+
+            impl<'de> serde::de::Visitor<'de> for CustomVisitor {
+                type Value = Option<NodesPerGroup>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str(
+                        "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
+                    )
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(None)
+                }
+
+                fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    if v < 0 {
+                        return Err(serde::de::Error::invalid_value(
+                            serde::de::Unexpected::Signed(v),
+                            &self,
+                        ));
+                    }
+                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
+                }
+
+                fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
+                }
+
+                fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    if !(0.0..=1.0).contains(&v) {
+                        return Err(serde::de::Error::invalid_value(
+                            serde::de::Unexpected::Float(v),
+                            &self,
+                        ));
+                    }
+                    Ok(Some(NodesPerGroup::Ratio(ordered_float::OrderedFloat(v))))
+                }
+            }
+
+            deserializer.deserialize_any(CustomVisitor)
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum NodesPerGroup {
+            Absolute(usize),
+            Ratio(ordered_float::OrderedFloat<f64>),
+        }
+
+        impl Serialize for NodesPerGroup {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match self {
+                    Self::Absolute(n) => serializer.serialize_u64(*n as u64),
+                    Self::Ratio(n) => serializer.serialize_str(format!("{}%", n * 100.0).as_str()),
+                }
+            }
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+        pub enum GroupBy {
+            #[serde(rename = "datacenter")]
+            Datacenter,
+            #[serde(rename = "subnet")]
+            Subnet,
+        }
+
+        #[derive(Debug, Deserialize, Serialize, Clone, EnumString, PartialEq, Eq)]
+        #[strum(serialize_all = "PascalCase")]
+        pub enum NodeStatus {
+            Healthy,
+            Degraded,
+            Dead,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+        pub struct NodeSelector {
+            pub assignment: Option<NodeAssignment>,
+            pub owner: Option<NodeOwner>,
+            #[serde(deserialize_with = "deserialize_nodes_per_group")]
+            pub nodes_per_group: Option<NodesPerGroup>,
+            pub group_by: Option<GroupBy>,
+            pub status: Option<NodeStatus>,
+        }
+
+        pub type NodeSelectors = Vec<NodeSelector>;
+
         #[derive(Serialize, Debug, Clone)]
         /// Represents a batch of subnets to upgrade.
         pub struct Batch {
@@ -457,6 +580,9 @@ pub mod v2 {
             pub display_url: String,
             /// A count of the nodes planned to be upgraded as part of this batch.
             pub planned_nodes: Vec<Node>,
+            /// A list of selectors used to select which nodes to target for upgrade.
+            /// This is None if the selectors are not yet known.
+            pub selectors: Option<NodeSelectors>,
             /// A count of the nodes that actually were or are upgraded as part of this batch.
             /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
             /// If that phase of the batch has yet to take place, this is usually null.
@@ -478,6 +604,7 @@ pub mod v2 {
                         .into_iter()
                         .map(|n| n.into())
                         .collect(),
+                    selectors: other.selectors.clone(),
                     actual_nodes: other
                         .actual_nodes
                         .clone()
@@ -820,14 +947,7 @@ pub mod unstable {
         pub linearized_task_instances: Vec<TaskInstancesResponseItem>,
     }
 
-    #[derive(Debug, Deserialize, Serialize, Clone, EnumString)]
-    #[strum(serialize_all = "PascalCase")]
-    enum NodeStatus {
-        Healthy,
-        Dead,
-        Degraded,
-    }
-
+    // FIXME stabilize these unstable types and corresponding endpoints.
     #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
     pub struct NodeInfo {
         pub node_id: String,
@@ -842,7 +962,7 @@ pub mod unstable {
         pub nodes: Vec<NodeInfo>,
     }
 
-    pub type ActualPlanBatch = Vec<NodeInfo>;
+    pub type ActuallyTargetedNodes = Vec<NodeInfo>;
 
     #[derive(Clone, PartialEq, Hash, Eq, EnumString, Serialize, Debug, Display)]
     #[strum(serialize_all = "lowercase")]
@@ -896,6 +1016,9 @@ pub mod unstable {
         pub comment: String,
         /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
         pub display_url: String,
+        /// A list of selectors used to select which nodes to target for upgrade.
+        /// This is None if the selectors are not yet known.
+        pub selectors: Option<super::v2::hostos::NodeSelectors>,
         /// A count of the nodes planned to be upgraded as part of this batch.
         pub planned_nodes: Vec<NodeInfo>,
         /// A count of the nodes that actually were or are upgraded as part of this batch.

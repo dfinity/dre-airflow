@@ -1,5 +1,9 @@
 <script lang="ts">
-    import { hostOsBatchStateIcon, type HostOsBatchResponse } from "./types";
+    import {
+        hostOsBatchStateIcon,
+        type HostOsBatchResponse,
+        formatSelectors,
+    } from "./types";
     import { Table } from "@flowbite-svelte-plugins/datatable";
     import {
         Table as RegularTable,
@@ -179,6 +183,12 @@
                         ></TableBodyRow
                     >
                 {/if}
+                <TableBodyRow
+                    ><TableHeadCell>Selectors</TableHeadCell>
+                    <TableBodyCell
+                        >{formatSelectors(batch.selectors)}
+                    </TableBodyCell>
+                </TableBodyRow>
                 <TableBodyRow
                     ><TableHeadCell>Targets</TableHeadCell>
                     {#if actual_items !== null}
