@@ -61,7 +61,6 @@ fn make_a_planned_host_os_batch(
         actual_nodes: None,
         upgraded_nodes: None,
         alerting_nodes: None,
-        present_in_provisional_plan: true,
     }
 }
 
@@ -88,7 +87,6 @@ fn make_a_discovered_host_os_batch(
         selectors: None,
         upgraded_nodes: None,
         alerting_nodes: None,
-        present_in_provisional_plan: false,
     }
 }
 
@@ -234,16 +232,18 @@ fn annotate_batch_state(
     state
 }
 
+#[derive(Clone, Default, Serialize)]
+struct BatchXcomData {
+    actual_plans: PlanCache<unstable::ActuallyTargetedNodes>,
+    nodes_upgrade_status: PlanCache<unstable::NodeUpgradeStatuses>,
+    nodes_alert_status: PlanCache<unstable::NodeAlertStatuses>,
+    selectors: PlanCache<NodeSelectors>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Parser {
     provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    actual_plans:
-        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::ActuallyTargetedNodes>>,
-    nodes_upgrade_status:
-        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::NodeUpgradeStatuses>>,
-    nodes_alert_status:
-        HashMap<(unstable::StageName, NonZero<usize>), PlanCache<unstable::NodeAlertStatuses>>,
-    selectors: HashMap<(unstable::StageName, NonZero<usize>), PlanCache<NodeSelectors>>,
+    batch_xcoms: HashMap<(unstable::StageName, NonZero<usize>), BatchXcomData>,
     pub(crate) stages: Option<Stages>,
 }
 
@@ -257,26 +257,14 @@ impl Serialize for Parser {
         #[derive(Serialize)]
         struct SerializedParser {
             provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-            actual_plans: HashMap<String, PlanCache<unstable::ActuallyTargetedNodes>>,
-            nodes_upgrade_status: HashMap<String, PlanCache<unstable::NodeUpgradeStatuses>>,
-            nodes_alert_status: HashMap<String, PlanCache<unstable::NodeAlertStatuses>>,
+            batch_xcoms: HashMap<String, BatchXcomData>,
             stages: Option<Stages>,
         }
 
         let p = SerializedParser {
             provisional_plan: self.provisional_plan.clone(),
-            actual_plans: self
-                .actual_plans
-                .iter()
-                .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
-                .collect(),
-            nodes_upgrade_status: self
-                .nodes_upgrade_status
-                .iter()
-                .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
-                .collect(),
-            nodes_alert_status: self
-                .nodes_alert_status
+            batch_xcoms: self
+                .batch_xcoms
                 .iter()
                 .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
                 .collect(),
@@ -339,18 +327,6 @@ impl Parser {
                     PlanQueryResult::NotFound => None,
                 }
             };
-        }
-
-        macro_rules! retrieve_xcom_from_hashmap_of_caches_or_server {
-            ($stage_name_enum:expr, $stage_batch_number:expr, $task_instance:expr, $xcom_key:expr, $field:expr) => {{
-                retrieve_xcom_from_cache_or_server!(
-                    $field
-                        .entry(($stage_name_enum.clone(), $stage_batch_number))
-                        .or_insert(PlanCache::Unretrieved),
-                    $task_instance,
-                    $xcom_key
-                )
-            }};
         }
 
         let rollout_stages: Arc<Mutex<Option<Stages>>> = Arc::new(Mutex::new(None));
@@ -462,6 +438,10 @@ impl Parser {
                             stage_batch_number,
                             &task_instance,
                         ));
+                let batch_xcom_data = self
+                    .batch_xcoms
+                    .entry((stage_name_enum.clone(), stage_batch_number))
+                    .or_default();
 
                 macro_rules! trans_min {
                     ($input:expr) => {
@@ -532,24 +512,20 @@ impl Parser {
                                 }
                                 "wait_for_revision_adoption" => {
                                     if *state == TaskInstanceState::UpForReschedule {
-                                        batch.upgraded_nodes = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                            stage_name_enum,
-                                            stage_batch_number,
+                                        batch.upgraded_nodes = retrieve_xcom_from_cache_or_server!(
+                                            batch_xcom_data.nodes_upgrade_status,
                                             task_instance,
-                                            "return_value",
-                                            self.nodes_upgrade_status
+                                            "return_value"
                                         );
                                     }
                                     trans_min!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     if *state == TaskInstanceState::UpForReschedule {
-                                        batch.alerting_nodes = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                            stage_name_enum,
-                                            stage_batch_number,
+                                        batch.alerting_nodes = retrieve_xcom_from_cache_or_server!(
+                                            batch_xcom_data.nodes_alert_status,
                                             task_instance,
-                                            "return_value",
-                                            self.nodes_alert_status
+                                            "return_value"
                                         );
                                     }
                                     trans_min!(BatchState::WaitingUntilNodesHealthy);
@@ -571,12 +547,10 @@ impl Parser {
                         TaskInstanceState::Success => {
                             match task_name {
                                 "plan" => {
-                                    if let Some(selectors) = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                        stage_name_enum.clone(),
-                                        stage_batch_number,
+                                    if let Some(selectors) = retrieve_xcom_from_cache_or_server!(
+                                        batch_xcom_data.selectors,
                                         task_instance,
-                                        "selectors",
-                                        self.selectors
+                                        "selectors"
                                     ) {
                                         batch.selectors = Some(selectors.clone())
                                     };
@@ -597,12 +571,10 @@ impl Parser {
                                     trans_exact!(BatchState::DeterminingTargets);
                                 }
                                 "collect_nodes" => {
-                                    if let Some(plan) = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                        stage_name_enum.clone(),
-                                        stage_batch_number,
+                                    if let Some(plan) = retrieve_xcom_from_cache_or_server!(
+                                        batch_xcom_data.actual_plans,
                                         task_instance,
-                                        "nodes",
-                                        self.actual_plans
+                                        "nodes"
                                     ) {
                                         batch.actual_nodes = Some(plan.clone())
                                     };
@@ -618,24 +590,20 @@ impl Parser {
                                     trans_exact!(BatchState::WaitingForAdoption);
                                 }
                                 "wait_for_revision_adoption" => {
-                                    batch.upgraded_nodes = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                        stage_name_enum,
-                                        stage_batch_number,
+                                    batch.upgraded_nodes = retrieve_xcom_from_cache_or_server!(
+                                        batch_xcom_data.nodes_upgrade_status,
                                         task_instance,
-                                        "return_value",
-                                        self.nodes_upgrade_status
+                                        "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
                                     // but the join task is not yet.
-                                    batch.alerting_nodes = retrieve_xcom_from_hashmap_of_caches_or_server!(
-                                        stage_name_enum,
-                                        stage_batch_number,
+                                    batch.alerting_nodes = retrieve_xcom_from_cache_or_server!(
+                                        batch_xcom_data.nodes_alert_status,
                                         task_instance,
-                                        "return_value",
-                                        self.nodes_alert_status
+                                        "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
                                 }
@@ -677,22 +645,34 @@ impl Parser {
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
         fn keep_batches_planned_or_provisional_with_tasks(
-            m: &IndexMap<NonZero<usize>, HostOsBatchResponse>,
-        ) -> IndexMap<NonZero<usize>, Batch> {
+            m: IndexMap<NonZero<usize>, HostOsBatchResponse>,
+        ) -> IndexMap<NonZero<usize>, HostOsBatchResponse> {
             m.into_iter()
                 .filter(|(_, v)| {
-                    !v.actual_nodes.clone().unwrap_or_default().is_empty()
-                        || v.present_in_provisional_plan
+                    !v.actual_nodes.clone().unwrap_or_default().is_empty() || v.selectors.is_some()
                 })
-                .map(|(k, v)| (*k, v.into()))
                 .collect()
         }
-        self.stages = final_rollout_stages;
+        self.stages = final_rollout_stages.map(|s| Stages {
+            canary: keep_batches_planned_or_provisional_with_tasks(s.canary),
+            main: keep_batches_planned_or_provisional_with_tasks(s.main),
+            unassigned: keep_batches_planned_or_provisional_with_tasks(s.unassigned),
+            stragglers: keep_batches_planned_or_provisional_with_tasks(s.stragglers),
+        });
+
         rollout.stages = self.stages.as_ref().map(|stages| V2Stages {
-            canary: keep_batches_planned_or_provisional_with_tasks(&stages.canary),
-            main: keep_batches_planned_or_provisional_with_tasks(&stages.main),
-            unassigned: keep_batches_planned_or_provisional_with_tasks(&stages.unassigned),
-            stragglers: keep_batches_planned_or_provisional_with_tasks(&stages.stragglers),
+            canary: stages.canary.iter().map(|(k, v)| (*k, v.into())).collect(),
+            main: stages.main.iter().map(|(k, v)| (*k, v.into())).collect(),
+            unassigned: stages
+                .unassigned
+                .iter()
+                .map(|(k, v)| (*k, v.into()))
+                .collect(),
+            stragglers: stages
+                .stragglers
+                .iter()
+                .map(|(k, v)| (*k, v.into()))
+                .collect(),
         });
 
         Ok(RolloutKind::RolloutIcOsToMainnetNodes(rollout))

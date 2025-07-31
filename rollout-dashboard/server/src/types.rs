@@ -1033,8 +1033,5 @@ pub mod unstable {
         /// waiting for alerts to subside phase has not yet been reached, or for very
         /// old rollouts that do not have this information.
         pub alerting_nodes: Option<NodeAlertStatuses>,
-        /// Internal flag used to prune batches that haven't yet run, or have run but
-        /// had no nodes assigned to them.
-        pub present_in_provisional_plan: bool,
     }
 }

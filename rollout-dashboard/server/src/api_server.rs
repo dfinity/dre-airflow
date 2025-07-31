@@ -1,5 +1,5 @@
 use crate::live_state::{
-    AirflowStateSyncer, Live, Parser, RolloutStates, SyncCycleState, SyncerState,
+    AirflowStateSyncer, Live, Parser, RolloutState, RolloutStates, SyncCycleState, SyncerState,
 };
 use crate::live_state::{RolloutDataGatherError, SuccessfulSyncCycleState};
 use async_stream::try_stream;
@@ -97,21 +97,20 @@ macro_rules! handle {
     }};
 }
 
-// FIXME: this and other error return types need to gain a distinction between
-// temporary errors and permanent ones (permanent ones should cause a disconnection).
-// Then that distinction needs to be implemented for the SSE endpoints.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostOsRolloutBatchStateRequestError {
+    NotYetSynced,
+    NoPlanDataYet,
+    NoBatchDataYet,
     InvalidBatchNumber,
     InvalidStageName,
     InvalidDagID,
-    InvalidDagRunID,
-    NotYetSynced,
-    RolloutDataGatherError(RolloutDataGatherError),
-    NoSuchDagRun,
-    NoPlanDataYet,
-    NoSuchBatch,
     WrongDagRunKind,
+    InvalidDagRunID,
+    NoSuchDagRun,
+    NoPlanData,
+    NoSuchBatch,
+    RolloutDataGatherError(RolloutDataGatherError),
 }
 
 impl From<HostOsRolloutBatchStateRequestError> for String {
@@ -120,40 +119,57 @@ impl From<HostOsRolloutBatchStateRequestError> for String {
         match h {
             T::NotYetSynced => "Backend has not yet fetched rollouts".to_string(),
             T::NoPlanDataYet => "Rollout has not yet computed a plan".to_string(),
-            T::NoSuchDagRun => "No such DAG run".to_string(),
+            T::NoBatchDataYet => {
+                "Requested batch is not yet in rollout but may appear later".to_string()
+            }
             T::InvalidDagID => "Invalid DAG ID".to_string(),
             T::WrongDagRunKind => "DAG run refers to the wrong kind of rollout".to_string(),
             T::InvalidDagRunID => "Invalid DAG run ID".to_string(),
             T::InvalidStageName => "Invalid stage name".to_string(),
             T::InvalidBatchNumber => "Invalid batch number".to_string(),
-            T::NoSuchBatch => "The batch number is not in the rollout".to_string(),
+            T::NoSuchDagRun => {
+                "The requested DAG run does not correspond to any rollout".to_string()
+            }
+            T::NoPlanData => "Rollout never computed a plan".to_string(),
+            T::NoSuchBatch => {
+                "The requested batch number does not correspond to any batch in the rollout"
+                    .to_string()
+            }
             T::RolloutDataGatherError(e) => e.to_string(),
         }
     }
 }
 
-impl From<HostOsRolloutBatchStateRequestError> for StatusCode {
-    fn from(h: HostOsRolloutBatchStateRequestError) -> StatusCode {
+impl From<&HostOsRolloutBatchStateRequestError> for StatusCode {
+    fn from(h: &HostOsRolloutBatchStateRequestError) -> StatusCode {
         type T = HostOsRolloutBatchStateRequestError;
         type C = StatusCode;
         match h {
             T::NotYetSynced => C::NO_CONTENT,
-            T::NoPlanDataYet => C::NO_CONTENT,
-            T::NoSuchDagRun => C::NOT_FOUND,
+            T::NoPlanDataYet => reqwest::StatusCode::from_u16(209).unwrap(),
+            T::NoBatchDataYet => reqwest::StatusCode::from_u16(209).unwrap(),
             T::InvalidDagID => C::BAD_REQUEST,
             T::WrongDagRunKind => C::BAD_REQUEST,
             T::InvalidDagRunID => C::BAD_REQUEST,
             T::InvalidStageName => C::BAD_REQUEST,
             T::InvalidBatchNumber => C::BAD_REQUEST,
+            T::NoSuchDagRun => C::NOT_FOUND,
+            T::NoPlanData => C::NOT_FOUND,
             T::NoSuchBatch => C::NOT_FOUND,
             T::RolloutDataGatherError(_) => C::INTERNAL_SERVER_ERROR,
         }
     }
 }
 
+impl HostOsRolloutBatchStateRequestError {
+    fn permanent(&self) -> bool {
+        reqwest::StatusCode::from(self).as_u16() >= 400
+    }
+}
+
 impl From<HostOsRolloutBatchStateRequestError> for (StatusCode, String) {
     fn from(h: HostOsRolloutBatchStateRequestError) -> (StatusCode, String) {
-        (h.clone().into(), h.into())
+        ((&h).into(), h.into())
     }
 }
 
@@ -526,49 +542,59 @@ impl ApiServer {
         let dag_run_id = v2::DagRunID::from_str(dag_run_id)
             .map_err(|_| HostOsRolloutBatchStateRequestError::InvalidDagRunID)?;
 
-        let res = match &syncer_state.cycle_state {
-            SyncCycleState::Initial => Err(HostOsRolloutBatchStateRequestError::NotYetSynced),
-            SyncCycleState::Error(e) => Err(
-                HostOsRolloutBatchStateRequestError::RolloutDataGatherError(e.clone()),
-            ),
-            SyncCycleState::Successful(SuccessfulSyncCycleState { .. }) => {
-                match syncer_state.rollout_states.get(&(dag_id, dag_run_id)) {
-                    None => Err(HostOsRolloutBatchStateRequestError::NoSuchDagRun),
-                    Some(it) => {
-                        match &it.parser {
-                            Parser::Nodes(parser) => {
-                                let stage = {
-                                    match (stage, &parser.stages) {
-                                        (StageName::Canary, Some(stages)) => &stages.canary,
-                                        (StageName::Main, Some(stages)) => &stages.main,
-                                        (StageName::Unassigned, Some(stages)) => &stages.unassigned,
-                                        (StageName::Stragglers, Some(stages)) => &stages.stragglers,
-                                        (_, None) => {
-                                            return Err(
-                                                HostOsRolloutBatchStateRequestError::NoPlanDataYet,
-                                            );
-                                        }
-                                    }
-                                };
-                                match stage.get(&nonzero_batch_number) {
-                                    Some(n) => Ok(n.clone()),
-                                    None => Err(HostOsRolloutBatchStateRequestError::NoSuchBatch),
-                                }
-                            }
-                            _ => {
-                                // There is a rollout with such a DAG run ID, but it's not
-                                // the right type of rollout, so we return early.
-                                Err(HostOsRolloutBatchStateRequestError::WrongDagRunKind)
-                            }
-                        }
-                    }
+        match (
+            syncer_state
+                .rollout_states
+                .get(&(dag_id.clone(), dag_run_id.clone())),
+            match &syncer_state.cycle_state {
+                SyncCycleState::Initial => Err(HostOsRolloutBatchStateRequestError::NotYetSynced),
+                SyncCycleState::Error(e) => Err(
+                    HostOsRolloutBatchStateRequestError::RolloutDataGatherError(e.clone()),
+                ),
+                SyncCycleState::Successful(SuccessfulSyncCycleState { rollouts, .. }) => {
+                    Ok(rollouts)
+                }
+            }?
+            .get(&(dag_id, dag_run_id)),
+        ) {
+            (
+                Some(RolloutState {
+                    parser: Parser::Nodes(parser),
+                    ..
+                }),
+                Some(v2::Rollout {
+                    kind: v2::RolloutKind::RolloutIcOsToMainnetNodes(kind),
+                    ..
+                }),
+            ) => {
+                let rollout_finished = matches!(
+                    kind.state,
+                    v2::hostos::State::Complete | v2::hostos::State::Failed
+                );
+                let stage = match (stage, &parser.stages) {
+                    (StageName::Canary, Some(stages)) => Ok(&stages.canary),
+                    (StageName::Main, Some(stages)) => Ok(&stages.main),
+                    (StageName::Unassigned, Some(stages)) => Ok(&stages.unassigned),
+                    (StageName::Stragglers, Some(stages)) => Ok(&stages.stragglers),
+                    (_, None) => Err(if rollout_finished {
+                        HostOsRolloutBatchStateRequestError::NoPlanData
+                    } else {
+                        HostOsRolloutBatchStateRequestError::NoPlanDataYet
+                    }),
+                }?;
+                match stage.get(&nonzero_batch_number) {
+                    Some(n) => Ok(n.clone()),
+                    None => Err(if rollout_finished {
+                        HostOsRolloutBatchStateRequestError::NoSuchBatch
+                    } else {
+                        HostOsRolloutBatchStateRequestError::NoBatchDataYet
+                    }),
                 }
             }
-        };
-
-        match res {
-            Err(e) => Err(e),
-            Ok(data) => Ok(data),
+            (Some(_), _) | (_, Some(_)) => {
+                Err(HostOsRolloutBatchStateRequestError::WrongDagRunKind)
+            }
+            _ => Err(HostOsRolloutBatchStateRequestError::NoSuchDagRun),
         }
     }
 
@@ -597,6 +623,10 @@ impl ApiServer {
                             }
                             Some(Err(e)) => {
                                 yield sse::Event::default().event("Error").json_data(v2::Error::from(e.clone())).unwrap();
+                                if e.permanent() {
+                                    // Unlike other errors, the problem will not go away.  Break the SSE connection.
+                                    break
+                                }
                             }
                             None => {}
                         }
