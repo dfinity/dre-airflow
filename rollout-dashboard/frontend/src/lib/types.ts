@@ -150,7 +150,7 @@ export function apiBoundaryNodesBatchStateComment(subnet: ApiBoundaryNodesBatch)
     return s
 }
 
-// types:v2::api_boundary_nodes::Node
+// types::v2::api_boundary_nodes::Node
 export type ApiBoundaryNodesNode = {
     node_id: string;
 };
@@ -231,6 +231,9 @@ const HostOsBatchState = {
     skipped: { icon: "⏩", name: "skipped" },
     unknown: { icon: "❓", name: "does not appear in Airflow" },
 };
+export function hostOsBatchStateName(batch: HostOsBatch): String {
+    return HostOsBatchState[batch.state].name;
+}
 export function hostOsBatchStateIcon(batch: HostOsBatch): String {
     return HostOsBatchState[batch.state].icon;
 }
@@ -242,10 +245,74 @@ export function hostOsBatchStateComment(subnet: HostOsBatch): string {
     return s
 }
 
-// types:v2::hostos::Node
+// types::v2::hostos::Node
 export type HostOsNode = {
     node_id: string;
 };
+
+// types::v2::hostos::NodeSelector
+export type HostOsNodeSelector = {
+    assignment: "assigned" | "unassigned" | null
+    owner: "DFINITY" | "others" | null
+    nodes_per_group: number | string
+    group_by: "datacenter" | "subnet" | null
+    status: "Healthy" | "Degraded" | "Dead" | null
+}
+
+function formatSelector(selector: HostOsNodeSelector): string {
+    let health =
+        selector.status === null
+            ? " "
+            : ` ${selector.status.toLowerCase()} `;
+
+    let s = "";
+    if (typeof selector.nodes_per_group === "string") {
+        s = `${selector.nodes_per_group} of${health}nodes`;
+    } else if (selector.nodes_per_group == 1) {
+        s = `${selector.nodes_per_group}${health}node`;
+    } else {
+        s = `${selector.nodes_per_group}${health}nodes`;
+    }
+
+    if (selector.group_by !== null) {
+        if (
+            !(
+                selector.assignment === "unassigned" &&
+                selector.group_by === "subnet"
+            )
+        ) {
+            s = `${s} per ${selector.group_by}`;
+        }
+    }
+
+    if (selector.owner === "DFINITY") {
+        s = `${s} owned by ${selector.owner}`;
+    } else if (selector.owner === "others") {
+        s = `${s} not owned by DFINITY`;
+    }
+
+    if (
+        selector.assignment === "assigned" &&
+        selector.group_by !== "subnet"
+    ) {
+        s = `${s} assigned to a subnet`;
+    } else if (selector.assignment === "unassigned") {
+        s = `${s} not assigned to any subnet`;
+    }
+
+    return s;
+}
+
+export function formatSelectors(selectors: HostOsNodeSelector[] | null): string {
+    if (selectors === null) {
+        return "Selectors not known";
+    }
+    if (selectors.length === 0) {
+        return "All remaining nodes";
+    }
+    return selectors.map((s) => formatSelector(s)).join(" ⇸ ");
+}
+
 
 // types::v2::hostos::Batch
 export type HostOsBatch = {
@@ -257,6 +324,7 @@ export type HostOsBatch = {
     display_url: string;
     planned_nodes: HostOsNode[];
     actual_nodes: HostOsNode[] | null;
+    selectors: HostOsNodeSelector[] | null;
 };
 
 export type HostOsRolloutConfiguration = {
@@ -278,6 +346,35 @@ export type HostOsRollout = {
     state: keyof typeof HostOsState;
     stages: HostOsStages | null;
 } & DAGInfo;
+
+export type NodeInfo = {
+    node_id: string
+    node_provider_id: string
+    subnet_id: string | null
+    dc_id: string
+    status: string
+}
+
+export type UpgradeStatus = "pending" | "upgraded" | "AWOL"
+
+export type AlertStatus = "OK" | "alerting" | "unknown"
+
+// types::v2::hostos::BatchResponse
+export type HostOsBatchResponse = {
+    stage: keyof HostOsStages
+    batch_number: number
+    planned_start_time: Date;
+    actual_start_time: Date | null;
+    end_time: Date | null;
+    state: keyof typeof HostOsBatchState;
+    comment: String;
+    display_url: string;
+    planned_nodes: NodeInfo[];
+    actual_nodes: NodeInfo[] | null;
+    selectors: HostOsNodeSelector[] | null;
+    upgraded_nodes: { [key: string]: UpgradeStatus } | null
+    alerting_nodes: { [key: string]: AlertStatus } | null
+}
 
 // End HostOS rollout types.
 
@@ -319,10 +416,15 @@ export type State = {
     rollouts: Rollout[];
     rollout_engine_states: RolloutEngineStates;
 };
-// Error.  An HTTP code and a message in a dict.
+// Error.  An HTTP code and a message in a dict.  Used by SSE.
+// A flag permanent indicates if the error is expected to never resolve
+// itself, and therefore the client should close the connection.  The
+// server will usually close the connection when the message it sent
+// has this flag and the flag is true.
 export type Error = {
-    code: Number;
-    message: String;
+    code: number;
+    message: string;
+    permanent: boolean;
 };
 
 // Delta state update.
@@ -330,3 +432,5 @@ export type RolloutsDelta = {
     updated: Rollout[];
     deleted: DeletedRollout[];
 };
+
+/* Unstable types. */

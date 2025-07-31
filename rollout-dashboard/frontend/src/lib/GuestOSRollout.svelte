@@ -1,6 +1,6 @@
 <script lang="ts">
     import Time from "svelte-time";
-    import SvelteMarkdown from "svelte-markdown";
+    import SvelteMarkdown from "@humanspeak/svelte-markdown";
     import {
         type GuestOsRollout,
         guestOsStateIcon,
@@ -9,7 +9,11 @@
     } from "./types";
     import { cap, activeClass } from "./lib";
     import SubnetBatch from "./SubnetBatch.svelte";
-    export let rollout: GuestOsRollout;
+    interface Props {
+        rollout: GuestOsRollout;
+    }
+
+    let { rollout }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
 </script>
@@ -67,7 +71,7 @@
     </div>
     {#if rollout.note}
         <div class="note space-y-4">
-            <SvelteMarkdown source={rollout.note} />
+            <SvelteMarkdown source={rollout.note.toString()} />
         </div>
     {/if}
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
@@ -82,7 +86,7 @@
             role="alert"
         >
             <svg
-                class="flex-shrink-0 inline w-4 h-4 me-3"
+                class="shrink-0 inline w-4 h-4 me-3"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="currentColor"

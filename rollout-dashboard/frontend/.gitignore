@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Routify temporary files
+.routify
+
+# TSC temporary files
+vite.config.js
+vite.config.d.ts

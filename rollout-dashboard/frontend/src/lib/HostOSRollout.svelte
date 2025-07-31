@@ -2,19 +2,30 @@
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";
-    import SvelteMarkdown from "svelte-markdown";
+    import SvelteMarkdown from "@humanspeak/svelte-markdown";
     import {
         type HostOsRollout,
+        type HostOsStages,
         hostOsStateName,
         hostOsStateIcon,
         rolloutKindName,
     } from "./types";
     import { cap, activeClass, selectTextOnFocus } from "./lib";
     import HostOSBatch from "./HostOSBatch.svelte";
-    export let rollout: HostOsRollout;
+    interface Props {
+        rollout: HostOsRollout;
+    }
+
+    let { rollout }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
+    let stage_names: (keyof HostOsStages)[] = [
+        "canary",
+        "main",
+        "unassigned",
+        "stragglers",
+    ];
 </script>
 
 <section class="rollout {rolloutClass} {rollout.kind}">
@@ -68,7 +79,7 @@
     </div>
     {#if rollout.note}
         <div class="note space-y-4">
-            <SvelteMarkdown source={rollout.note} />
+            <SvelteMarkdown source={rollout.note.toString()} />
         </div>
     {/if}
     <div class="rollout_info space-y-4 text-gray-500">
@@ -77,10 +88,13 @@
             class="git_revision"
             role="link"
             tabindex="0"
-            use:copy={git_revision}
+            use:copy={{
+                text: git_revision,
+                onCopy({ text, event }) {
+                    toast.push("Copied git revision to clipboard");
+                },
+            }}
             use:selectTextOnFocus
-            on:svelte-copy={(event) =>
-                toast.push("Copied git revision to clipboard")}
         >
             <svg
                 class="w-3 h-3 me-1.5"
@@ -97,50 +111,25 @@
     </div>
     {#if rollout.stages}
         <div class="stages">
-            {#if rollout.stages.canary["1"] !== undefined}
-                <ul class="stage-canary">
-                    {#each Object.entries(rollout.stages.canary) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div class="stage-canary stage-name text-gray-500 rounded-lg">
-                    Canary
-                </div>
-            {/if}
-            {#if rollout.stages.main["1"] !== undefined}
-                <ul class="stage-main">
-                    {#each Object.entries(rollout.stages.main) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div class="stage-main stage-name text-gray-500 rounded-lg">
-                    Main
-                </div>
-            {/if}
-            {#if rollout.stages.unassigned["1"] !== undefined}
-                <ul class="stage-unassigned">
-                    {#each Object.entries(rollout.stages.unassigned) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div
-                    class="stage-unassigned stage-name text-gray-500 rounded-lg"
-                >
-                    Unassigned
-                </div>
-            {/if}
-            {#if rollout.stages.stragglers["1"] !== undefined}
-                <ul class="stage-stragglers">
-                    {#each Object.entries(rollout.stages.stragglers) as [batch_num, batch]}
-                        <HostOSBatch {batch_num} {batch} />
-                    {/each}
-                </ul>
-                <div
-                    class="stage-stragglers stage-name text-gray-500 rounded-lg"
-                >
-                    Stragglers
-                </div>
-            {/if}
+            {#each stage_names as stage_name}
+                {#if rollout.stages[stage_name]["1"] !== undefined}
+                    <ul class="stage-{stage_name}">
+                        {#each Object.entries(rollout.stages[stage_name]) as [batch_num, batch]}
+                            <HostOSBatch
+                                dag_run_id={rollout.name.toString()}
+                                {stage_name}
+                                batch_number={batch_num}
+                                {batch}
+                            />
+                        {/each}
+                    </ul>
+                    <div
+                        class="stage-{stage_name} stage-name text-gray-500 rounded-lg"
+                    >
+                        {cap(stage_name)}
+                    </div>
+                {/if}
+            {/each}
         </div>
     {:else}
         <div
@@ -148,7 +137,7 @@
             role="alert"
         >
             <svg
-                class="flex-shrink-0 inline w-4 h-4 me-3"
+                class="shrink-0 inline w-4 h-4 me-3"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="currentColor"

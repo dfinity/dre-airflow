@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::{vec, vec::Vec};
 use topological_sort::TopologicalSort;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CyclicDependencyError {
     message: String,
 }

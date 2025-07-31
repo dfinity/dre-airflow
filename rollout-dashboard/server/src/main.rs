@@ -6,6 +6,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::select;
 use tokio::signal::unix::{SignalKind, signal};
@@ -19,6 +20,8 @@ use rollout_dashboard::airflow_client::AirflowClient;
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 const MAX_ROLLOUTS: u16 = 10;
+/// Default timeout per request to Airflow.
+const PER_REQUEST_TIMEOUT: u64 = 15;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -39,11 +42,17 @@ async fn main() -> ExitCode {
         env::var("AIRFLOW_URL").unwrap_or("http://admin:password@localhost:8080/".to_string());
     let airflow_url = Url::parse(&airflow_url_str).unwrap();
     let frontend_static_dir = env::var("FRONTEND_STATIC_DIR").unwrap_or(".".to_string());
+    let airflow_timeout = Duration::from_secs(
+        from_str::<u64>(
+            &env::var("PER_REQUEST_TIMEOUT").unwrap_or(format!("{}", PER_REQUEST_TIMEOUT)),
+        )
+        .unwrap(),
+    );
     let addr: SocketAddr = backend_host.parse().unwrap();
 
     let (end_tx, end_rx) = watch::channel(());
 
-    let airflow_client = Arc::new(AirflowClient::new(airflow_url).unwrap());
+    let airflow_client = Arc::new(AirflowClient::new(airflow_url, airflow_timeout).unwrap());
     let syncer = AirflowStateSyncer::new(airflow_client.clone(), max_rollouts, refresh_interval);
     let (syncing_syncer, background_loop_fut) = syncer.start_syncing(end_rx.clone());
     let server = Arc::new(api_server::ApiServer::new(syncing_syncer, airflow_client));

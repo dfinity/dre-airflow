@@ -9,6 +9,7 @@ pub mod v1 {
     use serde::Deserialize;
     use serde::Serialize;
     use std::collections::VecDeque;
+    use std::str::FromStr;
     use std::vec::Vec;
     use strum::Display;
 
@@ -140,7 +141,7 @@ pub mod v1 {
                 last_scheduling_decision: rollout.last_scheduling_decision,
                 note: rollout.note,
                 update_count: rollout.update_count,
-                name: rollout.name,
+                name: super::v2::DagRunID::from_str(rollout.name.as_str()).unwrap(),
             }
         }
     }
@@ -261,6 +262,10 @@ pub mod v2 {
     use serde::Serialize;
     use serde::Serializer;
     use std::collections::VecDeque;
+    use std::convert::Infallible;
+    use std::fmt::Display;
+    use std::str::FromStr;
+    use strum::EnumString;
 
     pub mod guestos {
         pub use super::super::v1::{
@@ -368,8 +373,10 @@ pub mod v2 {
 
         use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
-        use serde::Serialize;
-        use strum::Display;
+        use reqwest::StatusCode;
+        use serde::{Deserialize, Serialize, Serializer};
+        use std::{collections::HashMap, fmt, num::NonZero};
+        use strum::{Display, EnumString};
 
         #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
         #[serde(rename_all = "snake_case")]
@@ -429,6 +436,135 @@ pub mod v2 {
             pub node_id: String,
         }
 
+        impl From<NodeInfo> for Node {
+            fn from(n: NodeInfo) -> Node {
+                Node { node_id: n.node_id }
+            }
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
+        pub enum NodeAssignment {
+            #[serde(rename = "assigned")]
+            Assigned,
+            #[serde(rename = "unassigned")]
+            Unassigned,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
+        pub enum NodeOwner {
+            #[serde(rename = "DFINITY")]
+            Dfinity,
+            #[serde(rename = "others")]
+            Others,
+        }
+
+        fn deserialize_nodes_per_group<'de, D>(
+            deserializer: D,
+        ) -> Result<Option<NodesPerGroup>, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            struct CustomVisitor;
+
+            impl<'de> serde::de::Visitor<'de> for CustomVisitor {
+                type Value = Option<NodesPerGroup>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str(
+                        "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
+                    )
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(None)
+                }
+
+                fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    if v < 0 {
+                        return Err(serde::de::Error::invalid_value(
+                            serde::de::Unexpected::Signed(v),
+                            &self,
+                        ));
+                    }
+                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
+                }
+
+                fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
+                }
+
+                fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    if !(0.0..=1.0).contains(&v) {
+                        return Err(serde::de::Error::invalid_value(
+                            serde::de::Unexpected::Float(v),
+                            &self,
+                        ));
+                    }
+                    Ok(Some(NodesPerGroup::Ratio(ordered_float::OrderedFloat(v))))
+                }
+            }
+
+            deserializer.deserialize_any(CustomVisitor)
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum NodesPerGroup {
+            Absolute(usize),
+            Ratio(ordered_float::OrderedFloat<f64>),
+        }
+
+        impl Serialize for NodesPerGroup {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match self {
+                    Self::Absolute(n) => serializer.serialize_u64(*n as u64),
+                    Self::Ratio(n) => serializer.serialize_str(format!("{}%", n * 100.0).as_str()),
+                }
+            }
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+        pub enum GroupBy {
+            #[serde(rename = "datacenter")]
+            Datacenter,
+            #[serde(rename = "subnet")]
+            Subnet,
+        }
+
+        #[derive(Debug, Deserialize, Serialize, Clone, EnumString, PartialEq, Eq)]
+        #[strum(serialize_all = "PascalCase")]
+        pub enum NodeStatus {
+            Healthy,
+            Degraded,
+            Dead,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+        pub struct NodeSelector {
+            pub assignment: Option<NodeAssignment>,
+            pub owner: Option<NodeOwner>,
+            #[serde(deserialize_with = "deserialize_nodes_per_group")]
+            pub nodes_per_group: Option<NodesPerGroup>,
+            pub group_by: Option<GroupBy>,
+            pub status: Option<NodeStatus>,
+        }
+
+        pub type NodeSelectors = Vec<NodeSelector>;
+
         #[derive(Serialize, Debug, Clone)]
         /// Represents a batch of subnets to upgrade.
         pub struct Batch {
@@ -445,23 +581,46 @@ pub mod v2 {
             pub display_url: String,
             /// A count of the nodes planned to be upgraded as part of this batch.
             pub planned_nodes: Vec<Node>,
+            /// A list of selectors used to select which nodes to target for upgrade.
+            /// This is None if the selectors are not yet known.
+            pub selectors: Option<NodeSelectors>,
             /// A count of the nodes that actually were or are upgraded as part of this batch.
             /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
             /// If that phase of the batch has yet to take place, this is usually null.
             pub actual_nodes: Option<Vec<Node>>,
-            #[serde(skip_serializing)]
-            /// Internal flag used to prune batches that haven't yet run, or have run but
-            /// had no nodes assigned to them.
-            pub present_in_provisional_plan: bool,
+        }
+
+        impl From<&BatchResponse> for Batch {
+            fn from(other: &BatchResponse) -> Batch {
+                Batch {
+                    planned_start_time: other.planned_start_time,
+                    actual_start_time: other.actual_start_time,
+                    end_time: other.end_time,
+                    state: other.state.clone(),
+                    comment: other.comment.clone(),
+                    display_url: other.display_url.clone(),
+                    planned_nodes: other
+                        .planned_nodes
+                        .clone()
+                        .into_iter()
+                        .map(|n| n.into())
+                        .collect(),
+                    selectors: other.selectors.clone(),
+                    actual_nodes: other
+                        .actual_nodes
+                        .clone()
+                        .map(|ns| ns.into_iter().map(|n| n.into()).collect()),
+                }
+            }
         }
 
         ///  Represents a particular stage in the HostOS rollout.
         #[derive(Debug, Serialize, Clone)]
         pub struct Stages {
-            pub canary: IndexMap<usize, Batch>,
-            pub main: IndexMap<usize, Batch>,
-            pub unassigned: IndexMap<usize, Batch>,
-            pub stragglers: IndexMap<usize, Batch>,
+            pub canary: IndexMap<NonZero<usize>, Batch>,
+            pub main: IndexMap<NonZero<usize>, Batch>,
+            pub unassigned: IndexMap<NonZero<usize>, Batch>,
+            pub stragglers: IndexMap<NonZero<usize>, Batch>,
         }
 
         /// Represents a rollout of HostOS to nodes.
@@ -472,6 +631,198 @@ pub mod v2 {
             pub stages: Option<Stages>,
             /// Configuration associated to the rollout.
             pub conf: IndexMap<String, serde_json::Value>,
+        }
+
+        /// Represents the full information for a HostOS node.
+        #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+        pub struct NodeInfo {
+            pub node_id: String,
+            pub node_provider_id: String,
+            pub subnet_id: Option<String>,
+            pub dc_id: String,
+            pub status: String,
+        }
+
+        /// List of nodes actually targeted by a running batch.
+        pub type ActuallyTargetedNodes = Vec<NodeInfo>;
+
+        /// Stage of the HostOS rollout.
+        #[derive(Clone, PartialEq, Hash, Eq, EnumString, Serialize, Debug, Display)]
+        #[strum(serialize_all = "lowercase")]
+        pub enum StageName {
+            #[serde(rename = "canary")]
+            Canary,
+            #[serde(rename = "main")]
+            Main,
+            #[serde(rename = "unassigned")]
+            Unassigned,
+            #[serde(rename = "stragglers")]
+            Stragglers,
+        }
+
+        /// Upgrade status of a node.
+        #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+        pub enum NodeUpgradeStatus {
+            AWOL,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "upgraded")]
+            Upgraded,
+        }
+
+        /// Upgrade statuses of a list of nodes.
+        pub type NodeUpgradeStatuses = HashMap<String, NodeUpgradeStatus>;
+
+        /// Alert status of a node.
+        #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+        pub enum NodeAlertStatus {
+            #[serde(rename = "unknown")]
+            Unknown,
+            #[serde(rename = "OK")]
+            OK,
+            #[serde(rename = "alerting")]
+            Alerting,
+        }
+
+        /// Alert statuses of a list of nodes.
+        pub type NodeAlertStatuses = HashMap<String, NodeAlertStatus>;
+
+        #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+        /// Represents a batch of subnets to upgrade, its state, and other
+        /// important information (either known or pending) at its current
+        /// state.
+        pub struct BatchResponse {
+            pub stage: StageName,
+            pub batch_number: NonZero<usize>,
+            /// The time the batch was programmed to start at.
+            pub planned_start_time: DateTime<Utc>,
+            /// The actual observed start time of the batch.
+            pub actual_start_time: Option<DateTime<Utc>>,
+            /// The time of the last action associated with this batch, if any.
+            pub end_time: Option<DateTime<Utc>>,
+            pub state: BatchState,
+            /// Shows a comment for the batch if it is available; else it contains an empty string.
+            pub comment: String,
+            /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
+            pub display_url: String,
+            /// A list of selectors used to select which nodes to target for upgrade.
+            /// This is None if the selectors are not yet known.
+            pub selectors: Option<NodeSelectors>,
+            /// A count of the nodes planned to be upgraded as part of this batch.
+            pub planned_nodes: Vec<NodeInfo>,
+            /// A count of the nodes that actually were or are upgraded as part of this batch.
+            /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
+            /// If that phase of the batch has yet to take place, this is usually null.
+            pub actual_nodes: Option<Vec<NodeInfo>>,
+            /// A dictionary mapping node ID to node upgrade status.  This might be empty
+            /// if the upgrade phase has not yet been reached, or for very old rollouts
+            /// that did not supply this information.
+            pub upgraded_nodes: Option<NodeUpgradeStatuses>,
+            /// A dictionary mapping node ID to alert status.  This might be empty if the
+            /// waiting for alerts to subside phase has not yet been reached, or for very
+            /// old rollouts that do not have this information.
+            pub alerting_nodes: Option<NodeAlertStatuses>,
+        }
+
+        impl From<&BatchResponse> for axum::response::sse::Event {
+            fn from(m: &BatchResponse) -> Self {
+                axum::response::sse::Event::default()
+                    .event("BatchResponse")
+                    .json_data(m)
+                    .unwrap()
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum BatchError {
+            NotYetSynced,
+            NoPlanDataYet,
+            NoBatchDataYet,
+            InvalidBatchNumber,
+            InvalidStageName,
+            InvalidDagID,
+            WrongDagRunKind,
+            InvalidDagRunID,
+            NoSuchDagRun,
+            NoPlanData,
+            NoSuchBatch,
+            RolloutDataGatherError(String),
+        }
+
+        impl From<&BatchError> for String {
+            fn from(h: &BatchError) -> String {
+                type T = BatchError;
+                match h {
+                    T::NotYetSynced => "Backend has not yet fetched rollouts".to_string(),
+                    T::NoPlanDataYet => "Rollout has not yet computed a plan".to_string(),
+                    T::NoBatchDataYet => {
+                        "Requested batch is not yet in rollout but may appear later".to_string()
+                    }
+                    T::InvalidDagID => "Invalid DAG ID".to_string(),
+                    T::WrongDagRunKind => "DAG run refers to the wrong kind of rollout".to_string(),
+                    T::InvalidDagRunID => "Invalid DAG run ID".to_string(),
+                    T::InvalidStageName => "Invalid stage name".to_string(),
+                    T::InvalidBatchNumber => "Invalid batch number".to_string(),
+                    T::NoSuchDagRun => {
+                        "The requested DAG run does not correspond to any rollout".to_string()
+                    }
+                    T::NoPlanData => "Rollout never computed a plan".to_string(),
+                    T::NoSuchBatch => {
+                        "The requested batch number does not correspond to any batch in the rollout"
+                            .to_string()
+                    }
+                    T::RolloutDataGatherError(e) => e.to_string(),
+                }
+            }
+        }
+
+        impl From<&BatchError> for StatusCode {
+            fn from(h: &BatchError) -> StatusCode {
+                type T = BatchError;
+                type C = StatusCode;
+                match h {
+                    T::NotYetSynced => C::NO_CONTENT,
+                    T::NoPlanDataYet => reqwest::StatusCode::from_u16(209).unwrap(),
+                    T::NoBatchDataYet => reqwest::StatusCode::from_u16(209).unwrap(),
+                    T::InvalidDagID => C::BAD_REQUEST,
+                    T::WrongDagRunKind => C::BAD_REQUEST,
+                    T::InvalidDagRunID => C::BAD_REQUEST,
+                    T::InvalidStageName => C::BAD_REQUEST,
+                    T::InvalidBatchNumber => C::BAD_REQUEST,
+                    T::NoSuchDagRun => C::NOT_FOUND,
+                    T::NoPlanData => C::NOT_FOUND,
+                    T::NoSuchBatch => C::NOT_FOUND,
+                    T::RolloutDataGatherError(_) => C::INTERNAL_SERVER_ERROR,
+                }
+            }
+        }
+
+        impl BatchError {
+            pub fn permanent(&self) -> bool {
+                !(reqwest::StatusCode::from(self).as_u16() < 400
+                    || matches!(self, BatchError::RolloutDataGatherError(_)))
+            }
+        }
+
+        impl From<&BatchError> for (StatusCode, String) {
+            fn from(h: &BatchError) -> Self {
+                (h.into(), h.into())
+            }
+        }
+
+        impl From<&BatchError> for super::Error {
+            fn from(h: &BatchError) -> Self {
+                (h.into(), h.permanent()).into()
+            }
+        }
+
+        impl From<&BatchError> for axum::response::sse::Event {
+            fn from(m: &BatchError) -> Self {
+                axum::response::sse::Event::default()
+                    .event("Error")
+                    .json_data(super::Error::from(m))
+                    .unwrap()
+            }
         }
     }
 
@@ -484,11 +835,53 @@ pub mod v2 {
         RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes::Rollout),
         RolloutIcOsToMainnetNodes(hostos::Rollout),
     }
+
+    // Types to prevent type confusion.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, EnumString)]
+    #[strum(serialize_all = "snake_case")]
+    pub enum DagID {
+        RolloutIcOsToMainnetSubnets,
+        RolloutIcOsToMainnetApiBoundaryNodes,
+        RolloutIcOsToMainnetNodes,
+    }
+
+    impl Display for DagID {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}",
+                match self {
+                    Self::RolloutIcOsToMainnetSubnets => "rollout_ic_os_to_mainnet_subnets",
+                    Self::RolloutIcOsToMainnetApiBoundaryNodes =>
+                        "rollout_ic_os_to_mainnet_api_boundary_nodes",
+                    Self::RolloutIcOsToMainnetNodes => "rollout_ic_os_to_mainnet_nodes",
+                }
+            )
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+    pub struct DagRunID(String);
+
+    impl Display for DagRunID {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl FromStr for DagRunID {
+        type Err = Infallible;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            Ok(Self(s.to_string()))
+        }
+    }
+
     /// Represents a generic rollout of any kind.
     #[derive(Debug, Serialize, Clone)]
     pub struct Rollout {
         /// Unique, enforced by Airflow, corresponds to DAG run ID.
-        pub name: String,
+        pub name: DagRunID,
         /// Link to the rollout screen in Airflow.
         pub display_url: String,
         /// Optional note a rollout can have added by the administrator.
@@ -510,21 +903,21 @@ pub mod v2 {
     }
 
     impl Rollout {
-        pub fn kind(&self) -> String {
+        pub fn kind(&self) -> DagID {
             match self.kind {
                 RolloutKind::RolloutIcOsToMainnetSubnets(_) => {
-                    "rollout_ic_os_to_mainnet_subnets".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_subnets").unwrap()
                 }
                 RolloutKind::RolloutIcOsToMainnetApiBoundaryNodes(_) => {
-                    "rollout_ic_os_to_mainnet_api_boundary_nodes".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_api_boundary_nodes").unwrap()
                 }
                 RolloutKind::RolloutIcOsToMainnetNodes(_) => {
-                    "rollout_ic_os_to_mainnet_nodes".to_string()
+                    DagID::from_str("rollout_ic_os_to_mainnet_nodes").unwrap()
                 }
             }
         }
-        pub fn key(&self) -> String {
-            self.kind() + &self.name
+        pub fn key(&self) -> (DagID, DagRunID) {
+            (self.kind(), self.name.clone())
         }
     }
 
@@ -539,7 +932,7 @@ pub mod v2 {
             };
 
             Ok(super::v1::Rollout {
-                name: rollout.name,
+                name: rollout.name.to_string(),
                 display_url: rollout.display_url,
                 update_count: rollout.update_count,
                 note: rollout.note,
@@ -652,6 +1045,27 @@ pub mod v2 {
         #[serde(serialize_with = "serialize_status_code")]
         pub code: StatusCode,
         pub message: String,
+        // In SSE connections, if the client receives this message, and this field is present and true,
+        // the server will disconnect the client after the message, and the client should not attempt
+        // to reconnect or re-request the data, as the result will be the same.  If this field is
+        // present but false, the server will likely send more updates over the SSE connection.
+        pub permanent: bool,
+    }
+
+    impl From<((StatusCode, String), bool)> for Error {
+        fn from(((code, message), permanent): ((StatusCode, String), bool)) -> Self {
+            Self {
+                code,
+                message,
+                permanent,
+            }
+        }
+    }
+
+    impl From<&Error> for (StatusCode, String) {
+        fn from(e: &Error) -> (StatusCode, String) {
+            (e.code, e.message.clone())
+        }
     }
 
     /// The two variants of full state that can be sent by
@@ -718,18 +1132,57 @@ pub mod v2 {
             /// servers see.
             RolloutEngineStatesUpdate(RolloutEngineStates),
         }
+
+        impl From<&Message> for (bool, axum::response::sse::Event) {
+            /// Transforms a Message into a pair (bool, SSE event).
+            /// If the boolean is true, the caller running the SSE stream must interrupt
+            /// the connection after sending the event.
+            fn from(m: &Message) -> (bool, axum::response::sse::Event) {
+                match m {
+                    Message::CompleteState(sok) => (
+                        false,
+                        axum::response::sse::Event::default()
+                            .event("State")
+                            .json_data(sok)
+                            .unwrap(),
+                    ),
+                    Message::Error(serr) => (
+                        serr.permanent,
+                        axum::response::sse::Event::default()
+                            .event("Error")
+                            .json_data(serr)
+                            .unwrap(),
+                    ),
+                    Message::RolloutsDelta(sdelta) => (
+                        false,
+                        axum::response::sse::Event::default()
+                            .event("RolloutsDelta")
+                            .json_data(sdelta)
+                            .unwrap(),
+                    ),
+                    Message::RolloutEngineStatesUpdate(sdelta) => (
+                        false,
+                        axum::response::sse::Event::default()
+                            .event("RolloutEngineStates")
+                            .json_data(sdelta)
+                            .unwrap(),
+                    ),
+                }
+            }
+        }
     }
 }
 
 pub mod unstable {
-    use crate::airflow_client::TaskInstancesResponseItem;
+    pub use crate::airflow_client::DagRunsResponseItem;
+    pub use crate::airflow_client::TaskInstancesResponseItem;
     use chrono::{DateTime, Utc};
     use serde::Serialize;
 
     #[derive(Serialize)]
     pub struct FlowCacheResponse {
-        pub dag_id: String,
-        pub rollout_id: String,
+        pub dag_id: super::v2::DagID,
+        pub rollout_id: super::v2::DagRunID,
         pub dispatch_time: DateTime<Utc>,
         pub last_update_time: Option<DateTime<Utc>>,
         pub update_count: usize,

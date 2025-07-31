@@ -2,6 +2,7 @@
 /// Needed to retrieve the rollout plan and deserialize into a Rust structure.
 /// Python objects are quoted strings -- this parser does not parse them.
 use serde::Deserialize;
+use serde::Serialize;
 use serde::de;
 use serde::de::{
     DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor,
@@ -124,7 +125,7 @@ const DATETIME_FORMATS: [&str; 4] = [
     "datetime.datetime@version=2(timestamp=%s%.f,tz=None)",
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct PythonDateTime(chrono::NaiveDateTime);
 
 impl TryFrom<&str> for PythonDateTime {
@@ -654,7 +655,7 @@ impl<'de> de::Deserializer<'de> for &mut PythonDeserializer<'de> {
             self.input.chars().take(180).collect::<String>(),
         );
         self.chomp_whitespace()?;
-        if self.input.starts_with("null") {
+        if self.input.starts_with("null") || self.input.starts_with("None") {
             self.input = &self.input["null".len()..];
             visitor.visit_none()
         } else {
@@ -674,7 +675,7 @@ impl<'de> de::Deserializer<'de> for &mut PythonDeserializer<'de> {
             self.input.chars().take(180).collect::<String>(),
         );
         self.chomp_whitespace()?;
-        if self.input.starts_with("null") | self.input.starts_with("None") {
+        if self.input.starts_with("null") || self.input.starts_with("None") {
             self.input = &self.input["null".len()..];
             visitor.visit_unit()
         } else {

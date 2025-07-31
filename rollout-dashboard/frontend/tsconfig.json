@@ -11,13 +11,16 @@
      * Note that setting allowJs false does not prevent the use
      * of JS in `.svelte` files.
      */
+    "verbatimModuleSyntax": true,
     "allowJs": true,
+    "sourceMap": true,
     "checkJs": true,
     "isolatedModules": true,
     "moduleDetection": "force",
     "outDir": "./dist"
   },
   "include": [
+    "src/**/*.d.ts",
     "src/**/*.ts",
     "src/**/*.js",
     "src/**/*.svelte"
