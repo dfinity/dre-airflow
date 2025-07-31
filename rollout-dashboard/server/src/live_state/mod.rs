@@ -107,7 +107,11 @@ impl From<RolloutDataGatherError> for (reqwest::StatusCode, String) {
 impl From<RolloutDataGatherError> for v2::Error {
     fn from(f: RolloutDataGatherError) -> v2::Error {
         let (code, message) = f.into();
-        v2::Error { code, message }
+        v2::Error {
+            code,
+            message,
+            permanent: false,
+        }
     }
 }
 

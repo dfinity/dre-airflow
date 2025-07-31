@@ -347,6 +347,35 @@ export type HostOsRollout = {
     stages: HostOsStages | null;
 } & DAGInfo;
 
+export type NodeInfo = {
+    node_id: string
+    node_provider_id: string
+    subnet_id: string | null
+    dc_id: string
+    status: string
+}
+
+export type UpgradeStatus = "pending" | "upgraded" | "AWOL"
+
+export type AlertStatus = "OK" | "alerting" | "unknown"
+
+// types::v2::hostos::BatchResponse
+export type HostOsBatchResponse = {
+    stage: keyof HostOsStages
+    batch_number: number
+    planned_start_time: Date;
+    actual_start_time: Date | null;
+    end_time: Date | null;
+    state: keyof typeof HostOsBatchState;
+    comment: String;
+    display_url: string;
+    planned_nodes: NodeInfo[];
+    actual_nodes: NodeInfo[] | null;
+    selectors: HostOsNodeSelector[] | null;
+    upgraded_nodes: { [key: string]: UpgradeStatus } | null
+    alerting_nodes: { [key: string]: AlertStatus } | null
+}
+
 // End HostOS rollout types.
 
 // Combination structures.
@@ -387,10 +416,15 @@ export type State = {
     rollouts: Rollout[];
     rollout_engine_states: RolloutEngineStates;
 };
-// Error.  An HTTP code and a message in a dict.
+// Error.  An HTTP code and a message in a dict.  Used by SSE.
+// A flag permanent indicates if the error is expected to never resolve
+// itself, and therefore the client should close the connection.  The
+// server will usually close the connection when the message it sent
+// has this flag and the flag is true.
 export type Error = {
-    code: Number;
-    message: String;
+    code: number;
+    message: string;
+    permanent: boolean;
 };
 
 // Delta state update.
@@ -400,32 +434,3 @@ export type RolloutsDelta = {
 };
 
 /* Unstable types. */
-
-export type NodeInfo = {
-    node_id: string
-    node_provider_id: string
-    subnet_id: string | null
-    dc_id: string
-    status: string
-}
-
-export type UpgradeStatus = "pending" | "upgraded" | "AWOL"
-
-export type AlertStatus = "OK" | "alerting" | "unknown"
-
-// FIXME move to right place within v2 types once stabilized.
-export type HostOsBatchResponse = {
-    stage: keyof HostOsStages
-    batch_number: number
-    planned_start_time: Date;
-    actual_start_time: Date | null;
-    end_time: Date | null;
-    state: keyof typeof HostOsBatchState;
-    comment: String;
-    display_url: string;
-    planned_nodes: NodeInfo[];
-    actual_nodes: NodeInfo[] | null;
-    selectors: HostOsNodeSelector[] | null;
-    upgraded_nodes: { [key: string]: UpgradeStatus } | null
-    alerting_nodes: { [key: string]: AlertStatus } | null
-}

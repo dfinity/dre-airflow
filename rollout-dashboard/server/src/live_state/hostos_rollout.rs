@@ -9,11 +9,10 @@ use regex::Regex;
 use rollout_dashboard::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::unstable::{self, NodeInfo};
-use rollout_dashboard::types::unstable::{HostOsBatchResponse, StageName};
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::hostos::{
-    Batch, BatchState, NodeSelectors, Rollout, Stages as V2Stages, State,
+    ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeInfo, NodeSelectors,
+    NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::max;
@@ -46,8 +45,8 @@ fn make_a_planned_host_os_batch(
     batch_number: NonZero<usize>,
     val: &ProvisionalPlanBatch,
     selectors: &NodeSelectors,
-) -> HostOsBatchResponse {
-    HostOsBatchResponse {
+) -> BatchResponse {
+    BatchResponse {
         stage,
         batch_number,
         planned_start_time: val.start_at.clone().into(),
@@ -72,8 +71,8 @@ fn make_a_discovered_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
     val: &TaskInstancesResponseItem,
-) -> HostOsBatchResponse {
-    HostOsBatchResponse {
+) -> BatchResponse {
+    BatchResponse {
         stage,
         batch_number,
         planned_start_time: val.earliest_date(),
@@ -127,10 +126,10 @@ impl FromStr for ProvisionalHostOSPlan {
 
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct Stages {
-    pub(crate) canary: IndexMap<NonZero<usize>, HostOsBatchResponse>,
-    pub(crate) main: IndexMap<NonZero<usize>, HostOsBatchResponse>,
-    pub(crate) unassigned: IndexMap<NonZero<usize>, HostOsBatchResponse>,
-    pub(crate) stragglers: IndexMap<NonZero<usize>, HostOsBatchResponse>,
+    pub(crate) canary: IndexMap<NonZero<usize>, BatchResponse>,
+    pub(crate) main: IndexMap<NonZero<usize>, BatchResponse>,
+    pub(crate) unassigned: IndexMap<NonZero<usize>, BatchResponse>,
+    pub(crate) stragglers: IndexMap<NonZero<usize>, BatchResponse>,
 }
 
 impl From<&Stages> for V2Stages {
@@ -189,7 +188,7 @@ where
 }
 
 fn annotate_batch_state(
-    batch: &mut HostOsBatchResponse,
+    batch: &mut BatchResponse,
     state: BatchState,
     task_instance: &TaskInstancesResponseItem,
     base_url: &reqwest::Url,
@@ -234,16 +233,16 @@ fn annotate_batch_state(
 
 #[derive(Clone, Default, Serialize)]
 struct BatchXcomData {
-    actual_plans: PlanCache<unstable::ActuallyTargetedNodes>,
-    nodes_upgrade_status: PlanCache<unstable::NodeUpgradeStatuses>,
-    nodes_alert_status: PlanCache<unstable::NodeAlertStatuses>,
+    actual_plans: PlanCache<ActuallyTargetedNodes>,
+    nodes_upgrade_status: PlanCache<NodeUpgradeStatuses>,
+    nodes_alert_status: PlanCache<NodeAlertStatuses>,
     selectors: PlanCache<NodeSelectors>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct Parser {
     provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    batch_xcoms: HashMap<(unstable::StageName, NonZero<usize>), BatchXcomData>,
+    batch_xcoms: HashMap<(StageName, NonZero<usize>), BatchXcomData>,
     pub(crate) stages: Option<Stages>,
 }
 
@@ -286,8 +285,6 @@ impl Parser {
         airflow_api: Arc<AirflowClient>,
         linearized_tasks: Vec<TaskInstancesResponseItem>,
     ) -> Result<RolloutKind, RolloutDataGatherError> {
-        type StageName = unstable::StageName;
-
         let mut rollout = Rollout {
             state: State::Preparing,
             stages: None,
@@ -645,8 +642,8 @@ impl Parser {
         // have any nodes to roll out to and weren't present in the original plan
         // (and are consequently and inevitably going to be skipped).
         fn keep_batches_planned_or_provisional_with_tasks(
-            m: IndexMap<NonZero<usize>, HostOsBatchResponse>,
-        ) -> IndexMap<NonZero<usize>, HostOsBatchResponse> {
+            m: IndexMap<NonZero<usize>, BatchResponse>,
+        ) -> IndexMap<NonZero<usize>, BatchResponse> {
             m.into_iter()
                 .filter(|(_, v)| {
                     !v.actual_nodes.clone().unwrap_or_default().is_empty() || v.selectors.is_some()

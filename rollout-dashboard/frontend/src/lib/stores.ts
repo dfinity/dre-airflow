@@ -1,5 +1,5 @@
 import { get, writable, type Writable } from 'svelte/store'
-import { type Rollout, type State, type Error, type RolloutsDelta, type RolloutEngineStates } from './types'
+import { type Rollout, type State, type Error, type RolloutsDelta, type RolloutEngineStates, type HostOsBatchResponse } from './types'
 
 export type FullState = {
     error: [number, string] | string | null;
@@ -8,6 +8,10 @@ export type FullState = {
 }
 
 const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v2";
+const UNSTABLE_API_URL =
+    import.meta.env.BACKEND_API_PATH_UNSTABLE || "/api/unstable";
+
+
 const url = API_URL + "/sse"
 var evtSource: null | EventSource = null;
 
@@ -118,3 +122,61 @@ export const rollouts_view = ((): Writable<FullState> => {
     setupEventSource()
     return airflow_state
 });
+
+
+export type HostOsBatchMessage = HostOsBatchResponse | Error;
+
+export const batch_view_with_cancellation = ((dag_run_id: string, stage_name: string, batch_number: number): [Writable<HostOsBatchMessage>, () => void] => {
+    let resource = `${API_URL}/rollouts/rollout_ic_os_to_mainnet_nodes/${encodeURIComponent(dag_run_id)}/stages/${encodeURIComponent(stage_name)}/batches/${encodeURIComponent(batch_number)}/sse`;
+
+    const batch: Writable<HostOsBatchResponse | Error> = writable({
+        code: 204,
+        message: "No content",
+        permanent: false,
+    });
+    let timeout: number | null = null;
+
+    function setupEventSource(): EventSource {
+        console.log("Setting up event source for " + resource);
+        let ev = new EventSource(resource);
+        ev.addEventListener("BatchResponse", (e) => {
+            const msg: HostOsBatchResponse = JSON.parse(e.data);
+            console.log("Batch arrived");
+            batch.set(msg);
+        });
+        ev.addEventListener("Error", (e) => {
+            const msg: Error = JSON.parse(e.data);
+            console.log(msg);
+            batch.set(msg);
+            if (msg.permanent) {
+                evtSource.close();
+            }
+        });
+        ev.onerror = function (e) {
+            console.log({ message: "Disconnected from event source.  Reconnecting in 5 seconds.", event: e });
+            const msg: Error = {
+                code: 0,
+                message: `Rollout dashboard is down — reconnecting in 5 seconds`,
+                permanent: false,
+            };
+            batch.set(msg);
+            evtSource.close();
+            timeout = setTimeout(function setup() {
+                evtSource = setupEventSource();
+                console.log("Overrode event source");
+            }, 5000);
+        };
+        console.log("Set up event source");
+        return ev;
+    }
+
+    let evtSource = setupEventSource();
+
+    return [batch, function () {
+        console.log("Cancelled batch_view_with_cancellation");
+        if (timeout !== null) {
+            clearTimeout(timeout)
+        }
+        evtSource.close();
+    }]
+})

@@ -1,66 +1,30 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import { params } from "@roxi/routify";
     import HostOsBatchDetail from "../../../../../../../lib/HostOSBatchDetail.svelte";
     import {
         type HostOsBatchResponse,
         type Error,
     } from "../../../../../../../lib/types";
-    import { url } from "@roxi/routify";
     import { cap } from "../../../../../../../../src/lib/lib";
     import { Heading } from "flowbite-svelte";
     import { Navbar, NavLi, NavUl, NavBrand } from "flowbite-svelte";
     import { AngleLeftOutline } from "flowbite-svelte-icons";
-    import { writable, type Writable } from "svelte/store";
-
-    const API_URL =
-        import.meta.env.BACKEND_API_PATH_UNSTABLE || "/api/unstable";
 
     let dag_run_id = $params.dag_run_id;
     let stage_name = $params.stage_name;
     let batch_number = $params.batch_number;
-    let resource = `${API_URL}/rollouts/rollout_ic_os_to_mainnet_nodes/${encodeURIComponent(dag_run_id)}/stages/${encodeURIComponent(stage_name)}/batches/${encodeURIComponent(batch_number)}/sse`;
 
-    const batch: Writable<HostOsBatchResponse | Error> = writable({
-        code: 204,
-        message: "No content",
-    });
-
-    let evtSource = setupEventSource();
-
-    function setupEventSource(): EventSource {
-        console.log("Setting up event source for " + resource);
-        let ev = new EventSource(resource);
-        ev.addEventListener("HostOsBatchResponse", (e) => {
-            const msg: HostOsBatchResponse = JSON.parse(e.data);
-            console.log("Batch arrived");
-            batch.set(msg);
-        });
-        ev.addEventListener("Error", (e) => {
-            const msg: Error = JSON.parse(e.data);
-            console.log(msg);
-            batch.set(msg);
-        });
-        ev.onerror = function (e) {
-            const msg: Error = {
-                code: 0,
-                message: `Rollout dashboard is down — reconnecting in 5 seconds`,
-            };
-            batch.set(msg);
-            evtSource.close();
-            setTimeout(function setup() {
-                evtSource = setupEventSource();
-                console.log("Overrode event source");
-            }, 5000);
-        };
-        console.log("Set up event source");
-        return ev;
-    }
-
+    import { batch_view_with_cancellation } from "../../../../../../../lib/stores";
     import { onDestroy } from "svelte";
 
+    let [batch, cancel] = batch_view_with_cancellation(
+        dag_run_id,
+        stage_name,
+        batch_number,
+    );
+
     onDestroy(() => {
-        evtSource.close();
+        cancel();
     });
 </script>
 
