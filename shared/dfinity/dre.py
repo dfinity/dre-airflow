@@ -142,6 +142,10 @@ class RegistryNodeProvider(TypedDict):
     #  }
 
 
+class ApiBn(TypedDict):
+    principal: rollout_types.NodeId
+
+
 class RegistrySnapshot(TypedDict):
     subnets: list[RegistrySubnet]
     nodes: list[RegistryNode]
@@ -149,7 +153,7 @@ class RegistrySnapshot(TypedDict):
     dcs: list[RegistryDC]
     node_operators: list[RegistryNodeOperator]
     # node_rewards_table
-    # api_bns
+    api_bns: list[ApiBn]
     # elected_guest_os_versions
     # elected_host_os_versions
     node_providers: list[RegistryNodeProvider]

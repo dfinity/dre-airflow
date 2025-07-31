@@ -680,7 +680,7 @@ impl Parser {
 mod tests {
     use std::str::FromStr;
 
-    use rollout_dashboard::types::v2::hostos::NodeAssignment;
+    use rollout_dashboard::types::v2::hostos::{NodeAssignment, NodeSelectors};
 
     use crate::live_state::hostos_rollout::ProvisionalHostOSPlan;
 
@@ -703,12 +703,14 @@ mod tests {
     fn parse_ginormous_plan() {
         let pythonplan = include_str!("fixtures/ginormous_python_structure.txt");
         let data = ProvisionalHostOSPlan::from_str(pythonplan).unwrap();
-        assert_eq!(
-            data.canary.unwrap()[0].selectors[0]
-                .assignment
-                .clone()
-                .unwrap(),
-            NodeAssignment::Unassigned
-        );
+        let selectors = match &data.clone().canary.unwrap()[0].selectors {
+            NodeSelectors::NodeFilter(filter) => filter.clone(),
+            _ => panic!("The selector was not a filter."),
+        };
+        let spec = match &selectors.intersect[0] {
+            NodeSelectors::NodeSpecifier(spec) => spec,
+            _ => panic!("The subselector was not a specifier."),
+        };
+        assert_eq!(spec.assignment.clone().unwrap(), NodeAssignment::Unassigned);
     }
 }

@@ -251,15 +251,25 @@ export type HostOsNode = {
 };
 
 // types::v2::hostos::NodeSelector
-export type HostOsNodeSelector = {
-    assignment: "assigned" | "unassigned" | null
+export type HostOsNodeSpecifier = {
+    assignment: "assigned" | "unassigned" | "API boundary node" | null
     owner: "DFINITY" | "others" | null
     nodes_per_group: number | string
     group_by: "datacenter" | "subnet" | null
     status: "Healthy" | "Degraded" | "Dead" | null
 }
 
-function formatSelector(selector: HostOsNodeSelector): string {
+export type HostOsNodeAggregator = {
+    join: HostOsNodeSelectors[]
+}
+
+export type HostOsNodeFilter = {
+    intersect: HostOsNodeSelectors[]
+}
+
+export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeSpecifier;
+
+function formatSelector(selector: HostOsNodeSpecifier): string {
     let health =
         selector.status === null
             ? " "
@@ -298,19 +308,35 @@ function formatSelector(selector: HostOsNodeSelector): string {
         s = `${s} assigned to a subnet`;
     } else if (selector.assignment === "unassigned") {
         s = `${s} not assigned to any subnet`;
+    } else if (selector.assignment === "API boundary node") {
+        s = `${s} assigned to API boundary node duty`;
     }
 
     return s;
 }
 
-export function formatSelectors(selectors: HostOsNodeSelector[] | null): string {
+export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
     if (selectors === null) {
         return "Selectors not known";
     }
-    if (selectors.length === 0) {
-        return "All remaining nodes";
+    if ((selectors as HostOsNodeFilter).intersect !== undefined) {
+        if ((selectors as HostOsNodeFilter).intersect.length === 0) {
+            return "All remaining nodes";
+        } else if ((selectors as HostOsNodeFilter).intersect.length === 1) {
+            return formatSelectors((selectors as HostOsNodeFilter).intersect[0])
+        } else {
+            return "( " + (selectors as HostOsNodeFilter).intersect.map((s) => formatSelectors(s)).join(" ∩ ") + " )"
+        }
+    } else if ((selectors as HostOsNodeAggregator).join !== undefined) {
+        if ((selectors as HostOsNodeAggregator).join.length === 0) {
+            return "No nodes";
+        } else if ((selectors as HostOsNodeAggregator).join.length === 1) {
+            return formatSelectors((selectors as HostOsNodeAggregator).join[0])
+        } else {
+            return "( " + (selectors as HostOsNodeAggregator).join.map((s) => formatSelectors(s)).join(" ∪ ") + " )"
+        }
     }
-    return selectors.map((s) => formatSelector(s)).join(" ⇸ ");
+    return formatSelector((selectors as HostOsNodeSpecifier));
 }
 
 
@@ -324,7 +350,7 @@ export type HostOsBatch = {
     display_url: string;
     planned_nodes: HostOsNode[];
     actual_nodes: HostOsNode[] | null;
-    selectors: HostOsNodeSelector[] | null;
+    selectors: HostOsNodeSelectors | null;
 };
 
 export type HostOsRolloutConfiguration = {
@@ -347,10 +373,11 @@ export type HostOsRollout = {
     stages: HostOsStages | null;
 } & DAGInfo;
 
+// types:v2::hostos::NodeInfo
 export type NodeInfo = {
     node_id: string
     node_provider_id: string
-    subnet_id: string | null
+    assignment: string | null // Either a subnet ID or "API boundary node"
     dc_id: string
     status: string
 }
@@ -371,7 +398,7 @@ export type HostOsBatchResponse = {
     display_url: string;
     planned_nodes: NodeInfo[];
     actual_nodes: NodeInfo[] | null;
-    selectors: HostOsNodeSelector[] | null;
+    selectors: HostOsNodeSelectors | null;
     upgraded_nodes: { [key: string]: UpgradeStatus } | null
     alerting_nodes: { [key: string]: AlertStatus } | null
 }

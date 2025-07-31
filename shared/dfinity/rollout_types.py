@@ -147,32 +147,40 @@ def yaml_to_ApiBoundaryNodeRolloutPlanSpec(s: str) -> ApiBoundaryNodeRolloutPlan
 
 
 class NodeSelector(TypedDict, total=False):
-    assignment: Literal["unassigned"] | Literal["assigned"]
+    assignment: (
+        Literal["unassigned"] | Literal["assigned"] | Literal["API boundary node"]
+    )
     owner: Literal["DFINITY"] | Literal["others"]
     group_by: Literal["datacenter"] | Literal["subnet"]
     status: NodeStatus
     # Either a literal number of nodes or a float 0-1 for a percentage of nodes.
     nodes_per_group: int | float
+    join: list["NodeSelector"]
+    intersect: list["NodeSelector"]
 
 
-type NodeSelectors = list[NodeSelector]
-
-
-def to_selector(selector: dict[str, Any]) -> NodeSelector:
-    assert selector.get("assignment") in ["unassigned", "assigned", None], (
-        "the assignment is not either one of unassigned or assigned"
-    )
-    assert selector.get("owner") in ["DFINITY", "others", None], (
+def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
+    assert specifier.get("assignment") in [
+        "unassigned",
+        "assigned",
+        "API boundary node",
+        None,
+    ], "the assignment is not either one of unassigned or assigned or API boundary node"
+    assert specifier.get("owner") in ["DFINITY", "others", None], (
         "the owner is not either one of DFINITY or others"
     )
-    assert selector.get("group_by") in ["subnet", "datacenter", None], (
+    assert specifier.get("group_by") in ["subnet", "datacenter", None], (
         "the group_by key is not either one of subnet or datacenter"
     )
-    assert selector.get("status") in ["Healthy", "Degraded", "Down", None], (
+    if specifier.get("group_by") == "subnet":
+        assert specifier.get("assignment") != "API boundary node", (
+            "grouping by subnet is not supported for API boundary node assignments"
+        )
+    assert specifier.get("status") in ["Healthy", "Degraded", "Down", None], (
         "the status key is not either one of Healthy, Degraded or Down"
     )
-    if "nodes_per_group" in selector:
-        nodes_per_group = selector["nodes_per_group"]
+    if "nodes_per_group" in specifier:
+        nodes_per_group = specifier["nodes_per_group"]
         if isinstance(nodes_per_group, str):
             if nodes_per_group.endswith("%"):
                 nodes_per_group = float(nodes_per_group[:-1]) / 100
@@ -188,29 +196,51 @@ def to_selector(selector: dict[str, Any]) -> NodeSelector:
             assert 0, "nodes_per_group cannot be lower than 0% or greater than 100%"
         if isinstance(nodes_per_group, int) and (nodes_per_group < 0):
             assert 0, "nodes_per_group cannot be lower than 0 nodes"
-        selector["nodes_per_group"] = nodes_per_group
-    assert selector.get("status") in ["Healthy", "Degraded", "Down", None], (
+        specifier["nodes_per_group"] = nodes_per_group
+    assert specifier.get("status") in ["Healthy", "Degraded", "Down", None], (
         "the status key is not either one of Healthy, Degraded or Down"
     )
-    remaining_keys = set(selector.keys()) - set(
+    remaining_keys = set(specifier.keys()) - set(
         ["assignment", "owner", "group_by", "status", "nodes_per_group"]
     )
     assert not remaining_keys, f"extraneous keys found in selector: {remaining_keys}"
-    return cast(NodeSelector, selector)
+    assert "assignment" in specifier or "owner" in specifier or "status" in specifier, (
+        "illegal selector -- has no owner, assignment or status selection criteria"
+    )
+
+    return cast(NodeSelector, specifier)
 
 
-def to_selectors(selectors: list[dict[str, Any]]) -> NodeSelectors:
-    news: NodeSelectors = []
-    for selnum, s in enumerate(selectors):
-        try:
-            news.append(to_selector(s))
-        except Exception as e:
-            assert 0, f"selector {selnum + 1} has problems: {e}"
-    return news
+def to_selectors(
+    selectors: dict[str, Any] | list[dict[str, Any]] | NodeSelector,
+) -> NodeSelector:
+    # Compatibility with prior form of specification of the selectors.
+    if isinstance(selectors, list):
+        selectors = {"intersect": [to_selectors(s) for s in selectors]}
+
+    try:
+        if "join" in selectors:
+            remaining_keys = set(selectors.keys()) - set(["join"])
+            assert not remaining_keys, (
+                f"extraneous keys found in join selector: {remaining_keys}"
+            )
+            return {"join": [to_selectors(s) for s in selectors["join"]]}
+
+        if "intersect" in selectors:
+            remaining_keys = set(selectors.keys()) - set(["intersect"])
+            assert not remaining_keys, (
+                f"extraneous keys found in intersect selector: {remaining_keys}"
+            )
+            return {"intersect": [to_selectors(s) for s in selectors["intersect"]]}
+
+        return to_specifier(selectors)
+
+    except Exception as e:
+        assert 0, f"selector {selectors} has problems: {e}"
 
 
 class HostOSRolloutBatchSpec(TypedDict):
-    selectors: NodeSelectors
+    selectors: NodeSelector
 
 
 class HostOSRolloutStages(TypedDict, total=False):
@@ -258,16 +288,13 @@ def yaml_to_HostOSRolloutPlanSpec(s: str) -> HostOSRolloutPlanSpec:
                 except Exception as e:
                     assert 0, f"while evaluating canary stage {cn + 1}: {e}"
         for stage_name in ["main", "unassigned", "stragglers"]:
-            if stage_name in d:
+            if stage_name in d["stages"]:
                 if stage := d["stages"].get(stage_name):
-                    assert isinstance(canary, list), (
-                        f"the {stage_name} stage is not a list"
-                    )
                     try:
-                        stage = to_selectors(stage["selectors"])
-                        d["stages"][stage_name] = {"selectors": stage}
+                        selectors = to_selectors(stage["selectors"])
+                        d["stages"][stage_name] = {"selectors": selectors}
                     except Exception as e:
-                        f"while evaluating {stage_name} stage: {e}"
+                        assert 0, f"while evaluating {stage_name} stage: {e}"
         remaining_keys = set(d["stages"].keys()) - set(
             ["canary", "main", "unassigned", "stragglers"]
         )
@@ -323,7 +350,7 @@ class NodeInfo(TypedDict):
     node_id: NodeId
     node_provider_id: NodeOperatorId
     dc_id: DCId
-    subnet_id: SubnetId | None
+    assignment: SubnetId | Literal["API boundary node"] | None
     status: NodeStatus
 
 
@@ -340,7 +367,7 @@ type NodeAlertStatuses = dict[NodeId, NodeAlertStatus]
 
 class ComputedBatch(TypedDict):
     nodes: NodeBatch
-    selectors: NodeSelectors
+    selectors: NodeSelector
 
 
 type HostOSStage = (
@@ -357,7 +384,7 @@ class ProvisionalHostOSBatches(TypedDict):
 
 class ProvisionalHostOSPlanBatch(TypedDict):
     nodes: NodeBatch
-    selectors: NodeSelectors
+    selectors: NodeSelector
     start_at: datetime.datetime
 
 

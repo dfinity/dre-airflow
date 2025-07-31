@@ -77,41 +77,49 @@ DEFAULT_HOSTOS_ROLLOUT_PLANS: dict[str, str] = {
 stages:
   canary:
   - selectors:
-    - assignment: unassigned
-      owner: DFINITY
-      status: Healthy
-      nodes_per_group: 1
+      join:
+      - assignment: unassigned
+        owner: DFINITY
+        status: Healthy
+        nodes_per_group: 1
+      - assignment: API boundary node
+        status: Healthy
+        nodes_per_group: 1
   - selectors:
-    - assignment: unassigned
+      assignment: unassigned
       owner: DFINITY
       status: Healthy
       nodes_per_group: 5
   - selectors:
-    - assignment: unassigned
+      assignment: unassigned
       owner: others
       group_by: datacenter
       status: Healthy
       nodes_per_group: 1
   - selectors:
-    - assignment: assigned
+      assignment: assigned
       owner: DFINITY
       status: Healthy
       nodes_per_group: 10%
   - selectors:
-    - assignment: assigned
+      assignment: assigned
       owner: others
       group_by: subnet
       status: Healthy
       nodes_per_group: 1
   main:
     selectors:
-    - assignment: assigned
-      group_by: subnet
-      status: Healthy
-      nodes_per_group: 1
+      join:
+      - assignment: assigned
+        group_by: subnet
+        status: Healthy
+        nodes_per_group: 1
+      - assignment: API boundary node
+        status: Healthy
+        nodes_per_group: 1
   unassigned:
     selectors:
-    - assignment: unassigned
+      assignment: unassigned
       status: Healthy
       nodes_per_group: 100
   stragglers:

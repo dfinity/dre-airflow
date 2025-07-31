@@ -9,7 +9,12 @@ import pytest
 from dfinity import dre
 from dfinity.ic_types import IC_NETWORKS
 from dfinity.rollout_types import yaml_to_HostOSRolloutPlanSpec
-from operators.hostos_rollout import DagParams, compute_provisional_plan, schedule
+from operators.hostos_rollout import (
+    DagParams,
+    compute_provisional_plan,
+    is_apibn,
+    schedule,
+)
 
 
 @pytest.fixture
@@ -87,9 +92,13 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     assert canary[0]["start_at"] == datetime.datetime(2025, 7, 7, 7, 0)
     assert len(canary) == 5
     assert len(res["main"]) == 39
+    assert any(
+        is_apibn(n, set(s["principal"] for s in registry["api_bns"]))
+        for n in res["main"][3]["nodes"]
+    )
     assert len(res["main"][-1]["nodes"]) == 1
-    assert len(res["unassigned"]) == 8
-    assert len(res["unassigned"][-1]["nodes"]) == 13
+    assert len(res["unassigned"]) == 7
+    assert len(res["unassigned"][-1]["nodes"]) == 93
     assert len(res["stragglers"][0]["nodes"]) == 14
     batches = (
         [r for r in res["canary"]]
@@ -97,7 +106,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
         + [r for r in res["unassigned"]]
         + [r for r in res["stragglers"]]
     )
-    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 29, 7, 0)
+    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 28, 13, 0)
 
 
 def test_schedule_bombs_with_too_many_nodes(
@@ -118,3 +127,51 @@ def test_schedule_bombs_with_too_many_nodes(
     mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
     with pytest.raises(AssertionError):
         schedule(IC_NETWORKS["mainnet"], params)
+
+
+def test_only_apibns(mocker: Any, registry: dre.RegistrySnapshot) -> None:
+    "Schedule should bomb if one stage tries to upgrade too many nodes."
+    """Tests that the default rollout plan spec works."""
+    spec = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: API boundary node
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    params: DagParams = {"simulate": True, "plan": spec, "git_revision": "0"}
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+    sched = schedule(IC_NETWORKS["mainnet"], params)
+    assert len(sched["main"][0]["nodes"]) == 20
+    assert all(
+        is_apibn(n, set(s["principal"] for s in registry["api_bns"]))
+        for n in sched["main"][0]["nodes"]
+    )
+
+
+def test_join_apibn_and_regular_assigned(
+    mocker: Any, registry: dre.RegistrySnapshot
+) -> None:
+    "Schedule should bomb if one stage tries to upgrade too many nodes."
+    """Tests that the default rollout plan spec works."""
+    spec = textwrap.dedent("""\
+        stages:
+          canary:
+          - selectors:
+              join:
+              - assignment: API boundary node
+                nodes_per_group: 1
+              - assignment: unassigned
+                nodes_per_group: 1
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    params: DagParams = {"simulate": True, "plan": spec, "git_revision": "0"}
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+    sched = schedule(IC_NETWORKS["mainnet"], params)
+    assert len(sched["canary"][0]["nodes"]) == 2
+    assert sched["canary"][0]["nodes"][0]["assignment"] == "API boundary node"
+    assert sched["canary"][0]["nodes"][1]["assignment"] != "API boundary node"
