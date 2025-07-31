@@ -105,6 +105,10 @@
 <style>
     li.batch {
         background-color: #e4e4e4;
+        flex-grow: 1;
+        display: flex;
+    }
+    li.batch > a {
         padding: 0.6em;
         flex-grow: 1;
     }
