@@ -7,10 +7,7 @@ export type FullState = {
     rollout_engine_states: RolloutEngineStates;
 }
 
-const API_URL = import.meta.env.BACKEND_API_PATH || "/api/v2";
-const UNSTABLE_API_URL =
-    import.meta.env.BACKEND_API_PATH_UNSTABLE || "/api/unstable";
-
+const API_URL = "/api/v2";
 
 const url = API_URL + "/sse"
 var evtSource: null | EventSource = null;
