@@ -85,7 +85,13 @@
                     <DropdownItem
                         ><a
                             href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
-                            target="_blank">Mainnet versions</a
+                            target="_blank">Mainnet GuestOS versions</a
+                        ></DropdownItem
+                    >
+                    <DropdownItem
+                        ><a
+                            href="https://grafana.mainnet.dfinity.network/d/hostos-versions/hostos-versions"
+                            target="_blank">Mainnet HostOS versions</a
                         ></DropdownItem
                     >
                     <DropdownItem
