@@ -77,10 +77,10 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         stages:
             canary:
             - selectors:
-                - assignment: unassigned
-                  owner: DFINITY
-                  nodes_per_group: 1
-                  status: Healthy
+                assignment: unassigned
+                owner: DFINITY
+                nodes_per_group: 1
+                status: Healthy
             - selectors:
                 - assignment: unassigned
                   owner: DFINITY
@@ -130,10 +130,51 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         suspend_at: 18:59
         minimum_minutes_per_batch: 60
         """)
+
         p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
         stages = p["stages"]
-        assert stages["canary"][0]["selectors"][0]["nodes_per_group"] == 0.2
+        assert (
+            stages["canary"][0]["selectors"]["intersect"][0]["nodes_per_group"] == 0.2
+        )
         assert len(stages["canary"]) == 1
         assert "main" not in stages
         assert "unassigned" not in stages
         assert "stragglers" not in stages
+
+    def test_join(self) -> None:
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors:
+                   join:
+                    - assignment: assigned
+                      group_by: subnet
+                      status: Healthy
+                      nodes_per_group: 1
+                    - assignment: API boundary
+                      status: Healthy
+                      nodes_per_group: 1
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
+        stages = p["stages"]
+        assert stages["main"]["selectors"]["join"][0]["nodes_per_group"] == 1
+        assert stages["main"]["selectors"]["join"][1]["assignment"] == "API boundary"
+
+    def test_illegal_specifier(self) -> None:
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors: [{}]
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_types.yaml_to_HostOSRolloutPlanSpec(inp),
+        )

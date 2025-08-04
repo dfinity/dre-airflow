@@ -7,7 +7,6 @@ import datetime
 import logging
 import pprint
 import typing
-from copy import deepcopy
 from typing import cast
 
 import dfinity.dre as dre
@@ -20,13 +19,15 @@ from dfinity.rollout_types import (
     HostOSRolloutStages,
     HostOSStage,
     NodeBatch,
+    NodeId,
     NodeInfo,
     NodeProviderId,
-    NodeSelectors,
+    NodeSelector,
     ProposalInfo,
     ProvisionalHostOSBatches,
     ProvisionalHostOSPlan,
     ProvisionalHostOSPlanBatch,
+    to_selectors,
     yaml_to_HostOSRolloutPlanSpec,
 )
 
@@ -37,7 +38,7 @@ CANARY_BATCH_COUNT: int = 5
 MAIN_BATCH_COUNT: int = 50
 UNASSIGNED_BATCH_COUNT: int = 15
 STRAGGLERS_BATCH_COUNT: int = 1
-MAX_NODES_PER_BATCH: int = 150
+MAX_NODES_PER_BATCH: int = 160
 
 DFINITY: NodeProviderId = (
     "bvcsg-3od6r-jnydw-eysln-aql7w-td5zn-ay5m6-sibd2-jzojt-anwag-mqe"
@@ -52,12 +53,12 @@ class DagParams(typing.TypedDict):
     simulate: bool
 
 
-def registry_node_to_node_info(n: dre.RegistryNode) -> NodeInfo:
+def registry_node_to_node_info(n: dre.RegistryNode, apibns: set[NodeId]) -> NodeInfo:
     return {
         "node_id": n["node_id"],
         "node_provider_id": n["node_provider_id"],
         "dc_id": n["dc_id"],
-        "subnet_id": n["subnet_id"],
+        "assignment": "API boundary" if n["node_id"] in apibns else n["subnet_id"],
         "status": n["status"],
     }
 
@@ -89,62 +90,95 @@ def precedent_batches(batch_name: HostOSStage, batch_index: int) -> list[str]:
     assert 0, "not possible: %r" % batch_name
 
 
+def is_apibn(n: dre.RegistryNode | NodeInfo, apibns: set[NodeId]) -> bool:
+    return n["node_id"] in apibns
+
+
 def apply_selectors(
     pool: list[dre.RegistryNode],
-    selectors: NodeSelectors,
+    selector: NodeSelector,
     dcs_owned_by_dfinity: set[DCId],
+    apibns: set[NodeId],
 ) -> tuple[list[NodeInfo], list[dre.RegistryNode]]:
     """
     Take as many nodes from the pool as selectors prescribe, then return info
     on those nodes and a new, reduced pool without those nodes
     """
-    remaining_nodes = deepcopy(pool)
-    for selector in selectors:
-        if assignment := selector.get("assignment"):
-            pool = [
-                n
-                for n in pool
-                if (assignment == "unassigned" and n["subnet_id"] is None)
-                or (assignment == "assigned" and n["subnet_id"] is not None)
-            ]
-        # assert 0, this_batch
-        if owner := selector.get("owner"):
-            pool = [
-                n
-                for n in pool
-                if (owner == "DFINITY" and n["dc_id"] in dcs_owned_by_dfinity)
-                or (owner == "others" and n["dc_id"] not in dcs_owned_by_dfinity)
-            ]
-        if status := selector.get("status"):
-            pool = [n for n in pool if status == n["status"]]
-        groups: dict[str | None, list[dre.RegistryNode]] = collections.defaultdict(list)
-        if group_by := selector.get("group_by"):
-            for node in pool:
-                if group_by == "datacenter":
-                    groups[node["dc_id"]].append(node)
-                elif group_by == "subnet":
-                    groups[node["subnet_id"]].append(node)
+    remaining_nodes = [n for n in pool]
+    final: list[NodeInfo] = []
+
+    if "join" in selector:
+        for selector in selector["join"]:
+            selected, remaining_nodes = apply_selectors(
+                remaining_nodes, selector, dcs_owned_by_dfinity, apibns
+            )
+            final_node_ids = [n["node_id"] for n in final]
+            final += [s for s in selected if s["node_id"] not in final_node_ids]
+        return final, remaining_nodes
+
+    elif "intersect" in selector:
+        final = [registry_node_to_node_info(n, apibns) for n in remaining_nodes]
+        if len(selector["intersect"]) == 0:
+            remaining_nodes = []
         else:
-            groups[None] = pool
-        if nodes_per_group := selector.get("nodes_per_group"):
-            if isinstance(nodes_per_group, int):
-                for k, v in groups.items():
-                    groups[k] = v[:nodes_per_group]
-            elif isinstance(nodes_per_group, float):
-                for k, v in groups.items():
-                    perc = round(len(v) * nodes_per_group)
-                    groups[k] = v[:perc]
-        pool = [n for m in groups.values() for n in m]
+            for selector in selector["intersect"]:
+                selected, remaining_nodes = apply_selectors(
+                    remaining_nodes, selector, dcs_owned_by_dfinity, apibns
+                )
+                selected_node_ids = [n["node_id"] for n in selected]
+                final = [f for f in final if f["node_id"] in selected_node_ids]
+        return final, remaining_nodes
+
+    if assignment := selector.get("assignment"):
+        pool = [
+            n
+            for n in pool
+            if (
+                assignment == "unassigned"
+                and n["subnet_id"] is None
+                and not is_apibn(n, apibns)
+            )
+            or (assignment == "assigned" and n["subnet_id"] is not None)
+            or (assignment == "API boundary" and is_apibn(n, apibns))
+        ]
+    if owner := selector.get("owner"):
+        pool = [
+            n
+            for n in pool
+            if (owner == "DFINITY" and n["dc_id"] in dcs_owned_by_dfinity)
+            or (owner == "others" and n["dc_id"] not in dcs_owned_by_dfinity)
+        ]
+    if status := selector.get("status"):
+        pool = [n for n in pool if status == n["status"]]
+    groups: dict[str | None, list[dre.RegistryNode]] = collections.defaultdict(list)
+    if group_by := selector.get("group_by"):
+        for node in pool:
+            if group_by == "datacenter":
+                groups[node["dc_id"]].append(node)
+            elif group_by == "subnet":
+                groups[node["subnet_id"]].append(node)
+    else:
+        groups[None] = pool
+    if nodes_per_group := selector.get("nodes_per_group"):
+        if isinstance(nodes_per_group, int):
+            for k, v in groups.items():
+                groups[k] = v[:nodes_per_group]
+        elif isinstance(nodes_per_group, float):
+            for k, v in groups.items():
+                perc = round(len(v) * nodes_per_group)
+                groups[k] = v[:perc]
+    pool = [n for m in groups.values() for n in m]
+
     node_ids = [n["node_id"] for n in pool]
     spent = set(node_ids)
     remaining_nodes = [n for n in remaining_nodes if n["node_id"] not in spent]
 
-    return [registry_node_to_node_info(n) for n in pool], remaining_nodes
+    return [registry_node_to_node_info(n, apibns) for n in pool], remaining_nodes
 
 
 def compute_actual_plan_for_batch(
     git_revision: str,
-    selectors: NodeSelectors,
+    selectors: NodeSelector,
     registry: dre.RegistrySnapshot,
 ) -> NodeBatch:
     """
@@ -166,7 +200,10 @@ def compute_actual_plan_for_batch(
         for d in registry["node_operators"]
         if d["node_provider_principal_id"] == DFINITY
     )
-    node_ids, _ = apply_selectors(remaining_nodes, selectors, dcs_owned_by_dfinity)
+    apibns = set(d["principal"] for d in registry["api_bns"])
+    node_ids, _ = apply_selectors(
+        remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
+    )
     return node_ids
 
 
@@ -201,6 +238,7 @@ def compute_provisional_node_batches(
         for d in registry["node_operators"]
         if d["node_provider_principal_id"] == DFINITY
     )
+    apibns = set(d["principal"] for d in registry["api_bns"])
     p: ProvisionalHostOSBatches = {
         "canary": [],
         "main": [],
@@ -209,32 +247,37 @@ def compute_provisional_node_batches(
     }
     for batch_spec in stages.get("canary", []):
         node_ids, remaining_nodes = apply_selectors(
-            remaining_nodes, batch_spec["selectors"], dcs_owned_by_dfinity
+            remaining_nodes,
+            batch_spec["selectors"],
+            dcs_owned_by_dfinity,
+            apibns,
         )
-        p["canary"].append({"selectors": batch_spec["selectors"], "nodes": node_ids})
+        p["canary"].append(
+            {"selectors": to_selectors(batch_spec["selectors"]), "nodes": node_ids}
+        )
     if "main" in stages:
-        selectors = stages["main"]["selectors"]
+        selectors = to_selectors(stages["main"]["selectors"])
         while True:
             node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity
+                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
             )
             if not node_ids:
                 break
             p["main"].append({"selectors": selectors, "nodes": node_ids})
     if "unassigned" in stages:
-        selectors = stages["unassigned"]["selectors"]
+        selectors = to_selectors(stages["unassigned"]["selectors"])
         while True:
             node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity
+                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
             )
             if not node_ids:
                 break
             p["unassigned"].append({"selectors": selectors, "nodes": node_ids})
     if "stragglers" in stages:
-        selectors = stages["stragglers"]["selectors"]
+        selectors = to_selectors(stages["stragglers"]["selectors"])
         while True:
             node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity
+                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
             )
             if not node_ids:
                 break
@@ -380,7 +423,7 @@ def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostO
 
     print("Prospective timetable:\n%s" % pprint.pformat(plan))
     print("Summary of prospective timetable:")
-    bad: str | None = None
+    bad: tuple[str, ProvisionalHostOSPlanBatch] | None = None
     for batch_name in [
         "canary",
         "main",
@@ -392,13 +435,15 @@ def schedule(network: ic_types.ICNetwork, params: DagParams) -> ProvisionalHostO
             sn = stage_name(batchname, n)
             print(f"* {sn}: {len(b['nodes'])} at {b['start_at']}")
             if len(b["nodes"]) > MAX_NODES_PER_BATCH:
-                bad = sn
+                bad = (sn, b)
 
     if bad:
         LOGGER.error(
-            f"The list of nodes in batch {bad} is too long (> {MAX_NODES_PER_BATCH})."
-            "  Failing preemptively to protect the IC."
+            f"The list of nodes in batch {bad[0]} is too long "
+            f"(> {MAX_NODES_PER_BATCH})."
+            f"\n\n{pprint.pformat(bad[1]['nodes'])}"
         )
+        LOGGER.error("Failing to protect the IC due to list above being too long.")
         assert 0
 
     return plan
@@ -474,13 +519,16 @@ def collect_nodes(
     params: DagParams,
 ) -> list[str]:
     # Fetch the list of nodes.
-    selectors = typing.cast(
-        NodeSelectors,
-        ti.xcom_pull(
-            stage_name(batch_name, batch_index) + ".plan",
-            key="selectors",
-        ),
+    selectors_untyped = ti.xcom_pull(
+        stage_name(batch_name, batch_index) + ".plan",
+        key="selectors",
     )
+
+    if isinstance(selectors_untyped, list):
+        selectors = to_selectors(selectors_untyped)
+    else:
+        selectors = typing.cast(NodeSelector, selectors_untyped)
+
     print("Selectors:\n%s" % pprint.pformat(selectors))
     runner = dre.DRE(network=network, subprocess_hook=SubprocessHook())
     registry = runner.get_registry()
@@ -610,6 +658,7 @@ def create_proposal_if_none_exists(
 
 
 if __name__ == "__main__":
+    """
     network = ic_types.ICNetwork(
         "https://ic0.app/",
         "https://dashboard.internetcomputer.org/proposal",
@@ -683,7 +732,6 @@ if __name__ == "__main__":
         },
         "stragglers": {"selectors": []},
     }
-    """
     import yaml
 
     x = compute_provisional_plan("012345", spec, runner)

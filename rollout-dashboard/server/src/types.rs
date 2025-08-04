@@ -448,6 +448,8 @@ pub mod v2 {
             Assigned,
             #[serde(rename = "unassigned")]
             Unassigned,
+            #[serde(rename = "API boundary")]
+            ApiBoundary,
         }
 
         #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
@@ -553,8 +555,8 @@ pub mod v2 {
             Dead,
         }
 
-        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-        pub struct NodeSelector {
+        #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+        pub struct NodeSpecifier {
             pub assignment: Option<NodeAssignment>,
             pub owner: Option<NodeOwner>,
             #[serde(deserialize_with = "deserialize_nodes_per_group")]
@@ -563,7 +565,85 @@ pub mod v2 {
             pub status: Option<NodeStatus>,
         }
 
-        pub type NodeSelectors = Vec<NodeSelector>;
+        #[cfg(test)]
+        impl NodeSpecifier {
+            fn unassigned(self) -> Self {
+                Self {
+                    assignment: Some(NodeAssignment::Unassigned),
+                    ..self
+                }
+            }
+
+            fn dfinity(self) -> Self {
+                Self {
+                    owner: Some(NodeOwner::Dfinity),
+                    ..self
+                }
+            }
+
+            fn number(self, n: usize) -> Self {
+                Self {
+                    nodes_per_group: Some(NodesPerGroup::Absolute(n)),
+                    ..self
+                }
+            }
+
+            fn healthy(self) -> Self {
+                Self {
+                    status: Some(NodeStatus::Healthy),
+                    ..self
+                }
+            }
+        }
+
+        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        pub struct NodeAggregator {
+            pub join: Vec<NodeSelectors>,
+        }
+
+        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        pub struct NodeFilter {
+            pub intersect: Vec<NodeSelectors>,
+        }
+
+        #[derive(Deserialize, Debug)]
+        #[serde(untagged)]
+        pub enum NodeSelectorsOrListOfNodeSelectors {
+            ListOfSelectors(Vec<NodeSpecifier>),
+            NodeAggregator(NodeAggregator),
+            NodeFilter(NodeFilter),
+            NodeSpecifier(NodeSpecifier),
+        }
+
+        impl From<NodeSelectorsOrListOfNodeSelectors> for NodeSelectors {
+            fn from(s: NodeSelectorsOrListOfNodeSelectors) -> NodeSelectors {
+                match s {
+                    NodeSelectorsOrListOfNodeSelectors::ListOfSelectors(m) => {
+                        NodeSelectors::NodeFilter(NodeFilter {
+                            intersect: m.into_iter().map(NodeSelectors::NodeSpecifier).collect(),
+                        })
+                    }
+                    NodeSelectorsOrListOfNodeSelectors::NodeAggregator(m) => {
+                        NodeSelectors::NodeAggregator(m)
+                    }
+                    NodeSelectorsOrListOfNodeSelectors::NodeFilter(m) => {
+                        NodeSelectors::NodeFilter(m)
+                    }
+                    NodeSelectorsOrListOfNodeSelectors::NodeSpecifier(m) => {
+                        NodeSelectors::NodeSpecifier(m)
+                    }
+                }
+            }
+        }
+
+        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        #[serde(untagged)]
+        #[serde(from = "NodeSelectorsOrListOfNodeSelectors")]
+        pub enum NodeSelectors {
+            NodeAggregator(NodeAggregator),
+            NodeFilter(NodeFilter),
+            NodeSpecifier(NodeSpecifier),
+        }
 
         #[derive(Serialize, Debug, Clone)]
         /// Represents a batch of subnets to upgrade.
@@ -638,7 +718,7 @@ pub mod v2 {
         pub struct NodeInfo {
             pub node_id: String,
             pub node_provider_id: String,
-            pub subnet_id: Option<String>,
+            pub assignment: Option<String>, // either a subnet ID or "API boundary"
             pub dc_id: String,
             pub status: String,
         }
@@ -822,6 +902,57 @@ pub mod v2 {
                     .event("Error")
                     .json_data(super::Error::from(m))
                     .unwrap()
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::{NodeFilter, NodeSelectors, NodeSpecifier};
+
+            #[test]
+            fn test_deserialization_of_simple_selectors() {
+                let inp = r#"{"assignment": "unassigned",
+                                             "nodes_per_group": 100,
+                                             "status": "Healthy"}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeSpecifier(
+                    NodeSpecifier::default().unassigned().number(100).healthy(),
+                );
+                assert_eq!(res, exp)
+            }
+
+            #[test]
+            fn test_deserialization_of_list_of_selectors() {
+                let inp = r#"[{"assignment": "unassigned",
+                                              "nodes_per_group": 1,
+                                              "owner": "DFINITY",
+                                              "status": "Healthy"}]"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeFilter(NodeFilter {
+                    intersect: vec![NodeSelectors::NodeSpecifier(
+                        NodeSpecifier::default()
+                            .unassigned()
+                            .number(1)
+                            .healthy()
+                            .dfinity(),
+                    )],
+                });
+                assert_eq!(res, exp)
+            }
+
+            #[test]
+            #[should_panic]
+            fn test_deserialization_of_empty_specifier() {
+                let inp = r#"{}"#;
+                let _: NodeSelectors = serde_json::from_str(inp).unwrap();
+            }
+
+            #[test]
+            fn test_deserialization_of_empty_list_of_specifiers() {
+                let inp = r#"[]"#;
+                let res: NodeSelectors = dbg!(serde_json::from_str(inp).unwrap());
+                let exp = NodeSelectors::NodeFilter(NodeFilter { intersect: vec![] });
+                assert_eq!(res, exp)
             }
         }
     }

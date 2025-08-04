@@ -26,7 +26,12 @@
         Node: val.node_id,
         Provider: val.node_provider_id,
         DC: val.dc_id,
-        Subnet: val.subnet_id === null ? "—" : val.subnet_id,
+        Assignment:
+            val.assignment === null
+                ? "—"
+                : val.assignment === "API boundary"
+                  ? "API boundary"
+                  : val.assignment,
         Status: val.status,
     }));
 
@@ -60,7 +65,12 @@
                   Node: val.node_id,
                   Provider: val.node_provider_id,
                   DC: val.dc_id,
-                  Subnet: val.subnet_id === null ? "—" : val.subnet_id,
+                  Assignment:
+                      val.assignment === null
+                          ? "—"
+                          : val.assignment === "API boundary"
+                            ? "API boundary"
+                            : val.assignment,
                   "Upgraded?": getUpgradeStatus(val.node_id),
                   "Alerting?": getAlertStatus(val.node_id),
               }))
@@ -117,7 +127,7 @@
                 select: [3],
                 type: "string",
                 render: function (cellData: string, td: Node) {
-                    if (cellData != "—") {
+                    if (cellData != "—" && cellData != "API boundary") {
                         return `<a class="oneliner text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/subnets/${cellData}">${cellData.split("-")[0]}</div>`;
                     }
                 },
