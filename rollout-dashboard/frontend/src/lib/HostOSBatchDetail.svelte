@@ -104,43 +104,6 @@
                   .map(([k, v]) => v)
                   .reduce(reducer, {}),
     );
-
-    let options = {
-        paging: false,
-        perPage: 500,
-        columns: [
-            {
-                select: [0],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/nodes/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [1],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/providers/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [2],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/centers/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [3],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    if (cellData != "—" && cellData != "API boundary") {
-                        return `<a class="text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/subnets/${cellData}">${cellData.split("-")[0]}</div>`;
-                    }
-                },
-            },
-        ],
-    };
 </script>
 
 <div>
