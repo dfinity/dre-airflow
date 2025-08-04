@@ -83,6 +83,7 @@ stages:
         status: Healthy
         nodes_per_group: 1
       - assignment: API boundary
+        owner: DFINITY
         status: Healthy
         nodes_per_group: 1
   - selectors:
