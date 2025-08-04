@@ -10,6 +10,7 @@
         subnetStateIcon,
     } from "./types";
     import { cap } from "./lib";
+    import ClipboardIcon from "./ClipboardIcon.svelte";
     interface Props {
         batch_num: String;
         batch: GuestOsBatch;
@@ -52,17 +53,8 @@
                     }}
                     use:selectTextOnFocus
                 >
-                    <svg
-                        class="w-3 h-3 me-1.5"
-                        aria-hidden="true"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="currentColor"
-                        viewBox="0 0 18 20"
-                    >
-                        <path
-                            d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
-                        />
-                    </svg>{subnet.git_revision}
+                    <div class="icon"><ClipboardIcon /></div>
+                    {subnet.git_revision}
                 </div>
             </li>
         </ul>
@@ -150,14 +142,13 @@
     .git_revision {
         cursor: copy;
     }
-    .git_revision svg {
+    .git_revision .icon {
         display: none;
     }
-    .git_revision:hover svg {
+    .git_revision:hover .icon {
         display: block;
         position: absolute;
-        margin-left: -1em;
-        margin-top: 0.35em;
+        margin-left: -1.1em;
     }
     .time {
         text-align: right;

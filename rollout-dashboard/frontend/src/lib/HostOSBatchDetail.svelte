@@ -15,6 +15,8 @@
     import { Tabs, TabItem } from "flowbite-svelte";
     import { hostOsBatchStateName } from "./types";
     import { cap } from "./lib";
+    import InfoBlock from "./InfoBlock.svelte";
+    import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
 
     interface Props {
         dag_run_id: string;
@@ -148,7 +150,9 @@
                                 class="text-secondary-600"
                                 data-sveltekit-preload-data="off"
                                 >{hostOsBatchStateIcon(batch)}
-                                {cap(hostOsBatchStateName(batch))}</a
+                                {cap(
+                                    hostOsBatchStateName(batch),
+                                )}<ExternalLinkIcon /></a
                             >{:else}{hostOsBatchStateIcon(batch)}
                             {cap(
                                 hostOsBatchStateName(batch),
@@ -205,29 +209,12 @@
         </TabItem>
         {#if actual_items !== null}
             <TabItem title="Actual nodes">
-                <div
-                    class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
-                    role="alert"
-                >
-                    <svg
-                        class="shrink-0 inline w-4 h-4 me-3"
-                        aria-hidden="true"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                    >
-                        <path
-                            d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
-                        />
-                    </svg>
-                    <span class="sr-only">Info</span>
-                    <div>
-                        These are the nodes selected at the start of the batch
-                        just prior to submitting the upgrade proposal. They may
-                        differ from the planned nodes, originally selected at
-                        the beginning of the rollout.
-                    </div>
-                </div>
+                <InfoBlock>
+                    These are the nodes selected at the start of the batch just
+                    prior to submitting the upgrade proposal. They may differ
+                    from the planned nodes, originally selected at the beginning
+                    of the rollout.
+                </InfoBlock>
                 <RegularTable striped={true}>
                     <TableHead>
                         <TableHeadCell>Node</TableHeadCell>
@@ -279,30 +266,13 @@
             </TabItem>
         {/if}
         <TabItem title="Planned nodes">
-            <div
-                class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
-                role="alert"
-            >
-                <svg
-                    class="shrink-0 inline w-4 h-4 me-3"
-                    aria-hidden="true"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                >
-                    <path
-                        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
-                    />
-                </svg>
-                <span class="sr-only">Info</span>
-                <div>
-                    These are the nodes originally planned to be rolled out at
-                    the beginning of the rollout. They may differ from the nodes
-                    actually targeted once this batch has begun to do work. The
-                    status per node shown here corresponds to the status of the
-                    node at the beginning of the rollout.
-                </div>
-            </div>
+            <InfoBlock>
+                These are the nodes originally planned to be rolled out at the
+                beginning of the rollout. They may differ from the nodes
+                actually targeted once this batch has begun to do work. The
+                status per node shown here corresponds to the status of the node
+                at the beginning of the rollout.
+            </InfoBlock>
             <RegularTable striped={true}>
                 <TableHead>
                     <TableHeadCell>Node</TableHeadCell>
