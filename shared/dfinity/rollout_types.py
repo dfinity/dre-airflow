@@ -147,9 +147,7 @@ def yaml_to_ApiBoundaryNodeRolloutPlanSpec(s: str) -> ApiBoundaryNodeRolloutPlan
 
 
 class NodeSelector(TypedDict, total=False):
-    assignment: (
-        Literal["unassigned"] | Literal["assigned"] | Literal["API boundary node"]
-    )
+    assignment: Literal["unassigned"] | Literal["assigned"] | Literal["API boundary"]
     owner: Literal["DFINITY"] | Literal["others"]
     group_by: Literal["datacenter"] | Literal["subnet"]
     status: NodeStatus
@@ -163,9 +161,9 @@ def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
     assert specifier.get("assignment") in [
         "unassigned",
         "assigned",
-        "API boundary node",
+        "API boundary",
         None,
-    ], "the assignment is not either one of unassigned or assigned or API boundary node"
+    ], "the assignment is not either one of unassigned or assigned or API boundary"
     assert specifier.get("owner") in ["DFINITY", "others", None], (
         "the owner is not either one of DFINITY or others"
     )
@@ -173,8 +171,8 @@ def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
         "the group_by key is not either one of subnet or datacenter"
     )
     if specifier.get("group_by") == "subnet":
-        assert specifier.get("assignment") != "API boundary node", (
-            "grouping by subnet is not supported for API boundary node assignments"
+        assert specifier.get("assignment") != "API boundary", (
+            "grouping by subnet is not supported for API boundary assignments"
         )
     assert specifier.get("status") in ["Healthy", "Degraded", "Down", None], (
         "the status key is not either one of Healthy, Degraded or Down"
@@ -350,7 +348,7 @@ class NodeInfo(TypedDict):
     node_id: NodeId
     node_provider_id: NodeOperatorId
     dc_id: DCId
-    assignment: SubnetId | Literal["API boundary node"] | None
+    assignment: SubnetId | Literal["API boundary"] | None
     status: NodeStatus
 
 

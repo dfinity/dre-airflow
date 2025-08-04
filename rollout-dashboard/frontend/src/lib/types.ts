@@ -252,7 +252,7 @@ export type HostOsNode = {
 
 // types::v2::hostos::NodeSelector
 export type HostOsNodeSpecifier = {
-    assignment: "assigned" | "unassigned" | "API boundary node" | null
+    assignment: "assigned" | "unassigned" | "API boundary" | null
     owner: "DFINITY" | "others" | null
     nodes_per_group: number | string
     group_by: "datacenter" | "subnet" | null
@@ -308,8 +308,8 @@ function formatSelector(selector: HostOsNodeSpecifier): string {
         s = `${s} assigned to a subnet`;
     } else if (selector.assignment === "unassigned") {
         s = `${s} not assigned to any subnet`;
-    } else if (selector.assignment === "API boundary node") {
-        s = `${s} assigned to API boundary node duty`;
+    } else if (selector.assignment === "API boundary") {
+        s = `${s} assigned to API boundary duty`;
     }
 
     return s;
@@ -377,7 +377,7 @@ export type HostOsRollout = {
 export type NodeInfo = {
     node_id: string
     node_provider_id: string
-    assignment: string | null // Either a subnet ID or "API boundary node"
+    assignment: string | null // Either a subnet ID or "API boundary"
     dc_id: string
     status: string
 }

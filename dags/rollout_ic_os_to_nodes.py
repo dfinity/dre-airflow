@@ -69,7 +69,7 @@ A selector is either:
 
   This dictionary specifies at least one key of:
 
-  * `assignment` (unassigned or assigned or API boundary node),
+  * `assignment` (unassigned or assigned or API boundary),
   * `owner` (DFINITY or others),
   * `status` (Degraded, Healthy or Down).
 
@@ -116,7 +116,7 @@ boundary node:
         owner: DFINITY
         group_by: datacenter
         nodes_per_group: 1
-      - assignment: API boundary node
+      - assignment: API boundary
         status: Healthy
         nodes_per_group: 2
 ...

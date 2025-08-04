@@ -136,7 +136,7 @@ def test_only_apibns(mocker: Any, registry: dre.RegistrySnapshot) -> None:
         stages:
           main:
             selectors:
-              assignment: API boundary node
+              assignment: API boundary
         resume_at: 7:00
         suspend_at: 15:00
         minimum_minutes_per_batch: 30
@@ -161,7 +161,7 @@ def test_join_apibn_and_regular_assigned(
           canary:
           - selectors:
               join:
-              - assignment: API boundary node
+              - assignment: API boundary
                 nodes_per_group: 1
               - assignment: unassigned
                 nodes_per_group: 1
@@ -173,5 +173,5 @@ def test_join_apibn_and_regular_assigned(
     mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
     sched = schedule(IC_NETWORKS["mainnet"], params)
     assert len(sched["canary"][0]["nodes"]) == 2
-    assert sched["canary"][0]["nodes"][0]["assignment"] == "API boundary node"
-    assert sched["canary"][0]["nodes"][1]["assignment"] != "API boundary node"
+    assert sched["canary"][0]["nodes"][0]["assignment"] == "API boundary"
+    assert sched["canary"][0]["nodes"][1]["assignment"] != "API boundary"

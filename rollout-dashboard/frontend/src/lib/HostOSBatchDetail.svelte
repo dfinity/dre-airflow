@@ -29,7 +29,7 @@
         Assignment:
             val.assignment === null
                 ? "—"
-                : val.assignment === "API boundary node"
+                : val.assignment === "API boundary"
                   ? "API boundary"
                   : val.assignment,
         Status: val.status,
@@ -68,7 +68,7 @@
                   Assignment:
                       val.assignment === null
                           ? "—"
-                          : val.assignment === "API boundary node"
+                          : val.assignment === "API boundary"
                             ? "API boundary"
                             : val.assignment,
                   "Upgraded?": getUpgradeStatus(val.node_id),

@@ -58,7 +58,7 @@ def registry_node_to_node_info(n: dre.RegistryNode, apibns: set[NodeId]) -> Node
         "node_id": n["node_id"],
         "node_provider_id": n["node_provider_id"],
         "dc_id": n["dc_id"],
-        "assignment": "API boundary node" if n["node_id"] in apibns else n["subnet_id"],
+        "assignment": "API boundary" if n["node_id"] in apibns else n["subnet_id"],
         "status": n["status"],
     }
 
@@ -139,7 +139,7 @@ def apply_selectors(
                 and not is_apibn(n, apibns)
             )
             or (assignment == "assigned" and n["subnet_id"] is not None)
-            or (assignment == "API boundary node" and is_apibn(n, apibns))
+            or (assignment == "API boundary" and is_apibn(n, apibns))
         ]
     if owner := selector.get("owner"):
         pool = [

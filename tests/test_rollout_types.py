@@ -151,7 +151,7 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
                       group_by: subnet
                       status: Healthy
                       nodes_per_group: 1
-                    - assignment: API boundary node
+                    - assignment: API boundary
                       status: Healthy
                       nodes_per_group: 1
         allowed_days: [Wednesday]
@@ -162,9 +162,7 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
         stages = p["stages"]
         assert stages["main"]["selectors"]["join"][0]["nodes_per_group"] == 1
-        assert (
-            stages["main"]["selectors"]["join"][1]["assignment"] == "API boundary node"
-        )
+        assert stages["main"]["selectors"]["join"][1]["assignment"] == "API boundary"
 
     def test_illegal_specifier(self) -> None:
         inp = textwrap.dedent("""\

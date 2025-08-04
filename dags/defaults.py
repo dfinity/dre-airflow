@@ -82,7 +82,7 @@ stages:
         owner: DFINITY
         status: Healthy
         nodes_per_group: 1
-      - assignment: API boundary node
+      - assignment: API boundary
         status: Healthy
         nodes_per_group: 1
   - selectors:
@@ -114,7 +114,7 @@ stages:
         group_by: subnet
         status: Healthy
         nodes_per_group: 1
-      - assignment: API boundary node
+      - assignment: API boundary
         status: Healthy
         nodes_per_group: 1
   unassigned:

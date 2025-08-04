@@ -448,8 +448,8 @@ pub mod v2 {
             Assigned,
             #[serde(rename = "unassigned")]
             Unassigned,
-            #[serde(rename = "API boundary node")]
-            ApiBoundaryNode,
+            #[serde(rename = "API boundary")]
+            ApiBoundary,
         }
 
         #[derive(Debug, Serialize, Deserialize, Clone, EnumString, PartialEq, Eq)]
@@ -718,7 +718,7 @@ pub mod v2 {
         pub struct NodeInfo {
             pub node_id: String,
             pub node_provider_id: String,
-            pub assignment: Option<String>, // either a subnet ID or "API boundary node"
+            pub assignment: Option<String>, // either a subnet ID or "API boundary"
             pub dc_id: String,
             pub status: String,
         }
