@@ -12,7 +12,6 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.node.json"
   },
   "devDependencies": {
-    "@flowbite-svelte-plugins/datatable": "^0.4.0",
     "@humanspeak/svelte-markdown": "^0.8.8",
     "@roxi/routify": "^3.0.0-next.292",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
@@ -24,7 +23,6 @@
     "flowbite": "^2.5.2",
     "flowbite-svelte": "^1.10.20",
     "flowbite-svelte-icons": "^2.2.1",
-    "simple-datatables": "^10.0.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "svelte-copy": "^2.0.0",

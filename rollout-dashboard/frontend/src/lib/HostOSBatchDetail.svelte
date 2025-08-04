@@ -4,11 +4,12 @@
         type HostOsBatchResponse,
         formatSelectors,
     } from "./types";
-    import { Table } from "@flowbite-svelte-plugins/datatable";
     import {
         Table as RegularTable,
+        TableBody,
         TableBodyCell,
         TableBodyRow,
+        TableHead,
         TableHeadCell,
     } from "flowbite-svelte";
     import { Tabs, TabItem } from "flowbite-svelte";
@@ -19,21 +20,6 @@
         dag_run_id: string;
         batch: HostOsBatchResponse;
     }
-
-    let { dag_run_id, batch }: Props = $props();
-
-    let planned_items = batch.planned_nodes.map((val) => ({
-        Node: val.node_id,
-        Provider: val.node_provider_id,
-        DC: val.dc_id,
-        Assignment:
-            val.assignment === null
-                ? "—"
-                : val.assignment === "API boundary"
-                  ? "API boundary"
-                  : val.assignment,
-        Status: val.status,
-    }));
 
     function getUpgradeStatus(node_id: string): string {
         if (batch.upgraded_nodes !== null) {
@@ -59,7 +45,33 @@
         }
     }
 
-    let actual_items =
+    function reducer(akku: Record<string, number>, val: string) {
+        let old_count = akku[val];
+        if (old_count === undefined) {
+            akku[val] = 1;
+        } else {
+            akku[val] = old_count + 1;
+        }
+        return akku;
+    }
+
+    let { dag_run_id, batch }: Props = $props();
+
+    let planned_items = $derived(
+        batch.planned_nodes.map((val) => ({
+            Node: val.node_id,
+            Provider: val.node_provider_id,
+            DC: val.dc_id,
+            Assignment:
+                val.assignment === null
+                    ? "—"
+                    : val.assignment === "API boundary"
+                      ? "API boundary"
+                      : val.assignment,
+            Status: val.status,
+        })),
+    );
+    let actual_items = $derived(
         batch.actual_nodes !== null
             ? batch.actual_nodes.map((val) => ({
                   Node: val.node_id,
@@ -74,67 +86,24 @@
                   "Upgraded?": getUpgradeStatus(val.node_id),
                   "Alerting?": getAlertStatus(val.node_id),
               }))
-            : null;
+            : null,
+    );
 
-    function reducer(akku: Record<string, number>, val: string) {
-        let old_count = akku[val];
-        if (old_count === undefined) {
-            akku[val] = 1;
-        } else {
-            akku[val] = old_count + 1;
-        }
-        return akku;
-    }
-
-    let upgraded_nodes_summary =
+    let upgraded_nodes_summary = $derived(
         batch.upgraded_nodes === null
             ? null
             : Object.entries(batch.upgraded_nodes)
                   .map(([k, v]) => v)
-                  .reduce(reducer, {});
+                  .reduce(reducer, {}),
+    );
 
-    let alerting_nodes_summary =
+    let alerting_nodes_summary = $derived(
         batch.alerting_nodes === null
             ? null
             : Object.entries(batch.alerting_nodes)
                   .map(([k, v]) => v)
-                  .reduce(reducer, {});
-
-    let options = {
-        columns: [
-            {
-                select: [0],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="oneliner text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/nodes/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [1],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="oneliner text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/providers/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [2],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    return `<a class="oneliner text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/centers/${cellData}">${cellData}</div>`;
-                },
-            },
-            {
-                select: [3],
-                type: "string",
-                render: function (cellData: string, td: Node) {
-                    if (cellData != "—" && cellData != "API boundary") {
-                        return `<a class="oneliner text-secondary-600" target="_blank" href="https://dashboard.internetcomputer.org/network/subnets/${cellData}">${cellData.split("-")[0]}</div>`;
-                    }
-                },
-            },
-        ],
-        perPage: 20,
-    };
+                  .reduce(reducer, {}),
+    );
 </script>
 
 <div>
@@ -236,15 +205,158 @@
         </TabItem>
         {#if actual_items !== null}
             <TabItem title="Actual nodes">
-                <Table items={actual_items} dataTableOptions={options} />
-            </TabItem>
-            <TabItem title="Planned nodes">
-                <Table items={planned_items} dataTableOptions={options} />
-            </TabItem>
-        {:else}
-            <TabItem title="Planned nodes">
-                <Table items={planned_items} dataTableOptions={options} />
+                <div
+                    class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
+                    role="alert"
+                >
+                    <svg
+                        class="shrink-0 inline w-4 h-4 me-3"
+                        aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                    >
+                        <path
+                            d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+                        />
+                    </svg>
+                    <span class="sr-only">Info</span>
+                    <div>
+                        These are the nodes selected at the start of the batch
+                        just prior to submitting the upgrade proposal. They may
+                        differ from the planned nodes, originally selected at
+                        the beginning of the rollout.
+                    </div>
+                </div>
+                <RegularTable striped={true}>
+                    <TableHead>
+                        <TableHeadCell>Node</TableHeadCell>
+                        <TableHeadCell>Provider</TableHeadCell>
+                        <TableHeadCell>DC</TableHeadCell>
+                        <TableHeadCell>Upgraded?</TableHeadCell>
+                        <TableHeadCell>Alerting?</TableHeadCell>
+                    </TableHead>
+                    <TableBody>
+                        {#each actual_items as node}
+                            <TableBodyRow>
+                                <TableBodyCell class="oneliner"
+                                    ><a
+                                        class="text-secondary-600"
+                                        target="_blank"
+                                        href="https://dashboard.internetcomputer.org/network/nodes/{node[
+                                            'Node'
+                                        ]}">{node["Node"]}</a
+                                    ></TableBodyCell
+                                >
+                                <TableBodyCell class="oneliner"
+                                    ><a
+                                        class="text-secondary-600"
+                                        target="_blank"
+                                        href="https://dashboard.internetcomputer.org/network/providers/{node[
+                                            'Provider'
+                                        ]}">{node["Provider"]}</a
+                                    ></TableBodyCell
+                                >
+                                <TableBodyCell class="oneliner"
+                                    ><a
+                                        class=" text-secondary-600"
+                                        target="_blank"
+                                        href="https://dashboard.internetcomputer.org/network/centers/{node[
+                                            'DC'
+                                        ]}">{node["DC"]}</a
+                                    ></TableBodyCell
+                                >
+                                <TableBodyCell
+                                    >{node["Upgraded?"]}</TableBodyCell
+                                >
+                                <TableBodyCell
+                                    >{node["Alerting?"]}</TableBodyCell
+                                >
+                            </TableBodyRow>
+                        {/each}
+                    </TableBody>
+                </RegularTable>
             </TabItem>
         {/if}
+        <TabItem title="Planned nodes">
+            <div
+                class="flex items-center p-4 mb-4 text-sm text-blue-800 rounded-lg bg-blue-50 dark:bg-gray-800 dark:text-blue-400"
+                role="alert"
+            >
+                <svg
+                    class="shrink-0 inline w-4 h-4 me-3"
+                    aria-hidden="true"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                >
+                    <path
+                        d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
+                    />
+                </svg>
+                <span class="sr-only">Info</span>
+                <div>
+                    These are the nodes originally planned to be rolled out at
+                    the beginning of the rollout. They may differ from the nodes
+                    actually targeted once this batch has begun to do work. The
+                    status per node shown here corresponds to the status of the
+                    node at the beginning of the rollout.
+                </div>
+            </div>
+            <RegularTable striped={true}>
+                <TableHead>
+                    <TableHeadCell>Node</TableHeadCell>
+                    <TableHeadCell>Provider</TableHeadCell>
+                    <TableHeadCell>DC</TableHeadCell>
+                    <TableHeadCell>Assignment</TableHeadCell>
+                    <TableHeadCell>Status</TableHeadCell>
+                </TableHead>
+                <TableBody>
+                    {#each planned_items as node}
+                        <TableBodyRow>
+                            <TableBodyCell class="oneliner"
+                                ><a
+                                    class="text-secondary-600"
+                                    target="_blank"
+                                    href="https://dashboard.internetcomputer.org/network/nodes/{node[
+                                        'Node'
+                                    ]}">{node["Node"]}</a
+                                ></TableBodyCell
+                            >
+                            <TableBodyCell class="oneliner"
+                                ><a
+                                    class="text-secondary-600"
+                                    target="_blank"
+                                    href="https://dashboard.internetcomputer.org/network/providers/{node[
+                                        'Provider'
+                                    ]}">{node["Provider"]}</a
+                                ></TableBodyCell
+                            >
+                            <TableBodyCell class="oneliner"
+                                ><a
+                                    class=" text-secondary-600"
+                                    target="_blank"
+                                    href="https://dashboard.internetcomputer.org/network/centers/{node[
+                                        'DC'
+                                    ]}">{node["DC"]}</a
+                                ></TableBodyCell
+                            >
+                            <TableBodyCell
+                                >{#if node["Assignment"] != "—" && node["Assignment"] != "API boundary"}<a
+                                        class="oneliner text-secondary-600"
+                                        target="_blank"
+                                        href="https://dashboard.internetcomputer.org/network/subnets/${node[
+                                            'Assignment'
+                                        ]}">{node["Assignment"].split("-")}</a
+                                    >{:else}{node["Assignment"].split(
+                                        "-",
+                                    )}{/if}</TableBodyCell
+                            >
+                            <TableBodyCell>{node["Status"]}</TableBodyCell>
+                        </TableBodyRow>
+                    {/each}
+                </TableBody>
+            </RegularTable>
+        </TabItem>
     </Tabs>
 </div>

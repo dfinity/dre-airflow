@@ -77,15 +77,10 @@ DEFAULT_HOSTOS_ROLLOUT_PLANS: dict[str, str] = {
 stages:
   canary:
   - selectors:
-      join:
-      - assignment: unassigned
-        owner: DFINITY
-        status: Healthy
-        nodes_per_group: 1
-      - assignment: API boundary
-        owner: DFINITY
-        status: Healthy
-        nodes_per_group: 1
+      assignment: unassigned
+      owner: DFINITY
+      status: Healthy
+      nodes_per_group: 1
   - selectors:
       assignment: unassigned
       owner: DFINITY
@@ -103,11 +98,16 @@ stages:
       status: Healthy
       nodes_per_group: 10%
   - selectors:
-      assignment: assigned
-      owner: others
-      group_by: subnet
-      status: Healthy
-      nodes_per_group: 1
+      join:
+      - assignment: assigned
+        owner: others
+        group_by: subnet
+        status: Healthy
+        nodes_per_group: 1
+      - assignment: API boundary
+        owner: DFINITY
+        status: Healthy
+        nodes_per_group: 1
   main:
     selectors:
       join:
@@ -132,6 +132,6 @@ allowed_days:
 - Thursday
 resume_at: 7:00
 suspend_at: 15:00
-minimum_minutes_per_batch: 120
+minimum_minutes_per_batch: 90
 """.strip()
 }
