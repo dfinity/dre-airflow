@@ -11,6 +11,9 @@
     } from "./types";
     import { cap, activeClass, selectTextOnFocus } from "./lib";
     import ApiBoundaryNodesBatch from "./ApiBoundaryNodesBatch.svelte";
+    import BlackInfoBlock from "./BlackInfoBlock.svelte";
+    import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
+    import ClipboardIcon from "./ClipboardIcon.svelte";
     interface Props {
         rollout: ApiBoundaryNodesRollout;
     }
@@ -38,19 +41,7 @@
             </span>
             <span class="name">
                 {rollout.name}
-                <svg
-                    style="display: inline-block"
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="1em"
-                    height="1em"
-                    viewBox="0 0 15 15"
-                    ><path
-                        fill="currentColor"
-                        fill-rule="evenodd"
-                        d="M12 13a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v3.5a.5.5 0 0 0 1 0V3h9v9H8.5a.5.5 0 0 0 0 1zM9 6.5v3a.5.5 0 0 1-1 0V7.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 7H5.5a.5.5 0 0 1 0-1h3a.498.498 0 0 1 .5.497"
-                        clip-rule="evenodd"
-                    /></svg
-                >
+                <ExternalLinkIcon />
                 {#if rollout.conf.simulate}<i class="simulated">(simulated)</i
                     >{/if}
             </span>
@@ -91,17 +82,7 @@
             }}
             use:selectTextOnFocus
         >
-            <svg
-                class="w-3 h-3 me-1.5"
-                aria-hidden="true"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="currentColor"
-                viewBox="0 0 18 20"
-            >
-                <path
-                    d="M16 1h-3.278A1.992 1.992 0 0 0 11 0H7a1.993 1.993 0 0 0-1.722 1H2a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2Zm-3 14H5a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2Zm0-4H5a1 1 0 0 1 0-2h8a1 1 0 1 1 0 2Zm0-5H5a1 1 0 0 1 0-2h2V2h4v2h2a1 1 0 1 1 0 2Z"
-                />
-            </svg>{git_revision}
+            {git_revision}<ClipboardIcon />
         </div>
     </div>
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
@@ -111,27 +92,10 @@
             {/each}
         </ul>
     {:else}
-        <div
-            class="flex items-center p-4 text-sm text-gray-800 border border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600"
-            role="alert"
-        >
-            <svg
-                class="shrink-0 inline w-4 h-4 me-3"
-                aria-hidden="true"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-            >
-                <path
-                    d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM9.5 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 15H8a1 1 0 0 1 0-2h1v-3H8a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1v4h1a1 1 0 0 1 0 2Z"
-                />
-            </svg>
-            <span class="sr-only">Info</span>
-            <div>
-                This rollout {#if rollout.state == "complete" || rollout.state == "failed"}never{:else}has
-                    not yet{/if} computed a rollout plan.
-            </div>
-        </div>
+        <BlackInfoBlock>
+            This rollout {#if rollout.state == "complete" || rollout.state == "failed"}never{:else}has
+                not yet{/if} computed a rollout plan.
+        </BlackInfoBlock>
     {/if}
 </section>
 
@@ -181,15 +145,6 @@
     }
     .git_revision {
         cursor: copy;
-    }
-    .git_revision svg {
-        display: none;
-    }
-    .git_revision:hover svg {
-        display: block;
-        position: absolute;
-        margin-left: -1em;
-        margin-top: 0.35em;
     }
     .rollout a {
         order: 0;
