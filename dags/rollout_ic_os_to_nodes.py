@@ -54,9 +54,9 @@ batch by batch:
 
 If a stage key is not specified, the stage is skipped altogether.
 
-Which nodes to roll out to at each batch is decided by a selector (or a
-collection of selectors) that let the rollout select which nodes are to
-be rolled out:
+At each batch. a selector (or a tree of selectors) decides (from a
+pool of targetable HostOS nodes) which nodes are to be rolled out in
+that batch:
 
 * one selector per `canary` batch,
 * a selector common to all `main` batches,
@@ -72,6 +72,7 @@ A selector is either:
   * `assignment` (unassigned or assigned or API boundary),
   * `owner` (DFINITY or others),
   * `status` (Degraded, Healthy or Down).
+  * `datacenter` (a datacenter ID)
 
   Then, based on those selection keys, a list of nodes is created by
   the batch.
@@ -94,15 +95,31 @@ A selector is either:
   nodes targeted by each selector in the list are combined to produce a
   final node list that the batch will target.  If the list is empty, no nodes
   are selected.
+* A dictionary with a single key `not`, containing a selector.  `not` negates
+  whatever the selector within specifies.  In other words, the nodes that will
+  be selected by a `not` selector are all the nodes that *do not* match the
+  selector.
+
+In a selector tree, order generally matters.  E.g. a `join` of two selectors
+each selecting twenty nodes will generally select up to forty nodes, because
+the first selector will "grab" twenty nodes from the pool of nodes that the
+second selector will tap too.  Similarly, a `join` of a 1-node selector and
+a 20%-node selector will not produce the same results as a `join` of a
+20%-node selector and a 1-node selector.  The only case in which this does
+not apply is within the members of an `intersect` selector, because for
+an intersection to make any useful, practical sense, all its components need
+to see the same candidates.
 
 The application of selectors for each batch happens as follows:
 
 * The batch starts with all nodes not yet rolled out to as candidates.
 * The selector (or collection of selectors) is applied iteratively and recursively,
   finally forming the list of nodes that the batch will roll out, to only the
-  nodes matching the selector / selector collection.
+  nodes matching the selector / selector collection.  This process also returns
+  all the remaining nodes that future batches may select.
 * For the next batch, the process is repeated with its own selector, but
-  all nodes selected by prior batches are excluded from the candidates.
+  the candidates for node selection are limited to the remaining nodes returned
+  by the prior batch.
 
 Here is an example of a selector that would select both 1 unassigned node per
 datacenter that is owned by DFINITY, and 2 healthy nodes doing duty as API

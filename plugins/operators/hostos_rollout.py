@@ -104,31 +104,42 @@ def apply_selectors(
     Take as many nodes from the pool as selectors prescribe, then return info
     on those nodes and a new, reduced pool without those nodes
     """
-    remaining_nodes = [n for n in pool]
-    final: list[NodeInfo] = []
+    final_poses: dict[NodeId, int] = {x["node_id"]: n for n, x in enumerate(pool)}
 
     if "join" in selector:
+        avail = [n for n in pool]
+        final_node_ids: dict[NodeId, None] = {}
         for selector in selector["join"]:
-            selected, remaining_nodes = apply_selectors(
-                remaining_nodes, selector, dcs_owned_by_dfinity, apibns
+            selected, avail = apply_selectors(
+                avail, selector, dcs_owned_by_dfinity, apibns
             )
-            final_node_ids = [n["node_id"] for n in final]
-            final += [s for s in selected if s["node_id"] not in final_node_ids]
-        return final, remaining_nodes
+            for s in selected:
+                final_node_ids[s["node_id"]] = None
+        return [
+            registry_node_to_node_info(pool[final_poses[n]], apibns)
+            for n in final_node_ids
+        ], avail
 
     elif "intersect" in selector:
-        final = [registry_node_to_node_info(n, apibns) for n in remaining_nodes]
-        if len(selector["intersect"]) == 0:
-            remaining_nodes = []
-        else:
-            for selector in selector["intersect"]:
-                selected, remaining_nodes = apply_selectors(
-                    remaining_nodes, selector, dcs_owned_by_dfinity, apibns
-                )
-                selected_node_ids = [n["node_id"] for n in selected]
-                final = [f for f in final if f["node_id"] in selected_node_ids]
-        return final, remaining_nodes
+        selected_node_ids = set(final_poses.keys())
+        for selector in selector["intersect"]:
+            selected, _ = apply_selectors(pool, selector, dcs_owned_by_dfinity, apibns)
+            selected_node_ids.intersection_update(n["node_id"] for n in selected)
+        return [
+            registry_node_to_node_info(pool[pos], apibns)
+            for node_id, pos in final_poses.items()
+            if node_id in selected_node_ids
+        ], [n for n in pool if n["node_id"] not in selected_node_ids]
 
+    elif "not" in selector:
+        not_selected, not_avail = apply_selectors(
+            pool, selector["not"], dcs_owned_by_dfinity, apibns
+        )
+        selected = [registry_node_to_node_info(n, apibns) for n in not_avail]
+        avail = [pool[final_poses[n["node_id"]]] for n in not_selected]
+        return selected, avail
+
+    remaining_nodes = [n for n in pool]
     if assignment := selector.get("assignment"):
         pool = [
             n
@@ -150,6 +161,8 @@ def apply_selectors(
         ]
     if status := selector.get("status"):
         pool = [n for n in pool if status == n["status"]]
+    if datacenter := selector.get("datacenter"):
+        pool = [n for n in pool if datacenter == n["dc_id"]]
     groups: dict[str | None, list[dre.RegistryNode]] = collections.defaultdict(list)
     if group_by := selector.get("group_by"):
         for node in pool:
@@ -169,9 +182,11 @@ def apply_selectors(
                 groups[k] = v[:perc]
     pool = [n for m in groups.values() for n in m]
 
-    node_ids = [n["node_id"] for n in pool]
-    spent = set(node_ids)
-    remaining_nodes = [n for n in remaining_nodes if n["node_id"] not in spent]
+    remaining_nodes = [
+        n
+        for n in remaining_nodes
+        if n["node_id"] not in set([n["node_id"] for n in pool])
+    ]
 
     return [registry_node_to_node_info(n, apibns) for n in pool], remaining_nodes
 
