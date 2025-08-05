@@ -276,7 +276,9 @@ impl RolloutState {
 
         // If the note of the rollout has changed, note that this has been updated.
         if self.note != dag_run.note {
-            debug!(target: tgt, "{}: Rollout has updated note.  Updating", dag_run.dag_run_id);
+            if self.note.is_some() {
+                debug!(target: tgt, "{}: Rollout note has been updated.  Updating", dag_run.dag_run_id);
+            }
             self.note.clone_from(&dag_run.note);
             self.update_count += 1;
         }
