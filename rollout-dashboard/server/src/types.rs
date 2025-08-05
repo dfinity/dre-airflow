@@ -460,65 +460,58 @@ pub mod v2 {
             Others,
         }
 
-        fn deserialize_nodes_per_group<'de, D>(
-            deserializer: D,
-        ) -> Result<Option<NodesPerGroup>, D::Error>
-        where
-            D: serde::de::Deserializer<'de>,
-        {
-            struct CustomVisitor;
+        impl<'de> Deserialize<'de> for NodesPerGroup {
+            fn deserialize<D>(deserializer: D) -> Result<NodesPerGroup, D::Error>
+            where
+                D: serde::de::Deserializer<'de>,
+            {
+                struct CustomVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for CustomVisitor {
-                type Value = Option<NodesPerGroup>;
+                impl<'de> serde::de::Visitor<'de> for CustomVisitor {
+                    type Value = NodesPerGroup;
 
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str(
-                        "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
-                    )
-                }
-
-                fn visit_none<E>(self) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(None)
-                }
-
-                fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    if v < 0 {
-                        return Err(serde::de::Error::invalid_value(
-                            serde::de::Unexpected::Signed(v),
-                            &self,
-                        ));
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str(
+                            "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
+                        )
                     }
-                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
-                }
 
-                fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(Some(NodesPerGroup::Absolute(v.try_into().unwrap())))
-                }
-
-                fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    if !(0.0..=1.0).contains(&v) {
-                        return Err(serde::de::Error::invalid_value(
-                            serde::de::Unexpected::Float(v),
-                            &self,
-                        ));
+                    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        if v < 0 {
+                            return Err(serde::de::Error::invalid_value(
+                                serde::de::Unexpected::Signed(v),
+                                &self,
+                            ));
+                        }
+                        Ok(NodesPerGroup::Absolute(v.try_into().unwrap()))
                     }
-                    Ok(Some(NodesPerGroup::Ratio(ordered_float::OrderedFloat(v))))
+
+                    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Ok(NodesPerGroup::Absolute(v.try_into().unwrap()))
+                    }
+
+                    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        if !(0.0..=1.0).contains(&v) {
+                            return Err(serde::de::Error::invalid_value(
+                                serde::de::Unexpected::Float(v),
+                                &self,
+                            ));
+                        }
+                        Ok(NodesPerGroup::Ratio(ordered_float::OrderedFloat(v)))
+                    }
                 }
+
+                deserializer.deserialize_any(CustomVisitor)
             }
-
-            deserializer.deserialize_any(CustomVisitor)
         }
 
         #[derive(Debug, Clone, PartialEq, Eq)]
@@ -559,7 +552,6 @@ pub mod v2 {
         pub struct NodeSpecifier {
             pub assignment: Option<NodeAssignment>,
             pub owner: Option<NodeOwner>,
-            #[serde(deserialize_with = "deserialize_nodes_per_group")]
             pub nodes_per_group: Option<NodesPerGroup>,
             pub group_by: Option<GroupBy>,
             pub status: Option<NodeStatus>,
@@ -604,50 +596,35 @@ pub mod v2 {
             }
         }
 
-        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-        pub struct NodeAggregator {
-            pub join: Vec<NodeSelectors>,
-        }
-
-        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-        pub struct NodeFilter {
-            pub intersect: Vec<NodeSelectors>,
-        }
-
-        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-        pub struct NodeComplement {
-            pub not: Box<NodeSelectors>,
-        }
-
         #[derive(Deserialize, Debug)]
         #[serde(untagged)]
         pub enum NodeSelectorsOrListOfNodeSelectors {
-            ListOfSelectors(Vec<NodeSpecifier>),
-            NodeAggregator(NodeAggregator),
-            NodeFilter(NodeFilter),
+            NodeFilter { intersect: Vec<NodeSelectors> },
+            NodeAggregator { join: Vec<NodeSelectors> },
+            NodeComplement { not: Box<NodeSelectors> },
             NodeSpecifier(NodeSpecifier),
-            NodeComplement(NodeComplement),
+            ListOfSelectors(Vec<NodeSpecifier>),
         }
 
         impl From<NodeSelectorsOrListOfNodeSelectors> for NodeSelectors {
             fn from(s: NodeSelectorsOrListOfNodeSelectors) -> NodeSelectors {
                 match s {
+                    NodeSelectorsOrListOfNodeSelectors::NodeComplement { not: m } => {
+                        NodeSelectors::NodeComplement { not: m }
+                    }
                     NodeSelectorsOrListOfNodeSelectors::ListOfSelectors(m) => {
-                        NodeSelectors::NodeFilter(NodeFilter {
+                        NodeSelectors::NodeFilter {
                             intersect: m.into_iter().map(NodeSelectors::NodeSpecifier).collect(),
-                        })
+                        }
                     }
-                    NodeSelectorsOrListOfNodeSelectors::NodeAggregator(m) => {
-                        NodeSelectors::NodeAggregator(m)
+                    NodeSelectorsOrListOfNodeSelectors::NodeAggregator { join: m } => {
+                        NodeSelectors::NodeAggregator { join: m }
                     }
-                    NodeSelectorsOrListOfNodeSelectors::NodeFilter(m) => {
-                        NodeSelectors::NodeFilter(m)
+                    NodeSelectorsOrListOfNodeSelectors::NodeFilter { intersect: m } => {
+                        NodeSelectors::NodeFilter { intersect: m }
                     }
                     NodeSelectorsOrListOfNodeSelectors::NodeSpecifier(m) => {
                         NodeSelectors::NodeSpecifier(m)
-                    }
-                    NodeSelectorsOrListOfNodeSelectors::NodeComplement(m) => {
-                        NodeSelectors::NodeComplement(m)
                     }
                 }
             }
@@ -657,9 +634,9 @@ pub mod v2 {
         #[serde(untagged)]
         #[serde(from = "NodeSelectorsOrListOfNodeSelectors")]
         pub enum NodeSelectors {
-            NodeAggregator(NodeAggregator),
-            NodeFilter(NodeFilter),
-            NodeComplement(NodeComplement),
+            NodeFilter { intersect: Vec<NodeSelectors> },
+            NodeAggregator { join: Vec<NodeSelectors> },
+            NodeComplement { not: Box<NodeSelectors> },
             NodeSpecifier(NodeSpecifier),
         }
 
@@ -917,7 +894,7 @@ pub mod v2 {
 
         #[cfg(test)]
         mod tests {
-            use super::{NodeComplement, NodeFilter, NodeSelectors, NodeSpecifier};
+            use super::{NodeSelectors, NodeSpecifier};
 
             #[test]
             fn test_deserialization_of_simple_selectors() {
@@ -938,7 +915,7 @@ pub mod v2 {
                                               "owner": "DFINITY",
                                               "status": "Healthy"}]"#;
                 let res: NodeSelectors = serde_json::from_str(inp).unwrap();
-                let exp = NodeSelectors::NodeFilter(NodeFilter {
+                let exp = NodeSelectors::NodeFilter {
                     intersect: vec![NodeSelectors::NodeSpecifier(
                         NodeSpecifier::default()
                             .unassigned()
@@ -946,7 +923,7 @@ pub mod v2 {
                             .healthy()
                             .dfinity(),
                     )],
-                });
+                };
                 assert_eq!(res, exp)
             }
 
@@ -957,7 +934,7 @@ pub mod v2 {
                                               "datacenter": "hk4",
                                               "status": "Healthy"}}"#;
                 let res: NodeSelectors = serde_json::from_str(inp).unwrap();
-                let exp = NodeSelectors::NodeComplement(NodeComplement {
+                let exp = NodeSelectors::NodeComplement {
                     not: Box::new(NodeSelectors::NodeSpecifier(
                         NodeSpecifier::default()
                             .unassigned()
@@ -965,7 +942,7 @@ pub mod v2 {
                             .healthy()
                             .datacenter("hk4"),
                     )),
-                });
+                };
                 assert_eq!(res, exp);
                 let resstr = serde_json::to_string(&exp).unwrap();
                 let expstr = "{\"not\":{\"assignment\":\"unassigned\",\"owner\":null,\"nodes_per_group\":1,\"group_by\":null,\"status\":\"Healthy\",\"datacenter\":\"hk4\"}}";
@@ -973,17 +950,84 @@ pub mod v2 {
             }
 
             #[test]
-            #[should_panic]
-            fn test_deserialization_of_empty_specifier() {
-                let inp = r#"{}"#;
-                let _: NodeSelectors = serde_json::from_str(inp).unwrap();
+            fn test_serdeserialization_of_intersect_selector() {
+                let inp = r#"{"intersect": [{"owner": "DFINITY"}]}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeFilter {
+                    intersect: vec![NodeSelectors::NodeSpecifier(
+                        NodeSpecifier::default().dfinity(),
+                    )],
+                };
+                assert_eq!(res, exp);
             }
+
+            #[test]
+            fn test_serdeserialization_of_join_selector() {
+                let inp = r#"{"join": [{"owner": "DFINITY"}]}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeAggregator {
+                    join: vec![NodeSelectors::NodeSpecifier(
+                        NodeSpecifier::default().dfinity(),
+                    )],
+                };
+                assert_eq!(res, exp);
+            }
+
+            #[test]
+            fn test_serdeserialization_of_empty_join_selector() {
+                let inp = r#"{"join": []}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeAggregator { join: vec![] };
+                assert_eq!(res, exp);
+            }
+
+            #[test]
+            fn test_serdeserialization_of_empty_intersect_selector() {
+                let inp = r#"{"intersect": []}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeFilter { intersect: vec![] };
+                assert_eq!(res, exp);
+            }
+
+            #[test]
+            fn test_serdeserialization_of_intersect_complement_selector() {
+                let inp = r#"{"intersect": [{"not": {"assignment": "unassigned",
+                                              "nodes_per_group": 1,
+                                              "datacenter": "hk4",
+                                              "status": "Healthy"}}, {"owner": "DFINITY"}]}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeFilter {
+                    intersect: vec![
+                        NodeSelectors::NodeComplement {
+                            not: Box::new(NodeSelectors::NodeSpecifier(
+                                NodeSpecifier::default()
+                                    .unassigned()
+                                    .number(1)
+                                    .healthy()
+                                    .datacenter("hk4"),
+                            )),
+                        },
+                        NodeSelectors::NodeSpecifier(NodeSpecifier::default().dfinity()),
+                    ],
+                };
+                assert_eq!(res, exp);
+                //let resstr = serde_json::to_string(&exp).unwrap();
+                //let expstr = "{\"not\":{\"assignment\":\"unassigned\",\"owner\":null,\"nodes_per_group\":1,\"group_by\":null,\"status\":\"Healthy\",\"datacenter\":\"hk4\"}}";
+                //assert_eq!(expstr, &resstr)
+            }
+
+            // #[test]
+            // #[should_panic]
+            // fn test_deserialization_of_empty_specifier() {
+            //     let inp = r#"{}"#;
+            //     let _: NodeSelectors = serde_json::from_str(inp).unwrap();
+            // }
 
             #[test]
             fn test_deserialization_of_empty_list_of_specifiers() {
                 let inp = r#"[]"#;
-                let res: NodeSelectors = dbg!(serde_json::from_str(inp).unwrap());
-                let exp = NodeSelectors::NodeFilter(NodeFilter { intersect: vec![] });
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeFilter { intersect: vec![] };
                 assert_eq!(res, exp)
             }
         }

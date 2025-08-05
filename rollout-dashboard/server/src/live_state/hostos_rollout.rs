@@ -680,7 +680,9 @@ impl Parser {
 mod tests {
     use std::str::FromStr;
 
-    use rollout_dashboard::types::v2::hostos::{NodeAssignment, NodeSelectors};
+    use rollout_dashboard::types::v2::hostos::{
+        NodeAssignment, NodeOwner, NodeSelectors, NodeSpecifier, NodeStatus, NodesPerGroup,
+    };
 
     use crate::live_state::hostos_rollout::ProvisionalHostOSPlan;
 
@@ -688,7 +690,20 @@ mod tests {
 
     fn parse_small_plan() {
         let pythonplan = include_str!("fixtures/small_python_structure.txt");
-        let _ = ProvisionalHostOSPlan::from_str(pythonplan).unwrap();
+        let theplan = ProvisionalHostOSPlan::from_str(pythonplan).unwrap();
+        let batch = &theplan.canary.unwrap()[1];
+        let actual = &batch.selectors;
+        let expected = NodeSelectors::NodeFilter {
+            intersect: vec![NodeSelectors::NodeSpecifier(NodeSpecifier {
+                assignment: Some(NodeAssignment::Unassigned),
+                owner: Some(NodeOwner::Dfinity),
+                nodes_per_group: Some(NodesPerGroup::Absolute(5)),
+                group_by: None,
+                status: Some(NodeStatus::Healthy),
+                datacenter: None,
+            })],
+        };
+        assert_eq!(expected, *actual);
     }
 
     #[test]
@@ -704,10 +719,10 @@ mod tests {
         let pythonplan = include_str!("fixtures/ginormous_python_structure.txt");
         let data = ProvisionalHostOSPlan::from_str(pythonplan).unwrap();
         let selectors = match &data.clone().canary.unwrap()[0].selectors {
-            NodeSelectors::NodeFilter(filter) => filter.clone(),
+            NodeSelectors::NodeFilter { intersect } => intersect.clone(),
             _ => panic!("The selector was not a filter."),
         };
-        let spec = match &selectors.intersect[0] {
+        let spec = match &selectors[0] {
             NodeSelectors::NodeSpecifier(spec) => spec,
             _ => panic!("The subselector was not a specifier."),
         };
