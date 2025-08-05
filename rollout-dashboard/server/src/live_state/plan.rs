@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use futures::Future;
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Display, str::FromStr, sync::Arc};
@@ -72,7 +72,7 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        debug!(target: LOG_TARGET, "{} associated with task {} of DAG {} run {} is outdated; requerying.", 
+        trace!(target: LOG_TARGET, "{} associated with task {} of DAG {} run {} is outdated; requerying.",
         std::any::type_name::<P>(), associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::from_str(&schedule) {
@@ -144,7 +144,7 @@ where
         };
 
         // Plan is stale or has not yet been retrieved.  Let's go!
-        debug!(target: LOG_TARGET, "{} associated with task {} of DAG {} run {} is outdated; requerying.", 
+        trace!(target: LOG_TARGET, "{} associated with task {} of DAG {} run {} is outdated; requerying.",
         std::any::type_name::<P>(), associated_task_instance.task_id, associated_task_instance.dag_id, associated_task_instance.dag_run_id);
         match fetcher.await {
             Ok(schedule) => match P::deserialize(&mut PythonDeserializer::from_str(&schedule)) {
