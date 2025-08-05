@@ -231,13 +231,13 @@ const HostOsBatchState = {
     skipped: { icon: "⏩", name: "skipped" },
     unknown: { icon: "❓", name: "does not appear in Airflow" },
 };
-export function hostOsBatchStateName(batch: HostOsBatch): String {
+export function hostOsBatchStateName(batch: HostOsBatch | HostOsBatchResponse): String {
     return HostOsBatchState[batch.state].name;
 }
-export function hostOsBatchStateIcon(batch: HostOsBatch): String {
+export function hostOsBatchStateIcon(batch: HostOsBatch | HostOsBatchResponse): String {
     return HostOsBatchState[batch.state].icon;
 }
-export function hostOsBatchStateComment(subnet: HostOsBatch): string {
+export function hostOsBatchStateComment(subnet: HostOsBatch | HostOsBatchResponse): string {
     let s = HostOsBatchState[subnet.state].name;
     if (subnet.comment) {
         s = s + " • " + subnet.comment
@@ -348,8 +348,8 @@ export type HostOsBatch = {
     state: keyof typeof HostOsBatchState;
     comment: String;
     display_url: string;
-    planned_nodes: HostOsNode[];
-    actual_nodes: HostOsNode[] | null;
+    planned_nodes: number;
+    actual_nodes: number | null;
     selectors: HostOsNodeSelectors | null;
 };
 

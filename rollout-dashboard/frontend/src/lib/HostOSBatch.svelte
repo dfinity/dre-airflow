@@ -44,19 +44,19 @@
                         <span
                             class="tooltip"
                             title={formatSelectors(batch.selectors)}
-                            >{batch.planned_nodes.length} nodes planned</span
+                            >{batch.planned_nodes} nodes planned</span
                         >
                     </div>
                     <div class="nodes">
-                        {batch.actual_nodes.length} nodes targeted
+                        {batch.actual_nodes} nodes targeted
                     </div>
-                {:else if batch.actual_nodes !== null && batch.actual_nodes.length > 0}
+                {:else if batch.actual_nodes !== null && batch.actual_nodes > 0}
                     <div class="nodes">
                         <!-- planned and actual are same nodes -->
                         <span
                             class="tooltip"
                             title={formatSelectors(batch.selectors)}
-                            >{batch.actual_nodes.length} nodes targeted</span
+                            >{batch.actual_nodes} nodes targeted</span
                         >
                     </div>
                 {:else}
@@ -65,7 +65,7 @@
                         <span
                             class="tooltip"
                             title={formatSelectors(batch.selectors)}
-                            >{batch.planned_nodes.length} nodes planned</span
+                            >{batch.planned_nodes} nodes planned</span
                         >
                     </div>
                 {/if}

@@ -660,14 +660,14 @@ pub mod v2 {
             /// Links to the specific task within Airflow that this batch is currently performing; else it contains an empty string.
             pub display_url: String,
             /// A count of the nodes planned to be upgraded as part of this batch.
-            pub planned_nodes: Vec<Node>,
+            pub planned_nodes: usize,
             /// A list of selectors used to select which nodes to target for upgrade.
             /// This is None if the selectors are not yet known.
             pub selectors: Option<NodeSelectors>,
             /// A count of the nodes that actually were or are upgraded as part of this batch.
             /// Usually updated after collect_nodes has executed and has obtained a list of nodes.
             /// If that phase of the batch has yet to take place, this is usually null.
-            pub actual_nodes: Option<Vec<Node>>,
+            pub actual_nodes: Option<usize>,
         }
 
         impl From<&BatchResponse> for Batch {
@@ -679,17 +679,9 @@ pub mod v2 {
                     state: other.state.clone(),
                     comment: other.comment.clone(),
                     display_url: other.display_url.clone(),
-                    planned_nodes: other
-                        .planned_nodes
-                        .clone()
-                        .into_iter()
-                        .map(|n| n.into())
-                        .collect(),
+                    planned_nodes: other.planned_nodes.len(),
                     selectors: other.selectors.clone(),
-                    actual_nodes: other
-                        .actual_nodes
-                        .clone()
-                        .map(|ns| ns.into_iter().map(|n| n.into()).collect()),
+                    actual_nodes: other.actual_nodes.clone().map(|ns| ns.len()),
                 }
             }
         }
