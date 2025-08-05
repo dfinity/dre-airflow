@@ -3,6 +3,7 @@ use log::{error, info};
 use reqwest::Url;
 use serde_json::from_str;
 use std::env;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -25,7 +26,17 @@ const PER_REQUEST_TIMEOUT: u64 = 15;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "[{:<5}]  [{}]  {}",
+                record.level(),
+                record.target(),
+                record.args()
+            )
+        })
+        .init();
 
     let max_rollouts = from_str::<usize>(
         env::var("MAX_ROLLOUTS")
