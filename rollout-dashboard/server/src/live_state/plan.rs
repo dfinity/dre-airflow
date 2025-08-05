@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use futures::Future;
-use log::{debug, trace, warn};
+use log::{trace, warn};
 use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Display, str::FromStr, sync::Arc};
