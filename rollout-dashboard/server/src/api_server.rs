@@ -590,7 +590,7 @@ impl ApiServer {
                     })),
                 )
                 .route(
-                    "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number",
+                    "/rollouts/rollout_ic_os_to_mainnet_nodes/{dag_run_id}/stages/{stage_name}/batches/{batch_number}",
                     get(handle!(self, s, |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>|, {
                         let cycle_state = s.state_syncer.get_state().await;
                         match s
@@ -603,7 +603,7 @@ impl ApiServer {
                     }))
                 )
                 .route(
-                    "/rollouts/rollout_ic_os_to_mainnet_nodes/:dag_run_id/stages/:stage_name/batches/:batch_number/sse",
+                    "/rollouts/rollout_ic_os_to_mainnet_nodes/{dag_run_id}/stages/{stage_name}/batches/{batch_number}/sse",
                     get(handle!(self, s, |Path((dag_run_id, stage_name, batch_number)): Path<(String, String, usize)>|, {
                         s.stream_get_hostos_rollout_batch(dag_run_id, stage_name, batch_number).await
                     }))
@@ -621,7 +621,7 @@ impl ApiServer {
                     get(handle!(self, s, { s.get_internal_state().await }))
                 )
                 .route(
-                    "/dags/:dag_id/dag_runs/:dag_run_id",
+                    "/dags/{dag_id}/dag_runs/{dag_run_id}",
                     get(handle!(self, s, |Path((dag_id, dag_run_id)): Path<(String, String)>|, {
                         s
                             .get_dag_run(dag_id.as_str(), dag_run_id.as_str())

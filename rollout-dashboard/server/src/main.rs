@@ -72,7 +72,7 @@ async fn main() -> ExitCode {
         listener,
         server
             .routes()
-            .nest_service("/", ServeDir::new(frontend_static_dir))
+            .fallback_service(ServeDir::new(frontend_static_dir))
             .into_make_service(),
     )
     .with_graceful_shutdown(async move {
