@@ -563,6 +563,7 @@ pub mod v2 {
             pub nodes_per_group: Option<NodesPerGroup>,
             pub group_by: Option<GroupBy>,
             pub status: Option<NodeStatus>,
+            pub datacenter: Option<String>,
         }
 
         #[cfg(test)]
@@ -594,6 +595,13 @@ pub mod v2 {
                     ..self
                 }
             }
+
+            fn datacenter(self, dc_id: &str) -> Self {
+                Self {
+                    datacenter: Some(dc_id.to_string()),
+                    ..self
+                }
+            }
         }
 
         #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -606,6 +614,11 @@ pub mod v2 {
             pub intersect: Vec<NodeSelectors>,
         }
 
+        #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        pub struct NodeComplement {
+            pub not: Box<NodeSelectors>,
+        }
+
         #[derive(Deserialize, Debug)]
         #[serde(untagged)]
         pub enum NodeSelectorsOrListOfNodeSelectors {
@@ -613,6 +626,7 @@ pub mod v2 {
             NodeAggregator(NodeAggregator),
             NodeFilter(NodeFilter),
             NodeSpecifier(NodeSpecifier),
+            NodeComplement(NodeComplement),
         }
 
         impl From<NodeSelectorsOrListOfNodeSelectors> for NodeSelectors {
@@ -632,6 +646,9 @@ pub mod v2 {
                     NodeSelectorsOrListOfNodeSelectors::NodeSpecifier(m) => {
                         NodeSelectors::NodeSpecifier(m)
                     }
+                    NodeSelectorsOrListOfNodeSelectors::NodeComplement(m) => {
+                        NodeSelectors::NodeComplement(m)
+                    }
                 }
             }
         }
@@ -642,6 +659,7 @@ pub mod v2 {
         pub enum NodeSelectors {
             NodeAggregator(NodeAggregator),
             NodeFilter(NodeFilter),
+            NodeComplement(NodeComplement),
             NodeSpecifier(NodeSpecifier),
         }
 
@@ -899,7 +917,7 @@ pub mod v2 {
 
         #[cfg(test)]
         mod tests {
-            use super::{NodeFilter, NodeSelectors, NodeSpecifier};
+            use super::{NodeComplement, NodeFilter, NodeSelectors, NodeSpecifier};
 
             #[test]
             fn test_deserialization_of_simple_selectors() {
@@ -930,6 +948,28 @@ pub mod v2 {
                     )],
                 });
                 assert_eq!(res, exp)
+            }
+
+            #[test]
+            fn test_serdeserialization_of_complement_selector() {
+                let inp = r#"{"not": {"assignment": "unassigned",
+                                              "nodes_per_group": 1,
+                                              "datacenter": "hk4",
+                                              "status": "Healthy"}}"#;
+                let res: NodeSelectors = serde_json::from_str(inp).unwrap();
+                let exp = NodeSelectors::NodeComplement(NodeComplement {
+                    not: Box::new(NodeSelectors::NodeSpecifier(
+                        NodeSpecifier::default()
+                            .unassigned()
+                            .number(1)
+                            .healthy()
+                            .datacenter("hk4"),
+                    )),
+                });
+                assert_eq!(res, exp);
+                let resstr = serde_json::to_string(&exp).unwrap();
+                let expstr = "{\"not\":{\"assignment\":\"unassigned\",\"owner\":null,\"nodes_per_group\":1,\"group_by\":null,\"status\":\"Healthy\",\"datacenter\":\"hk4\"}}";
+                assert_eq!(expstr, &resstr)
             }
 
             #[test]
