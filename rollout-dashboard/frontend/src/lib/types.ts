@@ -267,9 +267,13 @@ export type HostOsNodeFilter = {
     intersect: HostOsNodeSelectors[]
 }
 
-export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeSpecifier;
+export type HostOsNodeComplement = {
+    not: HostOsNodeSelectors
+}
 
-function formatSelector(selector: HostOsNodeSpecifier): string {
+export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeComplement | HostOsNodeSpecifier;
+
+function formatSpecifier(selector: HostOsNodeSpecifier): string {
     let health =
         selector.status === null
             ? " "
@@ -335,8 +339,12 @@ export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
         } else {
             return "( " + (selectors as HostOsNodeAggregator).join.map((s) => formatSelectors(s)).join(" ∪ ") + " )"
         }
+    } else if ((selectors as HostOsNodeComplement).not !== undefined) {
+        {
+            return " — " + formatSelectors((selectors as HostOsNodeAggregator).join[0])
+        }
     }
-    return formatSelector((selectors as HostOsNodeSpecifier));
+    return formatSpecifier((selectors as HostOsNodeSpecifier));
 }
 
 
