@@ -38,7 +38,7 @@ pub(crate) enum ErrorCode {
 
 impl Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{:?}]", self)
+        write!(f, "[{self:?}]")
     }
 }
 
@@ -110,7 +110,7 @@ impl Display for ErrorImpl {
                     "" => "".to_string(),
                     _ => self.message.to_string(),
                 },
-                Some(s) => format!(": {}", s),
+                Some(s) => format!(": {s}"),
             }
         )
     }
@@ -160,8 +160,7 @@ impl<'de> Visitor<'de> for PythonDateVisitor {
         match Self::Value::try_from(v) {
             Ok(vv) => Ok(vv),
             Err(e) => Err(E::custom(format!(
-                "could not parse {} into a valid date/time: {}",
-                v, e
+                "could not parse {v} into a valid date/time: {e}"
             ))),
         }
     }

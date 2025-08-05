@@ -98,7 +98,7 @@ impl From<RolloutDataGatherError> for (reqwest::StatusCode, String) {
         match f {
             RolloutDataGatherError::AirflowError(e) => e.into(),
             RolloutDataGatherError::CyclicDependency(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", f))
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{f}"))
             }
         }
     }
@@ -200,7 +200,7 @@ impl From<&RolloutState> for unstable::FlowCacheResponse {
             linearized_task_instances: s
                 .task_instances
                 .iter()
-                .flat_map(|(_, s)| s.iter().map(|(_, v)| v.clone()))
+                .flat_map(|(_, s)| s.values().cloned())
                 .collect(),
             last_update_time: s.last_update_time,
             update_count: s.update_count,
@@ -264,7 +264,7 @@ impl RolloutState {
         let linearized_tasks: Vec<TaskInstancesResponseItem> = sorter.sort_instances(
             self.task_instances
                 .iter()
-                .flat_map(|(_, tasks)| tasks.iter().map(|(_, task)| task.clone())),
+                .flat_map(|(_, tasks)| tasks.values().cloned()),
         );
 
         let tgt = &format!("{}::{}::{}", LOG_TARGET, dag_run.dag_id, "UpdaterState");
@@ -393,7 +393,7 @@ impl RolloutStates {
         self.0.get(v)
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<(DagID, DagRunID), RolloutState> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, (DagID, DagRunID), RolloutState> {
         self.0.iter()
     }
 }
@@ -577,7 +577,7 @@ impl AirflowStateSyncer<Live> {
                                 .incrementally_detect_dag_updates(&self.airflow_api, &dag_id)
                                 .await?;
 
-                            debug!(target: &format!("{}::{}", LOG_TARGET, dag_id), "Retrieving DAG runs and tasks.");
+                            debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG runs and tasks.");
 
                             let dis = dag_id.to_string();
                             Ok((
@@ -837,8 +837,7 @@ impl AirflowStateSyncer<Live> {
                         }
                         SyncCycleState::Error(err) => {
                             error!(
-                                target: tgt, "During sync_state within periodically_sync_state: {}",
-                               err
+                                target: tgt, "During sync_state within periodically_sync_state: {err}"
                             );
                             errored = true;
                         }

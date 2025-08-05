@@ -47,7 +47,7 @@ impl TaskInstanceTopologicalSorter {
                 true => {
                     if !ts.is_empty() {
                         return Err(CyclicDependencyError {
-                            message: format!("cyclic dependencies on tasks {:?}", ts),
+                            message: format!("cyclic dependencies on tasks {ts:?}"),
                         });
                     }
                     break;
@@ -89,8 +89,7 @@ impl TaskInstanceTopologicalSorter {
             }) {
                 Ok(pos) => {
                     panic!(
-                        "Task instance {} {:?} cannot be already in pos {}",
-                        taskid, mapindex, pos
+                        "Task instance {taskid} {mapindex:?} cannot be already in pos {pos}"
                     )
                 } // element already in vector @ `pos`
                 Err(pos) => tasklist.insert(pos, rctaskinstance),

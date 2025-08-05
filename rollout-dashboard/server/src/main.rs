@@ -40,12 +40,12 @@ async fn main() -> ExitCode {
 
     let max_rollouts = from_str::<usize>(
         env::var("MAX_ROLLOUTS")
-            .unwrap_or(format!("{}", MAX_ROLLOUTS))
+            .unwrap_or(format!("{MAX_ROLLOUTS}"))
             .as_str(),
     )
     .unwrap();
     let refresh_interval = from_str::<u64>(
-        &env::var("REFRESH_INTERVAL").unwrap_or(format!("{}", BACKEND_REFRESH_UPDATE_INTERVAL)),
+        &env::var("REFRESH_INTERVAL").unwrap_or(format!("{BACKEND_REFRESH_UPDATE_INTERVAL}")),
     )
     .unwrap();
     let backend_host = env::var("BACKEND_HOST").unwrap_or("127.0.0.1:4174".to_string());
@@ -55,7 +55,7 @@ async fn main() -> ExitCode {
     let frontend_static_dir = env::var("FRONTEND_STATIC_DIR").unwrap_or(".".to_string());
     let airflow_timeout = Duration::from_secs(
         from_str::<u64>(
-            &env::var("PER_REQUEST_TIMEOUT").unwrap_or(format!("{}", PER_REQUEST_TIMEOUT)),
+            &env::var("PER_REQUEST_TIMEOUT").unwrap_or(format!("{PER_REQUEST_TIMEOUT}")),
         )
         .unwrap(),
     );
@@ -93,7 +93,7 @@ async fn main() -> ExitCode {
     {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            error!(target: "main", "Error serving: {}", err);
+            error!(target: "main", "Error serving: {err}");
             ExitCode::FAILURE
         }
     };

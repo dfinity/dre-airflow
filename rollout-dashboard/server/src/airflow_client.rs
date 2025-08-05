@@ -266,7 +266,7 @@ where
     } else {
         match usize::try_from(s) {
             Ok(ss) => Ok(Some(ss)),
-            Err(e) => Err(D::Error::custom(format!("cannot fit in usize: {}", e))),
+            Err(e) => Err(D::Error::custom(format!("cannot fit in usize: {e}"))),
         }
     }
 }
@@ -570,10 +570,10 @@ impl<'a> EventLogsResponseFilters<'a> {
             self.run_id.as_ref().map(|v| ("run_id", (*v).clone())),
             self.map_index
                 .as_ref()
-                .map(|v| ("map_index", format!("{}", v).to_owned())),
+                .map(|v| ("map_index", format!("{v}").to_owned())),
             self.try_number
                 .as_ref()
-                .map(|v| ("try_number", format!("{}", v).to_owned())),
+                .map(|v| ("try_number", format!("{v}").to_owned())),
             self.event.as_ref().map(|v| ("event", (*v).clone())),
             self.owner.as_ref().map(|v| ("owner", (*v).clone())),
             self.before
@@ -638,7 +638,7 @@ pub enum AirflowError {
 
 impl From<reqwest::Error> for AirflowError {
     fn from(err: reqwest::Error) -> AirflowError {
-        let mut explanation = format!("Cannot contact Airflow: {}", err);
+        let mut explanation = format!("Cannot contact Airflow: {err}");
         let mut err = err.source();
         loop {
             match err {
@@ -656,12 +656,12 @@ impl From<reqwest::Error> for AirflowError {
 impl From<AirflowError> for (StatusCode, String) {
     fn from(e: AirflowError) -> (reqwest::StatusCode, String) {
         match e {
-            AirflowError::StatusCode(c) => (c, format!("{}", e)),
-            AirflowError::ReqwestError(_) => (StatusCode::BAD_GATEWAY, format!("{}", e)),
+            AirflowError::StatusCode(c) => (c, format!("{e}")),
+            AirflowError::ReqwestError(_) => (StatusCode::BAD_GATEWAY, format!("{e}")),
             AirflowError::AuthenticationError(_)
             | AirflowError::DeserializeError { .. }
             | AirflowError::JSONDecodeError { .. } => {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e))
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"))
             }
         }
     }
@@ -670,23 +670,21 @@ impl From<AirflowError> for (StatusCode, String) {
 impl Display for AirflowError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ReqwestError(s) => write!(f, "{}", s),
-            Self::StatusCode(s) => write!(f, "Unexpected response code {} from Airflow", s),
+            Self::ReqwestError(s) => write!(f, "{s}"),
+            Self::StatusCode(s) => write!(f, "Unexpected response code {s} from Airflow"),
             Self::JSONDecodeError { explanation, .. } => {
                 write!(
                     f,
-                    "Error decoding JSON / UTF-8 from Airflow response: {}",
-                    explanation
+                    "Error decoding JSON / UTF-8 from Airflow response: {explanation}"
                 )
             }
             Self::DeserializeError { explanation, .. } => {
                 write!(
                     f,
-                    "Error deserializing structure from Airflow response: {}",
-                    explanation
+                    "Error deserializing structure from Airflow response: {explanation}"
                 )
             }
-            Self::AuthenticationError(s) => write!(f, "{}", s),
+            Self::AuthenticationError(s) => write!(f, "{s}"),
         }
     }
 }
@@ -727,7 +725,7 @@ where
                         Some(_) => "&",
                         None => "?",
                     }
-                    + format!("{}={}", k, v).as_str();
+                    + format!("{k}={v}").as_str();
             }
         };
         // Then the order by.
@@ -769,7 +767,7 @@ where
             Err(e) => return Err(e),
         };
         let batch_len = batch.len();
-        trace!(target: "airflow_client::paged_get", "Got {} before discarding", batch_len);
+        trace!(target: "airflow_client::paged_get", "Got {batch_len} before discarding");
         results.merge(batch);
         trace!(target: "airflow_client::paged_get",
             "Now we have {} objects after retrieving with offset {:?}",
@@ -810,8 +808,7 @@ where
 {
     let mut results = T::default();
     trace!(target: "airflow_client::paged_post",
-        "posting to and retrieving {}",
-        url,
+        "posting to and retrieving {url}",
     );
 
     let batch = match poster(url, content).await {
@@ -832,7 +829,7 @@ where
         Err(e) => return Err(e),
     };
     let batch_len = batch.len();
-    trace!(target: "airflow_client::paged_post", "Got {}", batch_len);
+    trace!(target: "airflow_client::paged_post", "Got {batch_len}");
     results.merge(batch);
     trace!(target: "airflow_client::paged_post",
         "Now we have {} objects after retrieving",
@@ -866,10 +863,10 @@ impl Display for AirflowClientCreationError {
             "Cannot create Airflow client: {}",
             match self {
                 Self::Reqwest(e) => {
-                    format!("{}", e)
+                    format!("{e}")
                 }
                 Self::Utf8(e) => {
-                    format!("{}", e)
+                    format!("{e}")
                 }
             }
         )
@@ -888,16 +885,16 @@ fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowEr
         Ok(decoded) => decoded,
         Err(deser_error) => match String::from_utf8(bytes.to_vec()) {
             Ok(text) => {
-                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to JSON ({})\n{}", deser_error, text);
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to JSON ({deser_error})\n{text}");
                 return Err(AirflowError::JSONDecodeError {
-                    explanation: format!("{}", deser_error),
+                    explanation: format!("{deser_error}"),
                     payload: text,
                 });
             }
             Err(decode_error) => {
-                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to UTF-8 ({})", decode_error);
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to UTF-8 ({decode_error})");
                 return Err(AirflowError::JSONDecodeError {
-                    explanation: format!("{}: {}", deser_error, decode_error),
+                    explanation: format!("{deser_error}: {decode_error}"),
                     payload: "".to_string(),
                 });
             }
@@ -967,7 +964,7 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                debug!(target: "airflow_client::http_client", "GET {} HTTP {}", url, status);
+                debug!(target: "airflow_client::http_client", "GET {url} HTTP {status}");
                 match status {
                     reqwest::StatusCode::OK => {
                         let bytes = match resp.bytes().await {
@@ -980,7 +977,7 @@ impl AirflowClient {
                     }
                     reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
                         if attempt_login {
-                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {}", status);
+                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status}");
                             match self._login().await {
                                 Ok(..) => (),
                                 Err(err) => return Err(err),
@@ -1001,7 +998,7 @@ impl AirflowClient {
             }
             Err(err) => Err(AirflowError::from(err)),
         };
-        trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
+        trace!(target: "airflow_client::http_client", "Result: {res:#?}");
         res
     }
 
@@ -1031,7 +1028,7 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                debug!(target: "airflow_client::http_client", "POST {} HTTP {}", url, status);
+                debug!(target: "airflow_client::http_client", "POST {url} HTTP {status}");
                 match status {
                     reqwest::StatusCode::OK => {
                         let bytes = match resp.bytes().await {
@@ -1064,7 +1061,7 @@ impl AirflowClient {
             }
             Err(err) => Err(AirflowError::from(err)),
         };
-        trace!(target: "airflow_client::http_client", "Result: {:#?}", res);
+        trace!(target: "airflow_client::http_client", "Result: {res:#?}");
         res
     }
 
@@ -1078,8 +1075,7 @@ impl AirflowClient {
                     Ok(text) => text,
                     Err(err) => {
                         return Err(AirflowError::AuthenticationError(format!(
-                            "Error retrieving text that contains CSRF token: {}",
-                            err
+                            "Error retrieving text that contains CSRF token: {err}"
                         )));
                     }
                 },
@@ -1124,16 +1120,14 @@ impl AirflowClient {
                     Ok(text) => text,
                     Err(err) => {
                         return Err(AirflowError::AuthenticationError(format!(
-                            "Error retrieving logged-in cookie: {}",
-                            err
+                            "Error retrieving logged-in cookie: {err}"
                         )));
                     }
                 },
                 _ => {
                     let (status, text) = (resp.status(), resp.text().await);
                     return Err(AirflowError::AuthenticationError(format!(
-                        "Server rejected login with status {} and text {:?}",
-                        status, text
+                        "Server rejected login with status {status} and text {text:?}"
                     )));
                 }
             },
@@ -1187,7 +1181,7 @@ impl AirflowClient {
         updated_at_lte: Option<DateTime<Utc>>,
         updated_at_gte: Option<DateTime<Utc>>,
     ) -> Result<DagRunsResponse, AirflowError> {
-        let mut url = format!("dags/{}/dagRuns", dag_id);
+        let mut url = format!("dags/{dag_id}/dagRuns");
         url = add_updated_parameters(url, updated_at_lte, updated_at_gte);
         _paged_get(
             url,
@@ -1206,12 +1200,12 @@ impl AirflowClient {
         dag_id: &str,
         dag_run_id: &str,
     ) -> Result<DagRunsResponseItem, AirflowError> {
-        let url = format!("dags/{}/dagRuns/{}", dag_id, dag_run_id);
+        let url = format!("dags/{dag_id}/dagRuns/{dag_run_id}");
         let json_value = self._get_logged_in(url).await?;
         match <DagRunsResponseItem>::deserialize(json_value.clone()) {
             Ok(deserialized) => Ok(deserialized),
             Err(e) => {
-                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({})\n{:?}", e, json_value);
+                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({e})\n{json_value:?}");
                 Err(AirflowError::DeserializeError {
                     explanation: format!(
                         "Could not deserialize {}: {}",
@@ -1233,7 +1227,7 @@ impl AirflowClient {
         offset: usize,
         filters: TaskInstanceRequestFilters,
     ) -> Result<TaskInstancesResponse, AirflowError> {
-        let mut url = format!("dags/{}/dagRuns/{}/taskInstances", dag_id, dag_run_id);
+        let mut url = format!("dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances");
         url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
         url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
         url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
@@ -1290,7 +1284,7 @@ impl AirflowClient {
     /// Return Tasks for a DAG run.
     pub async fn tasks(&self, dag_id: &str) -> Result<TasksResponse, AirflowError> {
         _paged_get(
-            format!("dags/{}/tasks", dag_id),
+            format!("dags/{dag_id}/tasks"),
             None,
             None,
             MAX_BATCH_SIZE,
@@ -1309,10 +1303,9 @@ impl AirflowClient {
         xcom_key: &str,
     ) -> Result<XComEntryResponse, AirflowError> {
         let suburl = format!(
-            "dags/{}/dagRuns/{}/taskInstances/{}/xcomEntries/{}",
-            dag_id, dag_run_id, task_instance_id, xcom_key
+            "dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_instance_id}/xcomEntries/{xcom_key}"
         ) + match map_index {
-            Some(i) => format!("&map_index={}", i),
+            Some(i) => format!("&map_index={i}"),
             None => "".to_string(),
         }
         .as_str();

@@ -66,7 +66,7 @@ impl AirflowIncrementalLogInspector {
         airflow_api: &AirflowClient,
         dag_id: &DagID,
     ) -> Result<(Self, DagRunUpdatesRequired), AirflowError> {
-        let tgt = &format!("{}::{}", LOG_TARGET, dag_id);
+        let tgt = &format!("{LOG_TARGET}::{dag_id}");
         let mut task_instances_to_update_per_dag = DagRunUpdatesRequired::new();
 
         let mut last_event_log_update = self.last_event_log_update;
@@ -135,7 +135,7 @@ impl AirflowIncrementalLogInspector {
                     || (event.event == "failed" && event.extra.is_some())
                     || (event.event == "clear" && event.extra.is_some());
 
-                trace!(target: tgt, "Processing event:\n{:#?}\n", event);
+                trace!(target: tgt, "Processing event:\n{event:#?}\n");
 
                 match task_instances_to_update_per_dag
                     .dag_runs
@@ -145,13 +145,13 @@ impl AirflowIncrementalLogInspector {
                     Vacant(ventry) => {
                         ventry.insert(match (&event.task_id, force_refresh_all_tasks) {
                 (Some(t), false) => {
-                    trace!(target: tgt, "{}: initializing plan with a request to update task {}", event_run_id, t);
+                    trace!(target: tgt, "{event_run_id}: initializing plan with a request to update task {t}");
                     let mut init = HashSet::new();
                     init.insert(t.clone());
                     DagRunUpdateType::SomeTaskInstances(init)
                 },
                 _ => {
-                    trace!(target: tgt, "{}: initializing plan with a request to update all tasks", event_run_id);
+                    trace!(target: tgt, "{event_run_id}: initializing plan with a request to update all tasks");
                     DagRunUpdateType::AllTaskInstances
                 },
             });
@@ -162,14 +162,14 @@ impl AirflowIncrementalLogInspector {
                             if let DagRunUpdateType::SomeTaskInstances(thevec) = entry.get_mut() {
                                 let ts = t.to_string();
                                 if !thevec.contains(&ts) {
-                                    trace!(target: tgt, "{}: adding task {} to plan", event_run_id, ts);
+                                    trace!(target: tgt, "{event_run_id}: adding task {ts} to plan");
                                     thevec.insert(ts);
                                 }
                             }
                         }
                         _ => {
                             if let DagRunUpdateType::SomeTaskInstances(_) = entry.get() {
-                                trace!(target: tgt, "{}: switching plan to request to update all tasks", event_run_id);
+                                trace!(target: tgt, "{event_run_id}: switching plan to request to update all tasks");
                                 entry.insert(DagRunUpdateType::AllTaskInstances);
                             }
                         }
@@ -188,8 +188,7 @@ impl AirflowIncrementalLogInspector {
                 && !task_instances_to_update_per_dag.dag_runs.is_empty()
             {
                 debug!(
-                    target: tgt, "Setting incremental refresh date to {:?}",
-                    last_event_log_update
+                    target: tgt, "Setting incremental refresh date to {last_event_log_update:?}"
                 )
             };
         } else {
@@ -209,7 +208,7 @@ impl AirflowIncrementalLogInspector {
                 last_event_log_update = Some(event.when);
             }
             if !event_logs.event_logs.is_empty() {
-                debug!(target: tgt, "Setting initial refresh date to {:?}", last_event_log_update);
+                debug!(target: tgt, "Setting initial refresh date to {last_event_log_update:?}");
             }
         }
 

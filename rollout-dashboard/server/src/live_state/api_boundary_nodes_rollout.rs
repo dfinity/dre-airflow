@@ -32,7 +32,7 @@ where
 {
     match opt {
         None => fallback.to_string(),
-        Some(v) => format!("{}{}", prefix, v),
+        Some(v) => format!("{prefix}{v}"),
     }
 }
 
@@ -72,7 +72,7 @@ fn annotate_batch_state(
             url.query_pairs_mut().append_pair("tab", "logs");
             if let Some(idx) = task_instance.map_index {
                 url.query_pairs_mut()
-                    .append_pair("map_index", format!("{}", idx).as_str());
+                    .append_pair("map_index", format!("{idx}").as_str());
             };
             url.to_string()
         };
@@ -150,7 +150,7 @@ impl Parser {
         // * for each and every known up-to-date Airflow task in the cache
         //   (always processed in topological order),
         for task_instance in linearized_tasks.into_iter() {
-            let tgt = &format!("{}::batch_state", LOG_TARGET);
+            let tgt = &format!("{LOG_TARGET}::batch_state");
 
             // * deduce the rollout plan, if available,
             // * mark the rollout as having problems or errors depending on what
