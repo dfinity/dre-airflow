@@ -58,25 +58,6 @@ macro_rules! no_content {
     ($($arg:tt)*) => {{ http_error!(StatusCode::NO_CONTENT, "") }};
 }
 
-macro_rules! sse {
-    ($ex:tt) => {
-        Sse::new({
-            try_stream! {$ex}
-        })
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(Duration::from_secs(5))
-                .text("keepalive"),
-        )
-    };
-}
-
-#[derive(Deserialize)]
-struct SseHandlerParameters {
-    #[serde(default, deserialize_with = "empty_value_as_true")]
-    incremental: Option<bool>,
-}
-
 struct DisconnectionGuard {}
 
 impl Default for DisconnectionGuard {
@@ -90,6 +71,31 @@ impl Drop for DisconnectionGuard {
     fn drop(&mut self) {
         debug!(target: "server::sse", "Client disconnected.");
     }
+}
+
+macro_rules! sse {
+    ($ex:tt) => {
+        Sse::new({
+            try_stream! {
+                // Set up something that will be dropped (thus log) when SSE is disconnected.
+                let guard = DisconnectionGuard::default();
+                $ex
+                // Drop the guard, logging the disconnection.
+                drop(guard)
+            }
+        })
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keepalive"),
+        )
+    };
+}
+
+#[derive(Deserialize)]
+struct SseHandlerParameters {
+    #[serde(default, deserialize_with = "empty_value_as_true")]
+    incremental: Option<bool>,
 }
 
 pub(crate) struct ApiServer {
@@ -322,7 +328,6 @@ impl ApiServer {
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
         let mut watcher = WatchStream::new(self.state_syncer.subscribe_to_syncer_updates());
-        let _ = DisconnectionGuard::default();
         // Set an initial message to diff the first broadcast message against.
         let mut last_rollout_data: SyncCycleState = SyncCycleState::Initial;
         let mut last_engine_state: v1::RolloutEngineState = v1::RolloutEngineState::Active;
@@ -361,7 +366,6 @@ impl ApiServer {
         delta_support: bool,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
         // Set up something that will be dropped (thus log) when SSE is disconnected.
-        let _ = DisconnectionGuard::default();
         // Stream status updates.
         let mut stream = WatchStream::new(self.state_syncer.subscribe_to_syncer_updates());
         // Set an initial message to diff the first broadcast message against.
@@ -528,8 +532,6 @@ impl ApiServer {
             }
         }
 
-        // Set up something that will be dropped (thus log) when SSE is disconnected.
-        let _ = DisconnectionGuard::default();
         // Stream status updates.
         let mut stream = WatchStream::new(self.state_syncer.subscribe_to_syncer_updates());
         // Set an initial message to diff the first broadcast message against.
@@ -585,7 +587,6 @@ impl ApiServer {
                 .route(
                     "/sse",
                     get(handle!(self, s, |options: Query<SseHandlerParameters>|, {
-                        let options: SseHandlerParameters = options.0;
                         s.stream_state(options.incremental.unwrap_or(true))
                     })),
                 )

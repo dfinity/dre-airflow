@@ -18,11 +18,10 @@ COPY frontend/public ./public
 COPY frontend/src ./src
 RUN npm run build
 
-FROM docker.io/debian:bookworm
+FROM quay.io/fedora/fedora-minimal:42
 WORKDIR /
 COPY --from=rust /usr/src/rollout-dashboard/rollout-dashboard /rollout-dashboard
 COPY --from=node /workdir/dist/client /static
-RUN apt-get update && apt-get upgrade -y && apt install -y openssl ca-certificates
 
 EXPOSE 4174
 ENV FRONTEND_STATIC_DIR=static
