@@ -112,6 +112,11 @@
         padding: 0.6em;
         flex-grow: 1;
     }
+    li.batch > a:hover,
+    li.batch > a:focus {
+        background-color: var(--color-secondary-200);
+        border-radius: var(--radius-lg);
+    }
     .hostos_node_batch_state {
         display: grid;
         grid-template-columns: min-content auto;
