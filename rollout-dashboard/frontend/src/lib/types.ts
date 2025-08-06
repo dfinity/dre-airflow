@@ -334,7 +334,6 @@ export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
             let s = "( ";
             for (const [index, selector] of (selectors as HostOsNodeFilter).intersect.entries()) {
                 if (index != 0 && (selector as HostOsNodeComplement).not !== undefined) {
-                    console.log("bingo");
                     s = s + " − " + formatSelectors((selector as HostOsNodeComplement).not);
                 } else if (index == 0) {
                     s = s + formatSelectors(selector);

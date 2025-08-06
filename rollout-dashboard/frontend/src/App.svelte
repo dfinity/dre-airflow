@@ -1,13 +1,8 @@
 <script module>
-  import { Router, createRouter } from "@roxi/routify";
-  import routes from "../.routify/routes.default.js";
-  const router = createRouter({
-    routes,
-    urlRewrite: {
-      toExternal: (url) => `#${url}`, // prepend URLs with #
-      toInternal: (url) => url.replace(/^.+#/, ""), // remove leading #
-    },
-  });
+</script>
+
+<script lang="ts">
+  import "./app.css";
   import {
     FooterCopyright,
     Footer,
@@ -15,13 +10,84 @@
     FooterLinkGroup,
     FooterBrand,
   } from "flowbite-svelte";
+
+  import Index from "./lib/index.svelte";
+  import HostOsBatchDetail from "./lib/HostOSBatchDetail.svelte";
+  import { writable, type Writable } from "svelte/store";
+  import NotFound from "./lib/NotFound.svelte";
+
+  type index_route = { name: "index" };
+  type not_found = { name: "NotFound" };
+  type host_os_batch_detail_route = {
+    name: "HostOsBatchDetail";
+    dag_run_id: string;
+    stage_name: string;
+    batch_number: number;
+  };
+  type routes = index_route | host_os_batch_detail_route | not_found;
+
+  function determineRoute(fragment: string): routes | null {
+    if (fragment == "" || fragment == "#/" || fragment === "#") {
+      return { name: "index" };
+    }
+
+    let m = fragment.match(
+      /#\/rollouts\/rollout_ic_os_to_mainnet_nodes\/(?<dag_run_id>.+)\/stages\/(?<stage_name>.+)\/batches\/(?<batch_number>.+)/,
+    );
+    if (m !== null && m.groups !== undefined) {
+      return {
+        name: "HostOsBatchDetail",
+        dag_run_id: decodeURIComponent(m.groups.dag_run_id),
+        stage_name: decodeURIComponent(m.groups.stage_name),
+        batch_number: parseInt(decodeURIComponent(m.groups.batch_number)),
+      };
+    }
+    return { name: "NotFound" };
+  }
+  let url = new URL(document.URL);
+  let selectedRoute = writable(determineRoute(url.hash)) as Writable<routes>;
+
+  // @ts-ignore
+  navigation.addEventListener("navigate", (e) => {
+    // Get the path for the URL being navigated to
+    let u = new URL(e.destination.url);
+    let path = u.pathname;
+    if (path !== "/") return;
+
+    let fragment = u.hash;
+
+    console.log(`About to navigate to ${path} with fragment ${fragment}`);
+    let possible_route = determineRoute(fragment);
+    console.log(possible_route);
+    if (possible_route) {
+      e.intercept({
+        handler: function () {
+          selectedRoute.set(possible_route);
+        },
+      });
+    }
+
+    // If it's not covered by your SPA, return and it works as normal
+    // For me, this means if it's not part of my admin path
+    // if (!url.startsWith("/admin")) return;
+  });
 </script>
 
-<script lang="ts">
-  import "./app.css";
-</script>
-
-<Router {router} />
+<div>
+  {#key $selectedRoute}
+    {#if $selectedRoute.name === "index"}
+      <Index />
+    {:else if $selectedRoute.name === "HostOsBatchDetail"}
+      <HostOsBatchDetail
+        dag_run_id={$selectedRoute.dag_run_id}
+        stage_name={$selectedRoute.stage_name}
+        batch_number={$selectedRoute.batch_number}
+      />
+    {:else}
+      <NotFound />
+    {/if}
+  {/key}
+</div>
 
 <Footer footerType="logo">
   <div class="sm:flex sm:items-center sm:justify-between">

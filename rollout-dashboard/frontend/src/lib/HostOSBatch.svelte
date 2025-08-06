@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { A } from "flowbite-svelte";
     import Time from "svelte-time";
     import {
         type HostOsBatch,
@@ -8,7 +7,6 @@
         formatSelectors,
     } from "./types";
     import { cap } from "./lib";
-    import { url } from "@roxi/routify";
     interface Props {
         dag_run_id: string;
         stage_name: string;
@@ -18,14 +16,7 @@
 
     let { dag_run_id, stage_name, batch_number, batch }: Props = $props();
 
-    const detailsUrl = $url(
-        "../rollouts/rollout_ic_os_to_mainnet_nodes/[dag_run_id]/stages/[stage_name]/batches/[batch_number]",
-        {
-            dag_run_id: dag_run_id,
-            stage_name: stage_name,
-            batch_number: batch_number,
-        },
-    );
+    const detailsUrl = `#/rollouts/rollout_ic_os_to_mainnet_nodes/${encodeURIComponent(dag_run_id)}/stages/${encodeURIComponent(stage_name)}/batches/${encodeURIComponent(batch_number)}`;
 </script>
 
 <li class="rounded-lg batch batch-{batch_number}">
