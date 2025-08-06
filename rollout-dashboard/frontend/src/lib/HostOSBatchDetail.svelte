@@ -328,9 +328,10 @@
                                 >{#if node["Assignment"] != "—" && node["Assignment"] != "API boundary"}<a
                                         class="oneliner text-secondary-600"
                                         target="_blank"
-                                        href="https://dashboard.internetcomputer.org/network/subnets/${node[
+                                        href="https://dashboard.internetcomputer.org/network/subnets/{node[
                                             'Assignment'
-                                        ]}">{node["Assignment"].split("-")}</a
+                                        ]}"
+                                        >{node["Assignment"].split("-")[0]}</a
                                     >{:else}{node["Assignment"].split(
                                         "-",
                                     )}{/if}</TableBodyCell
