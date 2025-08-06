@@ -146,15 +146,24 @@ def yaml_to_ApiBoundaryNodeRolloutPlanSpec(s: str) -> ApiBoundaryNodeRolloutPlan
     return cast(ApiBoundaryNodeRolloutPlanSpec, d)
 
 
-class NodeSelector(TypedDict, total=False):
-    assignment: Literal["unassigned"] | Literal["assigned"] | Literal["API boundary"]
-    owner: Literal["DFINITY"] | Literal["others"]
-    group_by: Literal["datacenter"] | Literal["subnet"]
-    status: NodeStatus
-    # Either a literal number of nodes or a float 0-1 for a percentage of nodes.
-    nodes_per_group: int | float
-    join: list["NodeSelector"]
-    intersect: list["NodeSelector"]
+NodeSelector = TypedDict(
+    "NodeSelector",
+    {
+        "assignment": Literal["unassigned"]
+        | Literal["assigned"]
+        | Literal["API boundary"],
+        "owner": Literal["DFINITY"] | Literal["others"],
+        "group_by": Literal["datacenter"] | Literal["subnet"],
+        "datacenter": DCId,
+        "status": NodeStatus,
+        # Either a literal number of nodes or a float 0-1 for a percentage of nodes.
+        "nodes_per_group": int | float,
+        "join": list["NodeSelector"],
+        "intersect": list["NodeSelector"],
+        "not": "NodeSelector",
+    },
+    total=False,
+)
 
 
 def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
@@ -199,11 +208,17 @@ def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
         "the status key is not either one of Healthy, Degraded or Down"
     )
     remaining_keys = set(specifier.keys()) - set(
-        ["assignment", "owner", "group_by", "status", "nodes_per_group"]
+        ["assignment", "owner", "group_by", "status", "nodes_per_group", "datacenter"]
     )
     assert not remaining_keys, f"extraneous keys found in selector: {remaining_keys}"
-    assert "assignment" in specifier or "owner" in specifier or "status" in specifier, (
-        "illegal selector -- has no owner, assignment or status selection criteria"
+    assert (
+        "assignment" in specifier
+        or "owner" in specifier
+        or "status" in specifier
+        or "datacenter" in specifier
+    ), (
+        "illegal selector -- has no owner, assignment, datacenter or status selection"
+        " criteria"
     )
 
     return cast(NodeSelector, specifier)
@@ -220,16 +235,24 @@ def to_selectors(
         if "join" in selectors:
             remaining_keys = set(selectors.keys()) - set(["join"])
             assert not remaining_keys, (
-                f"extraneous keys found in join selector: {remaining_keys}"
+                f"extraneous keys found in `join` selector: {remaining_keys}"
             )
             return {"join": [to_selectors(s) for s in selectors["join"]]}
 
         if "intersect" in selectors:
             remaining_keys = set(selectors.keys()) - set(["intersect"])
             assert not remaining_keys, (
-                f"extraneous keys found in intersect selector: {remaining_keys}"
+                f"extraneous keys found in `intersect` selector: {remaining_keys}"
             )
             return {"intersect": [to_selectors(s) for s in selectors["intersect"]]}
+        if "not" in selectors:
+            remaining_keys = set(selectors.keys()) - set(["not"])
+            assert not remaining_keys, (
+                f"extraneous keys found in `not` selector: {remaining_keys}"
+            )
+            return {
+                "not": to_selectors(selectors["not"]),
+            }
 
         return to_specifier(selectors)
 

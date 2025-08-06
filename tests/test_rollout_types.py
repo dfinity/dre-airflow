@@ -178,3 +178,36 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
             ValueError,
             lambda: rollout_types.yaml_to_HostOSRolloutPlanSpec(inp),
         )
+
+    def test_complement(self) -> None:
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors:
+                    intersect:
+                    - join:
+                            - assignment: assigned
+                              group_by: subnet
+                              status: Healthy
+                              nodes_per_group: 1
+                            - assignment: API boundary
+                              status: Healthy
+                              nodes_per_group: 1
+                    - not:
+                        datacenter: hk4
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
+        stages = p["stages"]
+        assert (
+            stages["main"]["selectors"]["intersect"][0]["join"][0]["nodes_per_group"]
+            == 1
+        )
+        assert (
+            stages["main"]["selectors"]["intersect"][0]["join"][1]["assignment"]
+            == "API boundary"
+        )
+        assert stages["main"]["selectors"]["intersect"][1]["not"]["datacenter"] == "hk4"

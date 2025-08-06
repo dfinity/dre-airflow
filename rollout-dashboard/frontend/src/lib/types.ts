@@ -254,7 +254,7 @@ export type HostOsNode = {
 export type HostOsNodeSpecifier = {
     assignment: "assigned" | "unassigned" | "API boundary" | null
     owner: "DFINITY" | "others" | null
-    nodes_per_group: number | string
+    nodes_per_group: number | string | null
     group_by: "datacenter" | "subnet" | null
     status: "Healthy" | "Degraded" | "Dead" | null
 }
@@ -267,16 +267,22 @@ export type HostOsNodeFilter = {
     intersect: HostOsNodeSelectors[]
 }
 
-export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeSpecifier;
+export type HostOsNodeComplement = {
+    not: HostOsNodeSelectors
+}
 
-function formatSelector(selector: HostOsNodeSpecifier): string {
+export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeComplement | HostOsNodeSpecifier;
+
+export function formatSpecifier(selector: HostOsNodeSpecifier): string {
     let health =
         selector.status === null
             ? " "
             : ` ${selector.status.toLowerCase()} `;
 
     let s = "";
-    if (typeof selector.nodes_per_group === "string") {
+    if (selector.nodes_per_group === null) {
+        s = `${health}nodes`
+    } else if (typeof selector.nodes_per_group === "string") {
         s = `${selector.nodes_per_group} of${health}nodes`;
     } else if (selector.nodes_per_group == 1) {
         s = `${selector.nodes_per_group}${health}node`;
@@ -312,7 +318,7 @@ function formatSelector(selector: HostOsNodeSpecifier): string {
         s = `${s} assigned to API boundary duty`;
     }
 
-    return s;
+    return s.trim();
 }
 
 export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
@@ -325,7 +331,19 @@ export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
         } else if ((selectors as HostOsNodeFilter).intersect.length === 1) {
             return formatSelectors((selectors as HostOsNodeFilter).intersect[0])
         } else {
-            return "( " + (selectors as HostOsNodeFilter).intersect.map((s) => formatSelectors(s)).join(" ∩ ") + " )"
+            let s = "( ";
+            for (const [index, selector] of (selectors as HostOsNodeFilter).intersect.entries()) {
+                if (index != 0 && (selector as HostOsNodeComplement).not !== undefined) {
+                    console.log("bingo");
+                    s = s + " − " + formatSelectors((selector as HostOsNodeComplement).not);
+                } else if (index == 0) {
+                    s = s + formatSelectors(selector);
+                } else {
+                    s = s + " ∩ " + formatSelectors(selector);
+                }
+            }
+            s = s + " )";
+            return s;
         }
     } else if ((selectors as HostOsNodeAggregator).join !== undefined) {
         if ((selectors as HostOsNodeAggregator).join.length === 0) {
@@ -335,8 +353,12 @@ export function formatSelectors(selectors: HostOsNodeSelectors | null): string {
         } else {
             return "( " + (selectors as HostOsNodeAggregator).join.map((s) => formatSelectors(s)).join(" ∪ ") + " )"
         }
+    } else if ((selectors as HostOsNodeComplement).not !== undefined) {
+        {
+            return "all candidates except " + formatSelectors((selectors as HostOsNodeComplement).not)
+        }
     }
-    return formatSelector((selectors as HostOsNodeSpecifier));
+    return formatSpecifier((selectors as HostOsNodeSpecifier));
 }
 
 
