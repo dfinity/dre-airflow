@@ -429,7 +429,7 @@ export type HostOsBatchResponse = {
 
 // Combination structures.
 export type RolloutKind = "rollout_ic_os_to_mainnet_subnets" | "rollout_ic_os_to_mainnet_api_boundary_nodes" | "rollout_ic_os_to_mainnet_nodes";
-const RolloutKindName = {
+export const RolloutKindName = {
     rollout_ic_os_to_mainnet_subnets: "GuestOS rollout to subnets",
     rollout_ic_os_to_mainnet_api_boundary_nodes: "GuestOS rollout to API boundary nodes",
     rollout_ic_os_to_mainnet_nodes: "HostOS rollout to nodes",
