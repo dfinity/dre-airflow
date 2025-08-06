@@ -1,9 +1,14 @@
 <script lang="ts">
     import { rollouts_view } from "../lib/stores.js";
-    import { rolloutKindName, getRolloutEngineStates } from "../lib/types.js";
+    import {
+        rolloutKindName,
+        getRolloutEngineStates,
+        RolloutKindName,
+    } from "../lib/types.js";
     import GuestOSRollout from "../lib/GuestOSRollout.svelte";
     import ApiBoundaryNodesRollout from "../lib/ApiBoundaryNodesRollout.svelte";
     import HostOsRollout from "../lib/HostOSRollout.svelte";
+    import { onDestroy, onMount } from "svelte";
 
     import { SvelteToast } from "@zerodevx/svelte-toast";
     import { ChevronDownOutline } from "flowbite-svelte-icons";
@@ -18,6 +23,10 @@
         NavHamburger,
         DropdownItem,
         Dropdown,
+        Button,
+        Checkbox,
+        Listgroup,
+        type CheckboxItem,
     } from "flowbite-svelte";
 
     import { url, isActive } from "@roxi/routify";
@@ -25,87 +34,136 @@
     import LoadingBlock from "../lib/LoadingBlock.svelte";
     import WarningBlock from "../lib/WarningBlock.svelte";
     import InfoBlock from "../lib/InfoBlock.svelte";
+    import ExternalLinkIcon from "../lib/ExternalLinkIcon.svelte";
 
-    let rolloutsState = $derived.by(() => {
-        let s = "active";
-        if ($isActive(".", { state: "failed" })) {
-            s = "failed";
-        } else if ($isActive(".", { state: "complete" })) {
-            s = "complete";
-        } else if ($isActive(".", { state: "all" })) {
-            s = "all";
-        }
-        return s;
-    });
-    let currentUrl = $derived.by(() => {
-        let c = $url(".");
-        if (rolloutsState === "failed") {
-            c = $url(".", { state: "failed" });
-        } else if (rolloutsState === "complete") {
-            c = $url(".", { state: "complete" });
-        } else if (rolloutsState === "all") {
-            c = $url(".", { state: "all" });
-        }
-        return c;
-    });
+    let stateChoices: CheckboxItem[] = [
+        { value: "active", label: "Active" },
+        { value: "complete", label: "Complete" },
+        { value: "failed", label: "Failed" },
+    ];
+    let visibleStates = $state(["active"]);
 
-    let activeClass =
-        "text-white bg-orange-700 md:bg-transparent md:text-orange-700 md:dark:text-white dark:bg-orange-600 md:dark:bg-transparent";
-    let nonActiveClass =
-        "text-gray-700 hover:bg-gray-100 md:hover:bg-transparent md:border-0 md:hover:text-orange-700 dark:text-gray-400 md:dark:hover:text-white dark:hover:bg-gray-700 dark:hover:text-white md:dark:hover:bg-transparent";
-    let navClasses = { active: activeClass, nonActive: nonActiveClass };
+    let kindChoices: CheckboxItem[] = Object.entries(RolloutKindName).map(
+        (v) => {
+            return { value: v[0], label: v[1] };
+        },
+    );
+    let visibleKinds = $state(
+        Object.entries(RolloutKindName).map((v) => {
+            return v[0];
+        }),
+    );
+
+    /* Preserve filters between navigations. */
+    type RolloutsViewFilters = {
+        visibleStates: string[];
+        visibleKinds: string[];
+    };
+
+    onMount(() => {
+        let savedFiltersJSON: string | null = sessionStorage.getItem(
+            "RolloutsViewFilters",
+        );
+        console.log(savedFiltersJSON);
+        if (savedFiltersJSON !== null) {
+            let savedFilters = JSON.parse(
+                savedFiltersJSON,
+            ) as RolloutsViewFilters;
+            if (visibleStates != savedFilters.visibleStates) {
+                visibleStates = savedFilters.visibleStates;
+            }
+            if (visibleKinds != savedFilters.visibleKinds) {
+                visibleKinds = savedFilters.visibleKinds;
+            }
+        }
+    });
+    onDestroy(() => {
+        let savedFilters = {
+            visibleStates: visibleStates,
+            visibleKinds: visibleKinds,
+        } as RolloutsViewFilters;
+        let savedFiltersJSON = JSON.stringify(savedFilters);
+        sessionStorage.setItem("RolloutsViewFilters", savedFiltersJSON);
+    });
 </script>
 
 <SvelteToast />
 
 <div id="header">
-    {#key currentUrl}
-        <Navbar>
-            <NavBrand href="/">
-                <img
-                    src="/favicon-512x512.png"
-                    class="me-3 h-6 sm:h-9"
-                    alt="IC Logo"
+    <Navbar>
+        <NavBrand href="/">
+            <img
+                src="/favicon-512x512.png"
+                class="me-3 h-6 sm:h-9"
+                alt="IC Logo"
+            />
+            <span
+                class="self-center whitespace-nowrap text-xl font-semibold dark:text-white"
+                >Rollouts</span
+            >
+        </NavBrand>
+        <NavHamburger />
+        <NavUl>
+            <NavLi class="cursor-pointer"
+                >Resources<ChevronDownOutline
+                    class="text-primary-800 dark:text-white inline"
                 />
-                <span
-                    class="self-center whitespace-nowrap text-xl font-semibold dark:text-white"
-                    >Rollouts</span
+            </NavLi>
+            <Dropdown class="w-72 z-20" placement="bottom-end">
+                <DropdownItem
+                    ><a
+                        href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
+                        target="_blank"
+                        >Mainnet GuestOS versions <ExternalLinkIcon /></a
+                    ></DropdownItem
                 >
-            </NavBrand>
-            <NavHamburger />
-            <NavUl activeUrl={currentUrl} classes={navClasses}>
-                <NavLi class="cursor-pointer"
-                    >Resources<ChevronDownOutline
-                        class="text-primary-800 dark:text-white inline"
+                <DropdownItem
+                    ><a
+                        href="https://grafana.mainnet.dfinity.network/d/hostos-versions/hostos-versions"
+                        target="_blank"
+                        >Mainnet HostOS versions <ExternalLinkIcon /></a
+                    ></DropdownItem
+                >
+                <DropdownItem
+                    ><a
+                        href="https://grafana.ch1-rel1.dfinity.network/d/release-controller/release-controller?from=now-30m&to=now&timezone=UTC&refresh=30s"
+                        target="_blank"
+                        >Release controller <ExternalLinkIcon /></a
+                    ></DropdownItem
+                >
+            </Dropdown>
+            <NavLi class="cursor-pointer"
+                >States<ChevronDownOutline
+                    class="text-primary-800 dark:text-white inline"
+                /></NavLi
+            >
+            <Dropdown class="space-y-3 p-3 text-sm" placement="bottom-end">
+                <Listgroup class="w-32">
+                    <Checkbox
+                        name="states"
+                        choices={stateChoices}
+                        bind:group={visibleStates}
+                        classes={{ div: "p-3" }}
                     />
-                </NavLi>
-                <Dropdown class="w-44 z-20">
-                    <DropdownItem
-                        ><a
-                            href="https://grafana.mainnet.dfinity.network/d/release/release?orgId=1&from=now-7d&to=now&var-ic=mercury&var-ic_subnet=$__all&refresh=30s"
-                            target="_blank">Mainnet GuestOS versions</a
-                        ></DropdownItem
-                    >
-                    <DropdownItem
-                        ><a
-                            href="https://grafana.mainnet.dfinity.network/d/hostos-versions/hostos-versions"
-                            target="_blank">Mainnet HostOS versions</a
-                        ></DropdownItem
-                    >
-                    <DropdownItem
-                        ><a
-                            href="https://grafana.ch1-rel1.dfinity.network/d/release-controller/release-controller?from=now-30m&to=now&timezone=UTC&refresh=30s"
-                            target="_blank">Release controller</a
-                        ></DropdownItem
-                    >
-                </Dropdown>
-                <NavLi href={$url(".")}>Active</NavLi>
-                <NavLi href={$url(".", { state: "complete" })}>Complete</NavLi>
-                <NavLi href={$url(".", { state: "failed" })}>Failed</NavLi>
-                <NavLi href={$url(".", { state: "all" })}>All</NavLi>
-            </NavUl>
-        </Navbar>
-    {/key}
+                </Listgroup>
+            </Dropdown>
+            <NavLi class="cursor-pointer"
+                >Rollouts<ChevronDownOutline
+                    class="text-primary-800 dark:text-white inline"
+                /></NavLi
+            >
+            <Dropdown class="space-y-3 p-3 text-sm" placement="bottom-end">
+                <Listgroup class="w-80">
+                    <Checkbox
+                        name="kinds"
+                        choices={kindChoices}
+                        bind:group={visibleKinds}
+                        classes={{ div: "p-3" }}
+                    />
+                </Listgroup>
+            </Dropdown>
+        </NavUl>
+    </Navbar>
 
     {#if $view.error && $view.error !== "loading"}
         <ErrorBlock>
@@ -165,12 +223,12 @@
 </div>
 
 {#each $view.rollouts as rollout}
-    {#if (rolloutsState === "active" && rollout.state !== "complete" && rollout.state !== "failed") || (rolloutsState === "complete" && rollout.state === "complete") || (rolloutsState === "failed" && rollout.state === "failed") || rolloutsState === "all"}
-        {#if rollout.kind === "rollout_ic_os_to_mainnet_subnets"}
+    {#if (visibleStates.includes("active") && rollout.state !== "complete" && rollout.state !== "failed") || (visibleStates.includes("complete") && rollout.state === "complete") || (visibleStates.includes("failed") && rollout.state === "failed")}
+        {#if rollout.kind === "rollout_ic_os_to_mainnet_subnets" && visibleKinds.includes("rollout_ic_os_to_mainnet_subnets")}
             <GuestOSRollout {rollout} />
-        {:else if rollout.kind === "rollout_ic_os_to_mainnet_api_boundary_nodes"}
+        {:else if rollout.kind === "rollout_ic_os_to_mainnet_api_boundary_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_api_boundary_nodes")}
             <ApiBoundaryNodesRollout {rollout} />
-        {:else if rollout.kind === "rollout_ic_os_to_mainnet_nodes"}
+        {:else if rollout.kind === "rollout_ic_os_to_mainnet_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_nodes")}
             <HostOsRollout {rollout} />
         {/if}
     {/if}
