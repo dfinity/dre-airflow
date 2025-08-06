@@ -273,7 +273,7 @@ export type HostOsNodeComplement = {
 
 export type HostOsNodeSelectors = HostOsNodeAggregator | HostOsNodeFilter | HostOsNodeComplement | HostOsNodeSpecifier;
 
-function formatSpecifier(selector: HostOsNodeSpecifier): string {
+export function formatSpecifier(selector: HostOsNodeSpecifier): string {
     let health =
         selector.status === null
             ? " "

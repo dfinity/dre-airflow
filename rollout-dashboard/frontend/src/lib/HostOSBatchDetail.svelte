@@ -17,6 +17,7 @@
     import { cap } from "./lib";
     import InfoBlock from "./InfoBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
+    import Selectors from "./Selectors.svelte";
 
     interface Props {
         dag_run_id: string;
@@ -114,21 +115,26 @@
             <RegularTable striped={true}>
                 <TableBodyRow
                     ><TableHeadCell>Part of rollout</TableHeadCell
-                    ><TableBodyCell>{dag_run_id}</TableBodyCell></TableBodyRow
+                    ><TableBodyCell style="white-space: normal"
+                        >{dag_run_id}</TableBodyCell
+                    ></TableBodyRow
                 >
                 <TableBodyRow
                     ><TableHeadCell>Stage</TableHeadCell><TableBodyCell
+                        style="white-space: normal"
                         >{cap(batch.stage)}</TableBodyCell
                     ></TableBodyRow
                 >
                 <TableBodyRow
                     ><TableHeadCell>Planned at</TableHeadCell><TableBodyCell
+                        style="white-space: normal"
                         >{batch.planned_start_time.toString()}</TableBodyCell
                     ></TableBodyRow
                 >
                 {#if batch.actual_start_time !== null}
                     <TableBodyRow
                         ><TableHeadCell>Started at</TableHeadCell><TableBodyCell
+                            style="white-space: normal"
                             >{batch.actual_start_time.toString()}</TableBodyCell
                         ></TableBodyRow
                     >
@@ -136,12 +142,14 @@
                 {#if batch.end_time !== null}
                     <TableBodyRow
                         ><TableHeadCell>Started at</TableHeadCell><TableBodyCell
+                            style="white-space: normal"
                             >{batch.end_time.toString()}</TableBodyCell
                         ></TableBodyRow
                     >
                 {/if}
                 <TableBodyRow
                     ><TableHeadCell>State</TableHeadCell><TableBodyCell
+                        style="white-space: normal"
                         >{#if batch.display_url}<a
                                 rel="external"
                                 title="Open Airflow logs for the most recently updated task"
@@ -162,25 +170,30 @@
                 {#if batch.comment !== null && batch.comment !== ""}
                     <TableBodyRow
                         ><TableHeadCell>Comment</TableHeadCell><TableBodyCell
+                            style="white-space: normal"
                             >{batch.comment}</TableBodyCell
                         ></TableBodyRow
                     >
                 {/if}
                 <TableBodyRow
                     ><TableHeadCell>Selectors</TableHeadCell>
-                    <TableBodyCell
-                        >{formatSelectors(batch.selectors)}
+                    <TableBodyCell style="white-space: normal">
+                        <div
+                            style="display: flex; flex-grow: 0; justify-content: flex-start;"
+                        >
+                            <Selectors selectors={batch.selectors} />
+                        </div>
                     </TableBodyCell>
                 </TableBodyRow>
                 <TableBodyRow
                     ><TableHeadCell>Targets</TableHeadCell>
                     {#if actual_items !== null}
-                        <TableBodyCell
+                        <TableBodyCell style="white-space: normal"
                             >{planned_items.length} nodes planned, {actual_items.length}
                             actually targeted</TableBodyCell
                         >
                     {:else}
-                        <TableBodyCell
+                        <TableBodyCell style="white-space: normal"
                             >{planned_items.length} nodes planned</TableBodyCell
                         >
                     {/if}</TableBodyRow
@@ -188,7 +201,7 @@
                 {#if upgraded_nodes_summary}
                     <TableBodyRow
                         ><TableHeadCell>Upgrade status</TableHeadCell
-                        ><TableBodyCell
+                        ><TableBodyCell style="white-space: normal"
                             >{Object.entries(upgraded_nodes_summary)
                                 .map(([k, v]) => `${v} nodes ${k}`)
                                 .join(", ")}</TableBodyCell
@@ -198,7 +211,7 @@
                 {#if alerting_nodes_summary}
                     <TableBodyRow
                         ><TableHeadCell>Health status</TableHeadCell
-                        ><TableBodyCell
+                        ><TableBodyCell style="white-space: normal"
                             >{Object.entries(alerting_nodes_summary)
                                 .map(([k, v]) => `${v} nodes ${k}`)
                                 .join(", ")}</TableBodyCell
