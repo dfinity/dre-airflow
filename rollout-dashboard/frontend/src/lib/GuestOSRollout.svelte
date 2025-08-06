@@ -11,11 +11,13 @@
     import SubnetBatch from "./SubnetBatch.svelte";
     import BlackInfoBlock from "./BlackInfoBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
+    import InfoBlock from "./InfoBlock.svelte";
     interface Props {
         rollout: GuestOsRollout;
+        paused: boolean;
     }
 
-    let { rollout }: Props = $props();
+    let { rollout, paused }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
 </script>
@@ -63,6 +65,13 @@
         <div class="note space-y-4">
             <SvelteMarkdown source={rollout.note.toString()} />
         </div>
+    {/if}
+    {#if paused}
+        <InfoBlock>
+            <span class="font-medium">This rollout has its engine paused.</span>
+            Rollouts of this type have been paused by DRE. Use the
+            <i>Help</i> link below if you want to inquire why.
+        </InfoBlock>
     {/if}
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
         <ul>

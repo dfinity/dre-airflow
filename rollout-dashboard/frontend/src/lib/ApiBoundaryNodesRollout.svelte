@@ -14,11 +14,13 @@
     import BlackInfoBlock from "./BlackInfoBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
     import ClipboardIcon from "./ClipboardIcon.svelte";
+    import InfoBlock from "./InfoBlock.svelte";
     interface Props {
         rollout: ApiBoundaryNodesRollout;
+        paused: boolean;
     }
 
-    let { rollout }: Props = $props();
+    let { rollout, paused }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
@@ -67,6 +69,13 @@
         <div class="note space-y-4">
             <SvelteMarkdown source={rollout.note.toString()} />
         </div>
+    {/if}
+    {#if paused}
+        <InfoBlock>
+            <span class="font-medium">This rollout has its engine paused.</span>
+            Rollouts of this type have been paused by DRE. Use the
+            <i>Help</i> link below if you want to inquire why.
+        </InfoBlock>
     {/if}
     <div class="rollout_info space-y-4 text-gray-500">
         Git revision:
