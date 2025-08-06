@@ -21,7 +21,7 @@ RUN npm run build
 FROM quay.io/fedora/fedora-minimal:42
 WORKDIR /
 COPY --from=rust /usr/src/rollout-dashboard/rollout-dashboard /rollout-dashboard
-COPY --from=node /workdir/dist/client /static
+COPY --from=node /workdir/dist /static
 
 EXPOSE 4174
 ENV FRONTEND_STATIC_DIR=static
