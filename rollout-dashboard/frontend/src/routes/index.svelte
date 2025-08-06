@@ -209,27 +209,32 @@
                 DRE.
             </WarningBlock>
         {/if}
-
-        {#if state === "paused"}
-            <InfoBlock>
-                <span class="font-medium"
-                    >{rolloutKindName(kind)} engine paused.</span
-                >
-                {rolloutKindName(kind)} has been paused by DRE. Use the
-                <i>Help</i> link below if you want to inquire why.
-            </InfoBlock>
-        {/if}
     {/each}
 </div>
 
 {#each $view.rollouts as rollout}
     {#if (visibleStates.includes("active") && rollout.state !== "complete" && rollout.state !== "failed") || (visibleStates.includes("complete") && rollout.state === "complete") || (visibleStates.includes("failed") && rollout.state === "failed")}
         {#if rollout.kind === "rollout_ic_os_to_mainnet_subnets" && visibleKinds.includes("rollout_ic_os_to_mainnet_subnets")}
-            <GuestOSRollout {rollout} />
+            <GuestOSRollout
+                {rollout}
+                paused={$view.rollout_engine_states[
+                    "rollout_ic_os_to_mainnet_subnets"
+                ] === "paused"}
+            />
         {:else if rollout.kind === "rollout_ic_os_to_mainnet_api_boundary_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_api_boundary_nodes")}
-            <ApiBoundaryNodesRollout {rollout} />
+            <ApiBoundaryNodesRollout
+                {rollout}
+                paused={$view.rollout_engine_states[
+                    "rollout_ic_os_to_mainnet_api_boundary_nodes"
+                ] === "paused"}
+            />
         {:else if rollout.kind === "rollout_ic_os_to_mainnet_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_nodes")}
-            <HostOsRollout {rollout} />
+            <HostOsRollout
+                {rollout}
+                paused={$view.rollout_engine_states[
+                    "rollout_ic_os_to_mainnet_nodes"
+                ] === "paused"}
+            />
         {/if}
     {/if}
 {/each}
