@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { rollouts_view } from "../lib/stores.js";
+    import { rollouts_view_with_cancellation } from "../lib/stores.js";
     import {
         rolloutKindName,
         getRolloutEngineStates,
@@ -13,8 +13,6 @@
     import { SvelteToast } from "@zerodevx/svelte-toast";
     import { ChevronDownOutline } from "flowbite-svelte-icons";
 
-    let view = rollouts_view();
-
     import {
         Navbar,
         NavLi,
@@ -23,18 +21,17 @@
         NavHamburger,
         DropdownItem,
         Dropdown,
-        Button,
         Checkbox,
         Listgroup,
         type CheckboxItem,
     } from "flowbite-svelte";
 
-    import { url, isActive } from "@roxi/routify";
     import ErrorBlock from "../lib/ErrorBlock.svelte";
     import LoadingBlock from "../lib/LoadingBlock.svelte";
     import WarningBlock from "../lib/WarningBlock.svelte";
-    import InfoBlock from "../lib/InfoBlock.svelte";
     import ExternalLinkIcon from "../lib/ExternalLinkIcon.svelte";
+
+    let [view, cancel] = rollouts_view_with_cancellation();
 
     let stateChoices: CheckboxItem[] = [
         { value: "active", label: "Active" },
@@ -64,7 +61,6 @@
         let savedFiltersJSON: string | null = sessionStorage.getItem(
             "RolloutsViewFilters",
         );
-        console.log(savedFiltersJSON);
         if (savedFiltersJSON !== null) {
             let savedFilters = JSON.parse(
                 savedFiltersJSON,
@@ -78,6 +74,7 @@
         }
     });
     onDestroy(() => {
+        cancel();
         let savedFilters = {
             visibleStates: visibleStates,
             visibleKinds: visibleKinds,
