@@ -65,8 +65,8 @@ nodes:
   - upg5h-ggk5u-6qxp7-ksz3r-osynn-z2wou-65klx-cuala-sd6y3-3lorr-dae
   - yqbqe-whgvn-teyic-zvtln-rcolf-yztin-ecal6-smlwy-6imph-6isdn-qqe
 start_day: Wednesday
-resume_at: 9:00
-suspend_at: 17:00
+resume_at: 7:00
+suspend_at: 15:00
 minimum_minutes_per_batch: 15
 """.strip()
 }
