@@ -1,3 +1,4 @@
+# mypy: disable-error-code="unused-ignore"
 """
 IC-OS HostOS rollout operators.
 """
@@ -7,7 +8,7 @@ import datetime
 import logging
 import pprint
 import typing
-from typing import cast
+from typing import NotRequired, TypedDict, cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
@@ -19,12 +20,12 @@ from dfinity.rollout_types import (
     HostOSRolloutStages,
     HostOSStage,
     NodeBatch,
+    NodeFailureTolerance,
     NodeId,
     NodeInfo,
     NodeProviderId,
     NodeSelector,
     ProposalInfo,
-    ProvisionalHostOSBatches,
     ProvisionalHostOSPlan,
     ProvisionalHostOSPlanBatch,
     to_selectors,
@@ -222,11 +223,24 @@ def compute_actual_plan_for_batch(
     return node_ids
 
 
+class ProvisionallyComputedBatch(TypedDict):
+    nodes: NodeBatch
+    selectors: NodeSelector
+    tolerance: NotRequired[NodeFailureTolerance]
+
+
+class ProvisionallyComputedBatches(TypedDict):
+    canary: list[ProvisionallyComputedBatch]
+    main: list[ProvisionallyComputedBatch]
+    unassigned: list[ProvisionallyComputedBatch]
+    stragglers: list[ProvisionallyComputedBatch]
+
+
 def compute_provisional_node_batches(
     git_revision: GitCommit,
     stages: HostOSRolloutStages,
     registry: dre.RegistrySnapshot,
-) -> ProvisionalHostOSBatches:
+) -> ProvisionallyComputedBatches:
     """
     Computes a provisional plan for the rollout.
 
@@ -254,50 +268,42 @@ def compute_provisional_node_batches(
         if d["node_provider_principal_id"] == DFINITY
     )
     apibns = set(d["principal"] for d in registry["api_bns"])
-    p: ProvisionalHostOSBatches = {
+    p: ProvisionallyComputedBatches = {
         "canary": [],
         "main": [],
         "unassigned": [],
         "stragglers": [],
     }
-    for batch_spec in stages.get("canary", []):
+    stage = stages.get("canary", [])
+    for batch_spec in stage:
         node_ids, remaining_nodes = apply_selectors(
             remaining_nodes,
             batch_spec["selectors"],
             dcs_owned_by_dfinity,
             apibns,
         )
-        p["canary"].append(
-            {"selectors": to_selectors(batch_spec["selectors"]), "nodes": node_ids}
-        )
-    if "main" in stages:
-        selectors = to_selectors(stages["main"]["selectors"])
-        while True:
-            node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
-            )
-            if not node_ids:
-                break
-            p["main"].append({"selectors": selectors, "nodes": node_ids})
-    if "unassigned" in stages:
-        selectors = to_selectors(stages["unassigned"]["selectors"])
-        while True:
-            node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
-            )
-            if not node_ids:
-                break
-            p["unassigned"].append({"selectors": selectors, "nodes": node_ids})
-    if "stragglers" in stages:
-        selectors = to_selectors(stages["stragglers"]["selectors"])
-        while True:
-            node_ids, remaining_nodes = apply_selectors(
-                remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
-            )
-            if not node_ids:
-                break
-            p["stragglers"].append({"selectors": selectors, "nodes": node_ids})
+        x: ProvisionallyComputedBatch = {
+            "selectors": batch_spec["selectors"],
+            "nodes": node_ids,
+        }
+        if "tolerance" in batch_spec:
+            x = x | {"tolerance": batch_spec["tolerance"]}
+        p["canary"].append(x)
 
+    for stage_name in ["main", "unassigned", "stragglers"]:
+        if stage_name in stages:
+            stage = stages[stage_name]  # type: ignore
+            selectors = stage["selectors"]
+            while True:
+                node_ids, remaining_nodes = apply_selectors(
+                    remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
+                )
+                if not node_ids:
+                    break
+                x = {"selectors": selectors, "nodes": node_ids}
+                if "tolerance" in stage:
+                    x = x | {"tolerance": stage["tolerance"]}
+                p[stage_name].append(x)  # type: ignore
     return p
 
 
@@ -370,52 +376,36 @@ def compute_provisional_plan(
 
     for n in range(max_canary_batches):
         try:
-            batch = batches.get("canary", [])[n]
+            batch: ProvisionallyComputedBatch = batches.get("canary", [])[n]
         except IndexError:
             continue
-        plan["canary"].append(
-            {
+        x: ProvisionalHostOSPlanBatch = {
+            "start_at": timetable.pop(0),
+            "nodes": batch["nodes"],
+            "selectors": batch["selectors"],
+        }
+        if "tolerance" in batch:
+            x = x | {"tolerance": batch["tolerance"]}
+        plan["canary"].append(x)
+
+    for stage_name, maxx in [
+        ("main", max_main_batches),
+        ("unassigned", max_unassigned_batches),
+        ("stragglers", max_stragglers_batches),
+    ]:
+        for n in range(maxx):
+            try:
+                batch = batches.get(stage_name, [])[n]  # type: ignore
+            except IndexError:
+                continue
+            x = {
                 "start_at": timetable.pop(0),
                 "nodes": batch["nodes"],
                 "selectors": batch["selectors"],
             }
-        )
-    for n in range(max_main_batches):
-        try:
-            batch = batches.get("main", [])[n]
-        except IndexError:
-            continue
-        plan["main"].append(
-            {
-                "start_at": timetable.pop(0),
-                "nodes": batch["nodes"],
-                "selectors": batch["selectors"],
-            }
-        )
-    for n in range(max_unassigned_batches):
-        try:
-            batch = batches.get("unassigned", [])[n]
-        except IndexError:
-            continue
-        plan["unassigned"].append(
-            {
-                "start_at": timetable.pop(0),
-                "nodes": batch["nodes"],
-                "selectors": batch["selectors"],
-            }
-        )
-    for n in range(max_stragglers_batches):
-        try:
-            batch = batches.get("stragglers", [])[n]
-        except IndexError:
-            continue
-        plan["stragglers"].append(
-            {
-                "start_at": timetable.pop(0),
-                "nodes": batch["nodes"],
-                "selectors": batch["selectors"],
-            }
-        )
+            if "tolerance" in batch:
+                x = x | {"tolerance": batch["tolerance"]}
+            plan[stage_name].append(x)  # type: ignore
     return plan
 
 
@@ -501,7 +491,10 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
     for pb in reversed(precedent_batches(batch_name, batch_index)):
         had_nodes = ti.xcom_pull(f"{pb}.collect_nodes", key="nodes")
         if had_nodes:
-            print(f"Investigating batch {pb} to see what its start time was")
+            print(
+                f"The last batch with any real nodes to roll out was {pb}."
+                f"Investigating batch {pb} to see what its start time was"
+            )
             if previous_task_started_at := ti.xcom_pull(f"{pb}.plan", key="start_at"):
                 print(
                     "The latest batch with nodes to run started at"
@@ -513,15 +506,15 @@ def plan(batch_name: HostOSStage, batch_index: int, ti: TaskInstance) -> list[st
                     batch_count=2,
                     now=previous_task_started_at,
                 )[1]
-                print(f"Original start date: {start_at}")
-                print(f"Updated start date: {new_start_at}")
+                print(f"Updated start date from {start_at} to {new_start_at}")
                 start_at = new_start_at
                 break
             else:
                 print(f"Batch {pb} to run does not have a start date, continuing")
 
-    print(f"Using {start_at} as the start date")
     ti.xcom_push("selectors", batch["selectors"])
+    if "tolerance" in batch:
+        ti.xcom_push("tolerance", batch["tolerance"])
     ti.xcom_push("start_at", start_at)
     return [f"{bn}.wait_until_start_time"]
 

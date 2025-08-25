@@ -285,16 +285,20 @@
                         </TableBodyRow>
                         <TableBodyRow
                             ><TableHeadCell>Targets</TableHeadCell>
-                            {#if actual_items !== null && planned_items !== null}
-                                <TableBodyCell style="white-space: normal"
-                                    >{planned_items.length} nodes planned, {actual_items.length}
-                                    actually targeted</TableBodyCell
-                                >
-                            {:else if planned_items !== null}
-                                <TableBodyCell style="white-space: normal"
-                                    >{planned_items.length} nodes planned</TableBodyCell
-                                >
-                            {/if}</TableBodyRow
+                            <TableBodyCell style="white-space: normal">
+                                {#if actual_items !== null && planned_items !== null}
+                                    {planned_items.length} nodes planned, {actual_items.length}
+                                    actually targeted.
+                                {:else if planned_items !== null}
+                                    {planned_items.length} nodes planned.
+                                {/if}<br /><br
+                                />{#if $batch.tolerance === null}All targets are
+                                    required to upgrade successfully and exhibit
+                                    zero alerts.{:else}At most {$batch.tolerance}
+                                    {#if typeof $batch.tolerance == "string"}of
+                                    {/if} targets may fail to upgrade or remain in
+                                    alerting state.{/if}</TableBodyCell
+                            ></TableBodyRow
                         >
                         {#if upgraded_nodes_summary}
                             <TableBodyRow

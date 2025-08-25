@@ -19,5 +19,8 @@
     "python.analysis.diagnosticMode": "workspace",
     "rust-analyzer.linkedProjects": [
         "rollout-dashboard/server/Cargo.toml"
+    ],
+    "mypy-type-checker.interpreter": [
+        "venv/bin/python3"
     ]
 }

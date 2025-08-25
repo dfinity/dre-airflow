@@ -98,7 +98,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     )
     assert len(res["main"][-1]["nodes"]) == 1
     assert len(res["unassigned"]) == 7
-    assert len(res["unassigned"][-1]["nodes"]) == 93
+    assert len(res["unassigned"][-1]["nodes"]) == 98
     assert len(res["stragglers"][0]["nodes"]) == 14
     batches = (
         [r for r in res["canary"]]

@@ -460,57 +460,53 @@ pub mod v2 {
             Others,
         }
 
-        impl<'de> Deserialize<'de> for NodesPerGroup {
-            fn deserialize<D>(deserializer: D) -> Result<NodesPerGroup, D::Error>
+        struct NaturalNumberOrRatioVisitor;
+
+        enum NaturalNumberOrRatio {
+            Absolute(usize),
+            Ratio(ordered_float::OrderedFloat<f64>),
+        }
+
+        impl<'de> serde::de::Visitor<'de> for NaturalNumberOrRatioVisitor {
+            type Value = NaturalNumberOrRatio;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
+                )
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where
-                D: serde::de::Deserializer<'de>,
+                E: serde::de::Error,
             {
-                struct CustomVisitor;
-
-                impl<'de> serde::de::Visitor<'de> for CustomVisitor {
-                    type Value = NodesPerGroup;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str(
-                            "either a nonzero nonnegative integer or a float between 0.0 and 1.0",
-                        )
-                    }
-
-                    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        if v < 0 {
-                            return Err(serde::de::Error::invalid_value(
-                                serde::de::Unexpected::Signed(v),
-                                &self,
-                            ));
-                        }
-                        Ok(NodesPerGroup::Absolute(v.try_into().unwrap()))
-                    }
-
-                    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        Ok(NodesPerGroup::Absolute(v.try_into().unwrap()))
-                    }
-
-                    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        if !(0.0..=1.0).contains(&v) {
-                            return Err(serde::de::Error::invalid_value(
-                                serde::de::Unexpected::Float(v),
-                                &self,
-                            ));
-                        }
-                        Ok(NodesPerGroup::Ratio(ordered_float::OrderedFloat(v)))
-                    }
+                if v < 0 {
+                    return Err(serde::de::Error::invalid_value(
+                        serde::de::Unexpected::Signed(v),
+                        &self,
+                    ));
                 }
+                Ok(Self::Value::Absolute(v.try_into().unwrap()))
+            }
 
-                deserializer.deserialize_any(CustomVisitor)
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Self::Value::Absolute(v.try_into().unwrap()))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if !(0.0..=1.0).contains(&v) {
+                    return Err(serde::de::Error::invalid_value(
+                        serde::de::Unexpected::Float(v),
+                        &self,
+                    ));
+                }
+                Ok(Self::Value::Ratio(ordered_float::OrderedFloat(v)))
             }
         }
 
@@ -520,7 +516,63 @@ pub mod v2 {
             Ratio(ordered_float::OrderedFloat<f64>),
         }
 
+        impl From<NaturalNumberOrRatio> for NodesPerGroup {
+            fn from(value: NaturalNumberOrRatio) -> Self {
+                match value {
+                    NaturalNumberOrRatio::Absolute(v) => Self::Absolute(v),
+                    NaturalNumberOrRatio::Ratio(v) => Self::Ratio(v),
+                }
+            }
+        }
+
+        impl<'de> Deserialize<'de> for NodesPerGroup {
+            fn deserialize<D>(deserializer: D) -> Result<NodesPerGroup, D::Error>
+            where
+                D: serde::de::Deserializer<'de>,
+            {
+                let nnor = deserializer.deserialize_any(NaturalNumberOrRatioVisitor)?;
+                Ok(nnor.into())
+            }
+        }
+
         impl Serialize for NodesPerGroup {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match self {
+                    Self::Absolute(n) => serializer.serialize_u64(*n as u64),
+                    Self::Ratio(n) => serializer.serialize_str(format!("{}%", n * 100.0).as_str()),
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum NodeFailureTolerance {
+            Absolute(usize),
+            Ratio(ordered_float::OrderedFloat<f64>),
+        }
+
+        impl From<NaturalNumberOrRatio> for NodeFailureTolerance {
+            fn from(value: NaturalNumberOrRatio) -> Self {
+                match value {
+                    NaturalNumberOrRatio::Absolute(v) => Self::Absolute(v),
+                    NaturalNumberOrRatio::Ratio(v) => Self::Ratio(v),
+                }
+            }
+        }
+
+        impl<'de> Deserialize<'de> for NodeFailureTolerance {
+            fn deserialize<D>(deserializer: D) -> Result<NodeFailureTolerance, D::Error>
+            where
+                D: serde::de::Deserializer<'de>,
+            {
+                let nnor = deserializer.deserialize_any(NaturalNumberOrRatioVisitor)?;
+                Ok(nnor.into())
+            }
+        }
+
+        impl Serialize for NodeFailureTolerance {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
@@ -775,6 +827,10 @@ pub mod v2 {
             /// A list of selectors used to select which nodes to target for upgrade.
             /// This is None if the selectors are not yet known.
             pub selectors: Option<NodeSelectors>,
+            /// An optional tolerance for nodes or percentage that can fail in this batch.
+            /// This may not be specified at rollout time, in which case the rollout
+            /// assumes zero tolerance for failures in the batch.
+            pub tolerance: Option<NodeFailureTolerance>,
             /// A count of the nodes planned to be upgraded as part of this batch.
             pub planned_nodes: Vec<NodeInfo>,
             /// A count of the nodes that actually were or are upgraded as part of this batch.

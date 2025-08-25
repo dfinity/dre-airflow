@@ -11,8 +11,8 @@ use rollout_dashboard::airflow_client::{
 };
 use rollout_dashboard::types::v2::RolloutKind;
 use rollout_dashboard::types::v2::hostos::{
-    ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeInfo, NodeSelectors,
-    NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
+    ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeFailureTolerance,
+    NodeInfo, NodeSelectors, NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::max;
@@ -33,18 +33,20 @@ lazy_static! {
     static ref BatchIdentificationRe: Regex = Regex::new("(canary|main|unassigned|stragglers)_([0-9]+)[.](.+)").unwrap();
 }
 
-#[derive(Debug, Deserialize, Clone, Serialize)]
-pub(super) struct ProvisionalPlanBatch {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct ProvisionalHostOSPlanBatch {
     pub(super) nodes: Vec<NodeInfo>,
     pub(super) selectors: NodeSelectors,
     pub(super) start_at: PythonDateTime,
+    pub(super) tolerance: Option<NodeFailureTolerance>,
 }
 
 fn make_a_planned_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
-    val: &ProvisionalPlanBatch,
+    val: &ProvisionalHostOSPlanBatch,
     selectors: &NodeSelectors,
+    tolerance: &Option<NodeFailureTolerance>,
 ) -> BatchResponse {
     BatchResponse {
         stage,
@@ -56,6 +58,7 @@ fn make_a_planned_host_os_batch(
         comment: "".to_string(),
         display_url: "".into(),
         selectors: Some(selectors.clone()),
+        tolerance: tolerance.clone(),
         planned_nodes: val.nodes.clone(),
         actual_nodes: None,
         upgraded_nodes: None,
@@ -84,6 +87,7 @@ fn make_a_discovered_host_os_batch(
         planned_nodes: vec![],
         actual_nodes: None,
         selectors: None,
+        tolerance: None,
         upgraded_nodes: None,
         alerting_nodes: None,
     }
@@ -106,10 +110,10 @@ impl Display for PlanParseError {
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 struct ProvisionalHostOSPlan {
-    canary: Option<Vec<ProvisionalPlanBatch>>,
-    main: Option<Vec<ProvisionalPlanBatch>>,
-    unassigned: Option<Vec<ProvisionalPlanBatch>>,
-    stragglers: Option<Vec<ProvisionalPlanBatch>>,
+    canary: Option<Vec<ProvisionalHostOSPlanBatch>>,
+    main: Option<Vec<ProvisionalHostOSPlanBatch>>,
+    unassigned: Option<Vec<ProvisionalHostOSPlanBatch>>,
+    stragglers: Option<Vec<ProvisionalHostOSPlanBatch>>,
 }
 
 impl FromStr for ProvisionalHostOSPlan {
@@ -160,6 +164,7 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                                         NonZero::new(n + 1).unwrap(),
                                         b,
                                         &b.selectors,
+                                        &b.tolerance,
                                     ),
                                 )
                             })
@@ -237,6 +242,7 @@ struct BatchXcomData {
     nodes_upgrade_status: PlanCache<NodeUpgradeStatuses>,
     nodes_alert_status: PlanCache<NodeAlertStatuses>,
     selectors: PlanCache<NodeSelectors>,
+    tolerance: PlanCache<NodeFailureTolerance>,
 }
 
 #[derive(Clone, Default)]
@@ -551,6 +557,13 @@ impl Parser {
                                     ) {
                                         batch.selectors = Some(selectors.clone())
                                     };
+                                    if let Some(tolerance) = retrieve_xcom_from_cache_or_server!(
+                                        batch_xcom_data.tolerance,
+                                        task_instance,
+                                        "tolerance"
+                                    ) {
+                                        batch.tolerance = Some(tolerance.clone())
+                                    };
                                     trans_min!(BatchState::Waiting);
                                 }
                                 "wait_until_start_time" => {
@@ -681,7 +694,8 @@ mod tests {
     use std::str::FromStr;
 
     use rollout_dashboard::types::v2::hostos::{
-        NodeAssignment, NodeOwner, NodeSelectors, NodeSpecifier, NodeStatus, NodesPerGroup,
+        NodeAssignment, NodeFailureTolerance, NodeOwner, NodeSelectors, NodeSpecifier, NodeStatus,
+        NodesPerGroup,
     };
 
     use crate::live_state::hostos_rollout::ProvisionalHostOSPlan;
@@ -704,6 +718,19 @@ mod tests {
             })],
         };
         assert_eq!(expected, *actual);
+    }
+
+    #[test]
+    fn parse_plan_with_tolerances() {
+        let pythonplan = include_str!("fixtures/python_structure_with_tolerances.txt");
+        let theplan = ProvisionalHostOSPlan::from_str(pythonplan).unwrap();
+        let canary = &theplan.canary.unwrap();
+        let batch = &canary[0];
+        let actual = &batch.tolerance;
+        assert_eq!(*actual, Some(NodeFailureTolerance::Absolute(1)));
+        let batch = &canary[1];
+        let actual = &batch.tolerance;
+        assert_eq!(*actual, None);
     }
 
     #[test]

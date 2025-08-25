@@ -87,27 +87,45 @@ stages:
       status: Healthy
       nodes_per_group: 5
   - selectors:
-      assignment: unassigned
-      owner: others
-      group_by: datacenter
-      status: Healthy
-      nodes_per_group: 1
+      intersect:
+      - assignment: unassigned
+        owner: others
+        group_by: datacenter
+        status: Healthy
+        nodes_per_group: 1
+      - not: # Exclude problematic datacenters.
+          join:
+          - datacenter: ct1
+          - datacenter: jb1
+          - datacenter: jb2
+          - datacenter: hk1
+          - datacenter: kr1
+    tolerance: 1
   - selectors:
       assignment: assigned
       owner: DFINITY
       status: Healthy
       nodes_per_group: 10%
   - selectors:
-      join:
-      - assignment: assigned
-        owner: others
-        group_by: subnet
-        status: Healthy
-        nodes_per_group: 1
-      - assignment: API boundary
-        owner: DFINITY
-        status: Healthy
-        nodes_per_group: 1
+      intersect:
+      - join:
+        - assignment: assigned
+          owner: others
+          group_by: subnet
+          status: Healthy
+          nodes_per_group: 1
+        - assignment: API boundary
+          owner: DFINITY
+          status: Healthy
+          nodes_per_group: 1
+      - not: # Exclude problematic datacenters.
+          join:
+          - datacenter: ct1
+          - datacenter: jb1
+          - datacenter: jb2
+          - datacenter: hk1
+          - datacenter: kr1
+    tolerance: 1
   main:
     selectors:
       join:
@@ -118,13 +136,16 @@ stages:
       - assignment: API boundary
         status: Healthy
         nodes_per_group: 1
+    tolerance: 5% # Up to three bad nodes in a 47-node subnet.
   unassigned:
     selectors:
       assignment: unassigned
       status: Healthy
       nodes_per_group: 100
+    tolerance: 15% # Tolerate up to 15% nodes not working after the upgrade.
   stragglers:
     selectors: []
+    tolerance: 100% # All nodes are known not to be healthy, so best-effort update.
 allowed_days:
 - Monday
 - Tuesday

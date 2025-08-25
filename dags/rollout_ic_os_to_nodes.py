@@ -140,6 +140,14 @@ boundary node:
 ...
 ```
 
+In addition, each batch specification can also have an optional `tolerance`
+value, which may be either a natural number (including zero), or a percentage
+string (e.g. "90%"), which indicates to the rollout how many nodes (or what
+percentage of the selected nodes) may fail the upgrade, while still considering
+the batch successful.  This is intended to reduce uncertainty during the rollout
+such that e.g. one node failing to upgrade won't stop the rollout from making
+any progress completely.
+
 The rollout has a fuse built-in that prevents rolling out to more than 160
 nodes at once, so if this error takes place, the rollout will abort.  If an
 empty list of nodes is the result of all selectors applied, the batch is
@@ -166,6 +174,7 @@ stages:
     selectors: # for all batches up to the 15th
       assignment: unassigned
       nodes_per_group: 100
+      tolerance: 10% # tolerate up to 10% failures in each batch.
 ...
 ```
 
@@ -245,6 +254,10 @@ for network_name, network in IC_NETWORKS.items():
                         "{{ ti.xcom_pull('%s.collect_nodes', key='nodes') }}"
                         % (hostos_operators.stage_name(stage, batch_index))
                     )
+                    tolerance_xcom_pull = (
+                        "{{ ti.xcom_pull('%s.plan', key='tolerance') }}"
+                        % (hostos_operators.stage_name(stage, batch_index))
+                    )
                     start_time_xcom_pull = """{{
                         ti.xcom_pull(task_ids='%s.plan', key="start_at")
                         | string
@@ -297,7 +310,7 @@ for network_name, network in IC_NETWORKS.items():
                         poke_interval=120,
                         timeout=86400 * 7,
                         mode="reschedule",
-                        op_args=[nodes_xcom_pull, network],
+                        op_args=[nodes_xcom_pull, tolerance_xcom_pull, network],
                         retries=retries,
                     )
                     healthy = python_sensor.PythonSensor(
@@ -306,7 +319,7 @@ for network_name, network in IC_NETWORKS.items():
                         poke_interval=120,
                         timeout=86400 * 7,
                         mode="reschedule",
-                        op_args=[nodes_xcom_pull, network],
+                        op_args=[nodes_xcom_pull, tolerance_xcom_pull, network],
                         retries=retries,
                     )
                     join = EmptyOperator(

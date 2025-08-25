@@ -141,6 +141,33 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         assert "unassigned" not in stages
         assert "stragglers" not in stages
 
+    def test_tolerance(self) -> None:
+        inp = textwrap.dedent("""\
+        stages:
+            canary:
+            - selectors:
+                - assignment: unassigned
+                  owner: DFINITY
+                  nodes_per_group: 20%
+                  status: Healthy
+              tolerance: 0
+            - selectors:
+                - assignment: unassigned
+                  owner: DFINITY
+                  nodes_per_group: 20%
+                  status: Healthy
+              tolerance: 25%
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+
+        p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
+        stages = p["stages"]
+        assert stages["canary"][0]["tolerance"] == 0
+        assert stages["canary"][1]["tolerance"] == 0.25
+
     def test_join(self) -> None:
         inp = textwrap.dedent("""\
         stages:
@@ -211,3 +238,13 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
             == "API boundary"
         )
         assert stages["main"]["selectors"]["intersect"][1]["not"]["datacenter"] == "hk4"
+
+
+class TestIntOrFloatBounded(unittest.TestCase):
+    def test_int(self) -> None:
+        assert 1 == rollout_types.intorfloatbounded("1")
+        assert 0 == rollout_types.intorfloatbounded("0")
+        assert 0.5 == rollout_types.intorfloatbounded("50%")
+        self.assertRaises(ValueError, lambda: rollout_types.intorfloatbounded("101%"))
+        self.assertRaises(ValueError, lambda: rollout_types.intorfloatbounded(-1))
+        self.assertRaises(ValueError, lambda: rollout_types.intorfloatbounded({}))
