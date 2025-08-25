@@ -146,6 +146,43 @@ def yaml_to_ApiBoundaryNodeRolloutPlanSpec(s: str) -> ApiBoundaryNodeRolloutPlan
     return cast(ApiBoundaryNodeRolloutPlanSpec, d)
 
 
+def intorfloatbounded(n: Any) -> int | float:
+    """
+    Convert a value from a percentage 0%-100% to a float, or an int to itself
+    so long as the int is greater than zero.
+
+    Raises ValueError if the value cannot be used.
+    """
+    nodes_per_group: int | float
+    if isinstance(n, str):
+        if n.endswith("%"):
+            nodes_per_group = float(n[:-1]) / 100
+        else:
+            nodes_per_group = int(n)
+    elif isinstance(n, int):
+        nodes_per_group = n
+    elif isinstance(n, float):
+        nodes_per_group = n
+    else:
+        raise ValueError(f"not a string, float or int: {n}")
+    if isinstance(nodes_per_group, float) and (
+        nodes_per_group < 0 or nodes_per_group > 1
+    ):
+        raise ValueError(f"value {n} cannot be lower than 0% or greater than 100%")
+    if isinstance(nodes_per_group, int) and (nodes_per_group < 0):
+        raise ValueError(f"value {n} cannot be lower than 0")
+    return nodes_per_group
+
+
+# Either a literal number of nodes allowed to not succeed,
+# or a float 0-1 for a percentage of nodes.
+type NodeFailureTolerance = int | float
+
+
+def to_NodeFailureTolerance(n: Any) -> int | float:
+    return intorfloatbounded(n)
+
+
 NodeSelector = TypedDict(
     "NodeSelector",
     {
@@ -188,21 +225,10 @@ def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
     )
     if "nodes_per_group" in specifier:
         nodes_per_group = specifier["nodes_per_group"]
-        if isinstance(nodes_per_group, str):
-            if nodes_per_group.endswith("%"):
-                nodes_per_group = float(nodes_per_group[:-1]) / 100
-            else:
-                nodes_per_group = int(nodes_per_group)
-        elif isinstance(nodes_per_group, int) or isinstance(nodes_per_group, float):
-            pass
-        else:
-            assert 0, "nodes_per_group is not float, integer or percentage"
-        if isinstance(nodes_per_group, float) and (
-            nodes_per_group < 0 or nodes_per_group > 1
-        ):
-            assert 0, "nodes_per_group cannot be lower than 0% or greater than 100%"
-        if isinstance(nodes_per_group, int) and (nodes_per_group < 0):
-            assert 0, "nodes_per_group cannot be lower than 0 nodes"
+        try:
+            nodes_per_group = intorfloatbounded(nodes_per_group)
+        except ValueError as e:
+            assert 0, f"nodes_per_group is not float, integer or percentage: {e}"
         specifier["nodes_per_group"] = nodes_per_group
     assert specifier.get("status") in ["Healthy", "Degraded", "Down", None], (
         "the status key is not either one of Healthy, Degraded or Down"
@@ -262,6 +288,7 @@ def to_selectors(
 
 class HostOSRolloutBatchSpec(TypedDict):
     selectors: NodeSelector
+    tolerance: NotRequired[NodeFailureTolerance]
 
 
 class HostOSRolloutStages(TypedDict, total=False):
@@ -307,7 +334,16 @@ def yaml_to_HostOSRolloutPlanSpec(s: str) -> HostOSRolloutPlanSpec:
                 try:
                     canary[cn] = {"selectors": to_selectors(c["selectors"])}
                 except Exception as e:
-                    assert 0, f"while evaluating canary stage {cn + 1}: {e}"
+                    assert 0, f"while evaluating canary stage {cn + 1} selectors: {e}"
+                if "tolerance" in c:
+                    try:
+                        canary[cn]["tolerance"] = to_NodeFailureTolerance(
+                            c["tolerance"]
+                        )
+                    except Exception as e:
+                        assert 0, (
+                            f"while evaluating canary stage {cn + 1} tolerance: {e}"
+                        )
         for stage_name in ["main", "unassigned", "stragglers"]:
             if stage_name in d["stages"]:
                 if stage := d["stages"].get(stage_name):
@@ -316,6 +352,15 @@ def yaml_to_HostOSRolloutPlanSpec(s: str) -> HostOSRolloutPlanSpec:
                         d["stages"][stage_name] = {"selectors": selectors}
                     except Exception as e:
                         assert 0, f"while evaluating {stage_name} stage: {e}"
+                    if "tolerance" in stage:
+                        try:
+                            d["stages"][stage_name]["tolerance"] = (
+                                to_NodeFailureTolerance(stage["tolerance"])
+                            )
+                        except Exception as e:
+                            assert 0, (
+                                f"while evaluating {stage_name} stage tolerance: {e}"
+                            )
         remaining_keys = set(d["stages"].keys()) - set(
             ["canary", "main", "unassigned", "stragglers"]
         )
@@ -385,27 +430,15 @@ type NodeAlertStatus = Literal["alerting"] | Literal["OK"] | Literal["unknown"]
 
 type NodeAlertStatuses = dict[NodeId, NodeAlertStatus]
 
-
-class ComputedBatch(TypedDict):
-    nodes: NodeBatch
-    selectors: NodeSelector
-
-
 type HostOSStage = (
     Literal["canary"] | Literal["main"] | Literal["unassigned"] | Literal["stragglers"]
 )
 
 
-class ProvisionalHostOSBatches(TypedDict):
-    canary: list[ComputedBatch]
-    main: list[ComputedBatch]
-    unassigned: list[ComputedBatch]
-    stragglers: list[ComputedBatch]
-
-
 class ProvisionalHostOSPlanBatch(TypedDict):
     nodes: NodeBatch
     selectors: NodeSelector
+    tolerance: NotRequired[NodeFailureTolerance]
     start_at: datetime.datetime
 
 

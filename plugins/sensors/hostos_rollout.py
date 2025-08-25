@@ -29,12 +29,14 @@ def has_network_adopted_hostos_revision(
 
 def have_hostos_nodes_adopted_revision(
     nodes: list[rollout_types.NodeInfo],
+    tolerance: rollout_types.NodeFailureTolerance | None,
     network: ic_types.ICNetwork,
     params: DagParams,
     ti: TaskInstance,
 ) -> PokeReturnValue:
     git_revision = params["git_revision"]
     simulate = params["simulate"]
+    tolerance = 0 if tolerance is None else tolerance
 
     print(
         f"Waiting for specified HostOS nodes to have adopted revision {git_revision}."
@@ -64,24 +66,50 @@ def have_hostos_nodes_adopted_revision(
     }
     ti.xcom_push(XCOM_RETURN_KEY, upgradeds)
 
+    node_count = len(nodes_versions)
     not_done = [(k, v) for k, v in upgradeds.items() if v == "AWOL" or v == "pending"]
+    not_done_count = len(not_done)
+    not_done_ratio = not_done_count / node_count
 
-    if len(not_done) > 0:
+    if isinstance(tolerance, float) and not_done_ratio > tolerance:
         print(
-            f"Upgrade of HostOS nodes to {git_revision}"
-            " is not complete yet.  The following nodes are not done:"
+            f"{not_done_ratio} of HostOS nodes have yet to upgrade to {git_revision}"
+            f" but the required ratio is {tolerance}:"
+        )
+        for n, s in not_done:
+            print(f"* Node {n} is {s}")
+
+    elif isinstance(tolerance, int) and not_done_count > tolerance:
+        print(
+            f"{not_done_count} of HostOS nodes have yet to upgrade to {git_revision}"
+            f" but the required number of nodes is {tolerance}:"
         )
         for n, s in not_done:
             print(f"* Node {n} is {s}")
     else:
         print(
-            "All %s HostOS nodes have updated to revision %s."
-            % (len(upgradeds), git_revision)
+            "All required %s HostOS nodes have updated to revision %s (%s)."
+            % (
+                len(upgradeds),
+                git_revision,
+                (
+                    "tolerance ratio: %s -- actually not done: %s"
+                    % (tolerance, not_done_ratio)
+                )
+                if isinstance(tolerance, float)
+                else (
+                    "tolerance count: %s -- actually not done: %s"
+                    % (tolerance, not_done_count)
+                ),
+            )
         )
         return PokeReturnValue(True)
 
     if simulate:
-        print("This is a simulation, pretending everything went well.")
+        print(
+            "This is a simulation, pretending everything went well "
+            f"regardless of tolerance {tolerance}"
+        )
         return PokeReturnValue(True)
 
     return PokeReturnValue(False)
@@ -89,6 +117,7 @@ def have_hostos_nodes_adopted_revision(
 
 def are_hostos_nodes_healthy(
     nodes: list[rollout_types.NodeInfo],
+    tolerance: rollout_types.NodeFailureTolerance | None,
     network: ic_types.ICNetwork,
     params: DagParams,
     ti: TaskInstance,
@@ -98,6 +127,8 @@ def are_hostos_nodes_healthy(
 
     Return True if no alerts, False otherwise.
     """
+    tolerance = 0 if tolerance is None else tolerance
+    simulate = params["simulate"]
     joined = "|".join(n["node_id"] for n in nodes)
 
     print("Waiting for alerts on HostOS nodes to subside.")
@@ -109,33 +140,62 @@ def are_hostos_nodes_healthy(
             }[15m]
         )""" % (joined,)
 
-    alerting: rollout_types.NodeAlertStatuses = {n["node_id"]: "unknown" for n in nodes}
+    nodestatuses: rollout_types.NodeAlertStatuses = {n["node_id"]: "OK" for n in nodes}
 
     print("::group::Querying Prometheus servers")
     print(query)
     print("::endgroup::")
     res = prom.query_prometheus_servers(network.prometheus_urls, query)
-    if len(res) > 0:
+
+    if res:
         print("There are still Prometheus alerts related to these HostOS nodes:")
-        for r in res:
-            alerting[r["metric"]["ic_node"]] = "alerting"
-            print(r)
+    for r in res:
+        print(r)
+        nodestatuses[r["metric"]["ic_node"]] = "alerting"
+    ti.xcom_push(XCOM_RETURN_KEY, nodestatuses)
 
-        # Save alerting status of nodes.
-        ti.xcom_push(XCOM_RETURN_KEY, alerting)
+    node_alerting_count = len([k for k, v in nodestatuses.items() if v == "alerting"])
+    node_alerting_ratio = len(
+        [k for k, v in nodestatuses.items() if v == "alerting"]
+    ) / len(nodestatuses)
 
-        if params["simulate"]:
-            print("Returning as success anyway because we are in a simulation.")
-            return True
-        else:
-            return False
+    if isinstance(tolerance, float) and node_alerting_ratio > tolerance:
+        print(
+            f"{node_alerting_ratio} of HostOS nodes are still alerting"
+            f" but the required ratio is {tolerance}."
+        )
 
+    elif isinstance(tolerance, int) and node_alerting_count > tolerance:
+        print(
+            f"{node_alerting_count} of HostOS nodes are still alerting"
+            f" but the required number of nodes is {tolerance}:"
+        )
     else:
-        print("There are no more alerts on HostOS nodes.")
-        alerting = {k: "OK" for k in alerting}
-        # Save all-OK alerting status.
-        ti.xcom_push(XCOM_RETURN_KEY, alerting)
+        print(
+            "All required %s HostOS nodes have stopped alerting (%s)."
+            % (
+                len(nodestatuses),
+                (
+                    "tolerance ratio: %s -- actually still alerting: %s"
+                    % (tolerance, node_alerting_ratio)
+                )
+                if isinstance(tolerance, float)
+                else (
+                    "tolerance count: %s -- actually still alerting: %s"
+                    % (tolerance, node_alerting_count)
+                ),
+            )
+        )
         return True
+
+    if simulate:
+        print(
+            "This is a simulation, pretending everything went well "
+            f"regardless of tolerance {tolerance}"
+        )
+        return True
+
+    return False
 
 
 if __name__ == "__main__":

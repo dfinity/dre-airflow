@@ -420,6 +420,7 @@ export type HostOsBatchResponse = {
     planned_nodes: NodeInfo[];
     actual_nodes: NodeInfo[] | null;
     selectors: HostOsNodeSelectors | null;
+    tolerance: number | string | null;
     upgraded_nodes: { [key: string]: UpgradeStatus } | null
     alerting_nodes: { [key: string]: AlertStatus } | null
 }

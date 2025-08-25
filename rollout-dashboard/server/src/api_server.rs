@@ -108,6 +108,10 @@ macro_rules! handle {
         let $ident = $self.clone();
         move || async move { $block }
     }};
+    ($self:ident, $ident:ident, |$parms:ident($($arg:tt)*): $type:ty, $parms2:ident($($arg2:tt)*): $type2:ty|, $block:block) => {{
+        let $ident = $self.clone();
+        move |$parms($($arg)*): $type, $parms2($($arg2)*): $type2| async move { $block }
+    }};
     ($self:ident, $ident:ident, |$parms:ident($($arg:tt)*): $type:ty|, $block:block) => {{
         let $ident = $self.clone();
         move |$parms($($arg)*): $type| async move { $block }
