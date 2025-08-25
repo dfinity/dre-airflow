@@ -646,7 +646,8 @@ impl Parser {
         ) -> IndexMap<NonZero<usize>, BatchResponse> {
             m.into_iter()
                 .filter(|(_, v)| {
-                    !v.actual_nodes.clone().unwrap_or_default().is_empty() || v.selectors.is_some()
+                    !v.planned_nodes.is_empty()
+                        || !v.actual_nodes.clone().unwrap_or_default().is_empty()
                 })
                 .collect()
         }
