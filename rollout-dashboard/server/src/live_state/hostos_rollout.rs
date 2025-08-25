@@ -659,7 +659,22 @@ impl Parser {
         ) -> IndexMap<NonZero<usize>, BatchResponse> {
             m.into_iter()
                 .filter(|(_, v)| {
-                    !v.actual_nodes.clone().unwrap_or_default().is_empty() || v.selectors.is_some()
+                    !(
+                        // We drop the batch if it has no planned nodes
+                        // AND (
+                        //   it is either known that there are no actual nodes,
+                        //   OR
+                        //   no nodes have been assigned to the task yet
+                        // )
+                        //
+                        // Basically if a batch has no planned work, and has
+                        // has not yet done any actual work yet, it is dropped.
+                        // If it has planned work, it is kept, even if it did
+                        // later do no actual work.  If it did not plan any work
+                        // but in the end did actual work, it is kept.
+                        v.planned_nodes.is_empty()
+                            && v.actual_nodes.as_ref().is_none_or(|nodes| nodes.is_empty())
+                    )
                 })
                 .collect()
         }
