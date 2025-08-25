@@ -21,17 +21,15 @@
     import InfoBlock from "./InfoBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
     import Selectors from "./Selectors.svelte";
-    import {
-        batch_view_with_cancellation,
-        rollouts_view_with_cancellation,
-    } from "./stores";
+    import { batch_view_with_cancellation, type FullState } from "./stores";
     import { onDestroy } from "svelte";
-    import { Dropdown, Heading, NavHamburger } from "flowbite-svelte";
+    import { Heading, NavHamburger } from "flowbite-svelte";
     import { Navbar, NavLi, NavUl, NavBrand } from "flowbite-svelte";
     import { AngleLeftOutline, GridOutline } from "flowbite-svelte-icons";
     import LoadingBlock from "./LoadingBlock.svelte";
     import ErrorBlock from "./ErrorBlock.svelte";
     import HostOsRollout from "./HostOSRollout.svelte";
+    import type { Writable } from "svelte/store";
 
     function reducer(akku: Record<string, number>, val: string) {
         let old_count = akku[val];
@@ -47,9 +45,11 @@
         dag_run_id: string;
         stage_name: string;
         batch_number: number;
+        rollouts_view: Writable<FullState>;
     }
 
-    let { dag_run_id, stage_name, batch_number }: Props = $props();
+    let { dag_run_id, stage_name, batch_number, rollouts_view }: Props =
+        $props();
 
     let [batch, cancel] = batch_view_with_cancellation(
         dag_run_id,
@@ -57,11 +57,8 @@
         batch_number,
     );
 
-    let [view, cancel_rollouts_view] = rollouts_view_with_cancellation();
-
     onDestroy(() => {
         cancel();
-        cancel_rollouts_view();
     });
 
     function getUpgradeStatus(
@@ -179,13 +176,14 @@
 
             <Popover class="cursor-pointer w-4/5">
                 <div>
-                    {#each $view.rollouts as rollout}
+                    {#each $rollouts_view.rollouts as rollout}
                         {#if rollout.name == dag_run_id && rollout.kind === "rollout_ic_os_to_mainnet_nodes"}
                             <HostOsRollout
                                 {rollout}
-                                paused={$view.rollout_engine_states[
+                                paused={$rollouts_view.rollout_engine_states[
                                     "rollout_ic_os_to_mainnet_nodes"
                                 ] === "paused"}
+                                {rollouts_view}
                             />
                         {/if}
                     {/each}
