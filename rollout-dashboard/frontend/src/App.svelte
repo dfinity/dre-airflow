@@ -15,6 +15,8 @@
   import HostOsBatchDetail from "./lib/HostOSBatchDetail.svelte";
   import { writable, type Writable } from "svelte/store";
   import NotFound from "./lib/NotFound.svelte";
+  import { rollouts_view_with_cancellation } from "./lib/stores";
+  import { onDestroy } from "svelte";
 
   type index_route = { name: "index" };
   type not_found = { name: "NotFound" };
@@ -71,17 +73,23 @@
     // For me, this means if it's not part of my admin path
     // if (!url.startsWith("/admin")) return;
   });
+
+  let [rollouts_view, cancel] = rollouts_view_with_cancellation();
+  onDestroy(() => {
+    cancel();
+  });
 </script>
 
 <div>
   {#key $selectedRoute}
     {#if $selectedRoute.name === "index"}
-      <Index />
+      <Index {rollouts_view} />
     {:else if $selectedRoute.name === "HostOsBatchDetail"}
       <HostOsBatchDetail
         dag_run_id={$selectedRoute.dag_run_id}
         stage_name={$selectedRoute.stage_name}
         batch_number={$selectedRoute.batch_number}
+        {rollouts_view}
       />
     {:else}
       <NotFound />

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { rollouts_view_with_cancellation } from "../lib/stores.js";
+    import { type FullState } from "../lib/stores.js";
     import {
         rolloutKindName,
         getRolloutEngineStates,
@@ -30,8 +30,12 @@
     import LoadingBlock from "../lib/LoadingBlock.svelte";
     import WarningBlock from "../lib/WarningBlock.svelte";
     import ExternalLinkIcon from "../lib/ExternalLinkIcon.svelte";
+    import type { Writable } from "svelte/store";
 
-    let [view, cancel] = rollouts_view_with_cancellation();
+    interface Props {
+        rollouts_view: Writable<FullState>;
+    }
+    let { rollouts_view }: Props = $props();
 
     let stateChoices: CheckboxItem[] = [
         { value: "active", label: "Active" },
@@ -74,7 +78,6 @@
         }
     });
     onDestroy(() => {
-        cancel();
         let savedFilters = {
             visibleStates: visibleStates,
             visibleKinds: visibleKinds,
@@ -162,17 +165,17 @@
         </NavUl>
     </Navbar>
 
-    {#if $view.error && $view.error !== "loading"}
+    {#if $rollouts_view.error && $rollouts_view.error !== "loading"}
         <ErrorBlock>
             <span class="font-medium">Cannot retrieve rollout data:</span>
-            {$view.error}
+            {$rollouts_view.error}
         </ErrorBlock>
     {/if}
 
-    {#if $view.error === "loading"}
+    {#if $rollouts_view.error === "loading"}
         <LoadingBlock />
     {/if}
-    {#each getRolloutEngineStates($view.rollout_engine_states) as [kind, state]}
+    {#each getRolloutEngineStates($rollouts_view.rollout_engine_states) as [kind, state]}
         {#if state === "missing"}
             <WarningBlock>
                 <span class="font-medium"
@@ -209,28 +212,29 @@
     {/each}
 </div>
 
-{#each $view.rollouts as rollout}
+{#each $rollouts_view.rollouts as rollout}
     {#if (visibleStates.includes("active") && rollout.state !== "complete" && rollout.state !== "failed") || (visibleStates.includes("complete") && rollout.state === "complete") || (visibleStates.includes("failed") && rollout.state === "failed")}
         {#if rollout.kind === "rollout_ic_os_to_mainnet_subnets" && visibleKinds.includes("rollout_ic_os_to_mainnet_subnets")}
             <GuestOSRollout
                 {rollout}
-                paused={$view.rollout_engine_states[
+                paused={$rollouts_view.rollout_engine_states[
                     "rollout_ic_os_to_mainnet_subnets"
                 ] === "paused"}
             />
         {:else if rollout.kind === "rollout_ic_os_to_mainnet_api_boundary_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_api_boundary_nodes")}
             <ApiBoundaryNodesRollout
                 {rollout}
-                paused={$view.rollout_engine_states[
+                paused={$rollouts_view.rollout_engine_states[
                     "rollout_ic_os_to_mainnet_api_boundary_nodes"
                 ] === "paused"}
             />
         {:else if rollout.kind === "rollout_ic_os_to_mainnet_nodes" && visibleKinds.includes("rollout_ic_os_to_mainnet_nodes")}
             <HostOsRollout
                 {rollout}
-                paused={$view.rollout_engine_states[
+                paused={$rollouts_view.rollout_engine_states[
                     "rollout_ic_os_to_mainnet_nodes"
                 ] === "paused"}
+                {rollouts_view}
             />
         {/if}
     {/if}

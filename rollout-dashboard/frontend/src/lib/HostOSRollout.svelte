@@ -16,12 +16,15 @@
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
     import ClipboardIcon from "./ClipboardIcon.svelte";
     import InfoBlock from "./InfoBlock.svelte";
+    import type { Writable } from "svelte/store";
+    import type { FullState } from "./stores";
     interface Props {
         rollout: HostOsRollout;
         paused: boolean;
+        rollouts_view: Writable<FullState>;
     }
 
-    let { rollout, paused }: Props = $props();
+    let { rollout, paused, rollouts_view }: Props = $props();
 
     let rolloutClass: String = activeClass(rollout.state);
     let git_revision: string = rollout.conf.git_revision.toString();
