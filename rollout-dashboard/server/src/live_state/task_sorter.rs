@@ -88,9 +88,7 @@ impl TaskInstanceTopologicalSorter {
                 })
             }) {
                 Ok(pos) => {
-                    panic!(
-                        "Task instance {taskid} {mapindex:?} cannot be already in pos {pos}"
-                    )
+                    panic!("Task instance {taskid} {mapindex:?} cannot be already in pos {pos}")
                 } // element already in vector @ `pos`
                 Err(pos) => tasklist.insert(pos, rctaskinstance),
             }

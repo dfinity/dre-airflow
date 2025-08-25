@@ -221,7 +221,7 @@ impl Pageable for DagRunsResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct XComEntryResponse {
     #[allow(dead_code)]
     pub key: String,
@@ -1293,7 +1293,7 @@ impl AirflowClient {
         .await
     }
 
-    /// Return mapped tasks of a task instance in a DAG run.
+    /// Return XCom entry of a (possibly mapped) task instance in a DAG run.
     pub async fn xcom_entry(
         &self,
         dag_id: &str,

@@ -101,12 +101,17 @@ struct SseHandlerParameters {
 pub(crate) struct ApiServer {
     state_syncer: Arc<AirflowStateSyncer<Live>>,
     airflow_api: Arc<AirflowClient>,
+    unstable_api_enabled: bool,
 }
 
 macro_rules! handle {
     ($self:ident, $ident:ident, $block:block) => {{
         let $ident = $self.clone();
         move || async move { $block }
+    }};
+    ($self:ident, $ident:ident, |$parms:ident($($arg:tt)*): $type:ty, $parms2:ident($($arg2:tt)*): $type2:ty|, $block:block) => {{
+        let $ident = $self.clone();
+        move |$parms($($arg)*): $type, $parms2($($arg2)*): $type2| async move { $block }
     }};
     ($self:ident, $ident:ident, |$parms:ident($($arg:tt)*): $type:ty|, $block:block) => {{
         let $ident = $self.clone();
@@ -128,10 +133,12 @@ impl ApiServer {
     pub fn new(
         state_syncer: Arc<AirflowStateSyncer<Live>>,
         airflow_api: Arc<AirflowClient>,
+        enable_unstable_api: bool,
     ) -> Self {
         Self {
             state_syncer,
             airflow_api,
+            unstable_api_enabled: enable_unstable_api,
         }
     }
 
@@ -432,6 +439,26 @@ impl ApiServer {
         ))
     }
 
+    async fn get_xcom_entry(
+        &self,
+        dag_id: &str,
+        dag_run_id: &str,
+        task_instance_id: &str,
+        map_index: Option<usize>,
+        xcom_key: &str,
+    ) -> Result<Json<unstable::XComEntryResponse>, (StatusCode, String)> {
+        Ok(Json(
+            match self
+                .airflow_api
+                .xcom_entry(dag_id, dag_run_id, task_instance_id, map_index, xcom_key)
+                .await
+            {
+                Ok(val) => val,
+                Err(e) => return Err(e.into()),
+            },
+        ))
+    }
+
     fn get_hostos_rollout_batch(
         &self,
         dag_run_id: &str,
@@ -558,7 +585,12 @@ impl ApiServer {
     }
 
     pub fn routes(self: Arc<Self>) -> Router {
-        Router::new()
+        #[derive(Deserialize)]
+        struct QMapIndex {
+            map_index: Option<usize>,
+        }
+
+        let mut router = Router::new()
             .nest("/api/v1", Router::new()
                 // V1 API
                 .route(
@@ -609,7 +641,9 @@ impl ApiServer {
                         s.stream_get_hostos_rollout_batch(dag_run_id, stage_name, batch_number).await
                     }))
                 )
-            )
+            );
+        if self.unstable_api_enabled {
+            router = router
             .nest(
                 // unstable API
                 "/api/unstable",
@@ -629,6 +663,15 @@ impl ApiServer {
                             .await
                     }))
                 )
+                .route(
+                    "/dags/{dag_id}/dag_runs/{dag_run_id}/task_instances/{task_id}/xcom_entries/{xcom_key}",
+                    get(handle!(self, s, |Path((dag_id,dag_run_id,task_instance_id,xcom_key)): Path<(String,String,String,String)>, Query(query): Query<QMapIndex>|, {
+                        s.get_xcom_entry(dag_id.as_str(),dag_run_id.as_str(),task_instance_id.as_str(),query.map_index,xcom_key.as_str())
+                        .await
+                    }))
+                )
             )
+        }
+        router
     }
 }

@@ -48,6 +48,8 @@ async fn main() -> ExitCode {
         &env::var("REFRESH_INTERVAL").unwrap_or(format!("{BACKEND_REFRESH_UPDATE_INTERVAL}")),
     )
     .unwrap();
+    let enable_unstable_api =
+        from_str::<bool>(&env::var("ENABLE_UNSTABLE_API").unwrap_or("false".to_string())).unwrap();
     let backend_host = env::var("BACKEND_HOST").unwrap_or("127.0.0.1:4174".to_string());
     let airflow_url_str =
         env::var("AIRFLOW_URL").unwrap_or("http://admin:password@localhost:8080/".to_string());
@@ -66,7 +68,11 @@ async fn main() -> ExitCode {
     let airflow_client = Arc::new(AirflowClient::new(airflow_url, airflow_timeout).unwrap());
     let syncer = AirflowStateSyncer::new(airflow_client.clone(), max_rollouts, refresh_interval);
     let (syncing_syncer, background_loop_fut) = syncer.start_syncing(end_rx.clone());
-    let server = Arc::new(api_server::ApiServer::new(syncing_syncer, airflow_client));
+    let server = Arc::new(api_server::ApiServer::new(
+        syncing_syncer,
+        airflow_client,
+        enable_unstable_api,
+    ));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
