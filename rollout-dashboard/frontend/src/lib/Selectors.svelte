@@ -37,15 +37,16 @@
     {:else}
         <div class="join">
             {#each Object.entries(selectors.join) as [index, selector]}
-                {#if index !== "0"}<div class="operator">⋃</div>{/if}
+                {#if index !== "0"}<div class="operator" title="joined to">
+                        ⋃
+                    </div>{/if}
                 <Selectors selectors={selector} />
             {/each}
         </div>
     {/if}
 {:else if "not" in selectors}
     <div class="complement">
-        <div class="specifier">remaining candidates</div>
-        <div class="operator">∖</div>
+        <div class="operator" title="except for">∖</div>
         <Selectors selectors={selectors.not} />
     </div>
 {:else}
