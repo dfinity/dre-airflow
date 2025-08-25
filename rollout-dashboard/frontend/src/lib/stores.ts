@@ -21,7 +21,7 @@ export const rollouts_view_with_cancellation = ((): [Writable<FullState>, () => 
             "rollout_ic_os_to_mainnet_nodes": "initial"
         }
     })
-    let timeout: number | null = null;
+    let timeout: number[] = [];
 
     function setupEventSource(): EventSource {
         let ev = new EventSource(url);
@@ -98,7 +98,7 @@ export const rollouts_view_with_cancellation = ((): [Writable<FullState>, () => 
                 rollout_engine_states: get(airflow_state).rollout_engine_states,
             })
         });
-        ev.onerror = function (e) {
+        ev.addEventListener("error", (e) => {
             console.log({ message: "Disconnected from event source.  Reconnecting in 5 seconds.", event: e })
             var errorText = 'Rollout dashboard is down — reconnecting in 5 seconds'
             airflow_state.set({
@@ -107,12 +107,16 @@ export const rollouts_view_with_cancellation = ((): [Writable<FullState>, () => 
                 rollout_engine_states: get(airflow_state).rollout_engine_states
             })
             evtSource.close();
-            setTimeout(setupEventSource, 5000)
-            timeout = setTimeout(function setup() {
+            while (timeout.length > 0) {
+                let t = timeout.pop();
+                console.log("Clearing timeout " + t);
+                clearTimeout(t)
+            }
+            timeout.push(setTimeout(function setup() {
                 evtSource = setupEventSource();
                 console.log("Overrode event source");
-            }, 5000);
-        }
+            }, 5000));
+        });
         console.log("Set up rollouts_view event source");
         return ev
     }
@@ -121,10 +125,12 @@ export const rollouts_view_with_cancellation = ((): [Writable<FullState>, () => 
 
     return [airflow_state, function () {
         console.log("Cancelled rollouts_view_with_cancellation");
-        if (timeout !== null) {
-            clearTimeout(timeout)
-        }
         evtSource.close();
+        while (timeout.length > 0) {
+            let t = timeout.pop();
+            console.log("Clearing timeout " + t);
+            clearTimeout(t)
+        }
     }]
 
 });
@@ -140,7 +146,7 @@ export const batch_view_with_cancellation = ((dag_run_id: string, stage_name: st
         message: "No content",
         permanent: false,
     });
-    let timeout: number | null = null;
+    let timeout: number[] = [];
 
     function setupEventSource(): EventSource {
         console.log("Setting up event source for " + resource);
@@ -167,10 +173,15 @@ export const batch_view_with_cancellation = ((dag_run_id: string, stage_name: st
             };
             batch.set(msg);
             evtSource.close();
-            timeout = setTimeout(function setup() {
+            while (timeout.length > 0) {
+                let t = timeout.pop();
+                console.log("Clearing timeout " + t);
+                clearTimeout(t)
+            }
+            timeout.push(setTimeout(function setup() {
                 evtSource = setupEventSource();
                 console.log("Overrode event source");
-            }, 5000);
+            }, 5000));
         };
         console.log("Set up batch_view event source");
         return ev;
@@ -180,8 +191,10 @@ export const batch_view_with_cancellation = ((dag_run_id: string, stage_name: st
 
     return [batch, function () {
         console.log("Cancelled batch_view_with_cancellation");
-        if (timeout !== null) {
-            clearTimeout(timeout)
+        while (timeout.length > 0) {
+            let t = timeout.pop();
+            console.log("Clearing timeout " + t);
+            clearTimeout(t)
         }
         evtSource.close();
     }]
