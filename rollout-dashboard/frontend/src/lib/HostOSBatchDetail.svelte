@@ -288,9 +288,9 @@
                             <TableBodyCell style="white-space: normal">
                                 {#if actual_items !== null && planned_items !== null}
                                     {planned_items.length} nodes planned, {actual_items.length}
-                                    actually targeted
+                                    actually targeted.
                                 {:else if planned_items !== null}
-                                    {planned_items.length} nodes planned
+                                    {planned_items.length} nodes planned.
                                 {/if}<br /><br
                                 />{#if $batch.tolerance === null}All targets are
                                     required to upgrade successfully and exhibit
