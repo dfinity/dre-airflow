@@ -1383,6 +1383,7 @@ pub mod v2 {
 pub mod unstable {
     pub use crate::airflow_client::DagRunsResponseItem;
     pub use crate::airflow_client::TaskInstancesResponseItem;
+    pub use crate::airflow_client::XComEntryResponse;
     use chrono::{DateTime, Utc};
     use serde::Serialize;
 
