@@ -255,6 +255,7 @@ export type HostOsNodeSpecifier = {
     assignment: "assigned" | "unassigned" | "API boundary" | null
     owner: "DFINITY" | "others" | null
     nodes_per_group: number | string | null
+    datacenter: string | null
     group_by: "datacenter" | "subnet" | null
     status: "Healthy" | "Degraded" | "Dead" | null
 }
@@ -305,6 +306,10 @@ export function formatSpecifier(selector: HostOsNodeSpecifier): string {
         s = `${s} owned by ${selector.owner}`;
     } else if (selector.owner === "others") {
         s = `${s} not owned by DFINITY`;
+    }
+
+    if (selector.datacenter !== null) {
+        s = `${s} in datacenter ${selector.datacenter}`;
     }
 
     if (
