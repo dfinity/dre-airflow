@@ -1,8 +1,5 @@
 <script lang="ts">
-    import {
-        rollouts_view_with_cancellation,
-        type FullState,
-    } from "../lib/stores.js";
+    import { type FullState } from "../lib/stores.js";
     import {
         rolloutKindName,
         getRolloutEngineStates,
