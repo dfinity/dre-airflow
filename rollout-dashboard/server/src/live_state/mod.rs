@@ -8,7 +8,7 @@ use rollout_dashboard::airflow_client::{
     AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
     TaskInstancesResponseItem,
 };
-use rollout_dashboard::types::v2::{Rollout, RolloutKind};
+use rollout_dashboard::types::v2::{Rollout, RolloutEngineState, RolloutKind};
 use rollout_dashboard::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
@@ -544,7 +544,7 @@ impl AirflowStateSyncer<Live> {
         debug!(target: LOG_TARGET, "Retrieving engine states.");
 
         // Retrieve the state of each DAG.
-        let engine_states: v2::RolloutEngineStates = {
+        let mut engine_states: v2::RolloutEngineStates = {
             let mut dags_response = self
                 .airflow_api
                 .dags(1000, 0, &DagsQueryFilter::default(), None)
@@ -557,6 +557,12 @@ impl AirflowStateSyncer<Live> {
             dags_response
         }
         .into();
+
+        for d in Parser::valid_dag_ids() {
+            engine_states
+                .entry(d.to_string())
+                .or_insert(RolloutEngineState::Broken);
+        }
 
         let rollout_state_futures: Vec<_> = join_all(
             Parser::valid_dag_ids()
@@ -599,8 +605,15 @@ impl AirflowStateSyncer<Live> {
         )
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, AirflowError>>()?
-        .into_iter()
+        .filter_map(|r: std::result::Result<_, AirflowError>| {
+            match r {
+                Ok(x) => Some(x),
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Unexpected error retrieving DAG runs and tasks of some DAG: {}", e); None
+                }
+            }
+        }
+        )
         .map(
             |(
                 dag_id,
