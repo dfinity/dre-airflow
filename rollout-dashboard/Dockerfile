@@ -3,10 +3,14 @@ WORKDIR /usr/src
 RUN cargo new rollout-dashboard
 COPY server/Cargo.toml server/Cargo.lock ./rollout-dashboard/
 WORKDIR /usr/src/rollout-dashboard
-RUN cargo build --release ; rm -rf src ; echo "This step is expected to fail, but it creates a layer that is cacheable." >&2
+RUN cargo build --release ; \
+    rm -rf src ; \
+    echo "This step is expected to fail, but it creates a layer that is cacheable." >&2
 COPY server/src ./src/
 RUN cargo build --release && \
-    mv target/release/rollout-dashboard .
+    RUSTDOCFLAGS="-D warnings" cargo doc --release --no-deps && \
+    mv target/release/rollout-dashboard . && \
+    mv target/doc .
 
 FROM docker.io/node:alpine as node
 WORKDIR /workdir
@@ -22,6 +26,7 @@ FROM quay.io/fedora/fedora-minimal:42
 WORKDIR /
 COPY --from=rust /usr/src/rollout-dashboard/rollout-dashboard /rollout-dashboard
 COPY --from=node /workdir/dist /static
+COPY --from=rust /usr/src/rollout-dashboard/doc /static/doc
 
 EXPOSE 4174
 ENV FRONTEND_STATIC_DIR=static

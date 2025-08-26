@@ -1,11 +1,11 @@
+use super::super::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{trace, warn};
-use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Display, str::FromStr, sync::Arc};
 
-use crate::live_state::python::PythonDeserializer;
+use super::python::PythonDeserializer;
 
 const LOG_TARGET: &str = "live_state::plan";
 

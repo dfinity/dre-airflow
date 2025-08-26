@@ -1,6 +1,4 @@
-use rollout_dashboard::airflow_client::{
-    TaskInstancesResponseItem, TasksResponse, TasksResponseItem,
-};
+use super::super::airflow_client::{TaskInstancesResponseItem, TasksResponse, TasksResponseItem};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
@@ -10,6 +8,9 @@ use std::{vec, vec::Vec};
 use topological_sort::TopologicalSort;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// The tasks sent by Airflow have a cyclic graph error.
+///
+/// This should never happen.
 pub struct CyclicDependencyError {
     message: String,
 }
