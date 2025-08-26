@@ -606,14 +606,22 @@ impl AirflowStateSyncer<Live> {
         .await
         .into_iter()
         .filter_map(|r: std::result::Result<_, AirflowError>| {
+            // Here we handle the circumstance whereby a DAG itself went missing because it was broken.
+            // Positive confirmation of this phenomenon will be available in the v2::RolloutEngineStates
+            // returned at the end of this function.
+            //
+            // We handle this by filtering because, that way, at least we can collect information on
+            // existing DAGs that are *not* broken.
             match r {
-                Ok(x) => Some(x),
-                Err(e) => {
-                    error!(target: LOG_TARGET, "Unexpected error retrieving DAG runs and tasks of some DAG: {}", e); None
+                Err(AirflowError::StatusCode(StatusCode::NOT_FOUND)) => {
+                    error!(target: LOG_TARGET, "Airflow responded {} to request for DAG runs and tasks of some DAG -- DAG probably broken.", StatusCode::NOT_FOUND);
+                    None
                 }
+                _ => Some(r),
             }
-        }
-        )
+        })
+        .collect::<Result<Vec<_>, AirflowError>>()?
+        .into_iter()
         .map(
             |(
                 dag_id,
