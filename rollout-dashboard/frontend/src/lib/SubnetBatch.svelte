@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { A } from "flowbite-svelte";
     import Time from "svelte-time";
     import { copy } from "svelte-copy";
     import { toast } from "@zerodevx/svelte-toast";

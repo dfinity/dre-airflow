@@ -1,6 +1,10 @@
+use axum::Router;
+use axum::http::HeaderValue;
+use axum::response::Redirect;
+use axum::routing::get;
 use live_state::AirflowStateSyncer;
 use log::{error, info};
-use reqwest::Url;
+use reqwest::{Url, header};
 use serde_json::from_str;
 use std::env;
 use std::io::Write;
@@ -8,6 +12,8 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
+use tower::ServiceBuilder;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use tokio::select;
 use tokio::signal::unix::{SignalKind, signal};
@@ -84,12 +90,26 @@ async fn main() -> ExitCode {
         end_tx.send(()).unwrap_or(());
     });
 
+    let root = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, must-revalidate"),
+        ))
+        .service(ServeDir::new(frontend_static_dir.clone()));
+    let assets = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, immutable, max-age=31536000"),
+        ))
+        .service(ServeDir::new(frontend_static_dir.clone() + "/assets"));
     let mut end_rx_for_server = end_rx.clone();
     let ret = match axum::serve(
         listener,
         server
             .routes()
-            .fallback_service(ServeDir::new(frontend_static_dir))
+            .route_service("/index.html", get(|| async { Redirect::permanent("/") }))
+            .nest("/assets", Router::new().fallback_service(assets))
+            .fallback_service(root)
             .into_make_service(),
     )
     .with_graceful_shutdown(async move {

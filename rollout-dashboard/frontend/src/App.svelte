@@ -54,12 +54,13 @@
     // Get the path for the URL being navigated to
     let u = new URL(e.destination.url);
     let path = u.pathname;
+    if (path == "/index.html") {
+      path = "/";
+    }
     if (path !== "/") return;
 
-    let fragment = u.hash;
-
-    console.log(`About to navigate to ${path} with fragment ${fragment}`);
-    let possible_route = determineRoute(fragment);
+    console.log(`About to navigate to ${path} with fragment ${u.hash}`);
+    let possible_route = determineRoute(u.hash);
     console.log(possible_route);
     if (possible_route) {
       e.intercept({
