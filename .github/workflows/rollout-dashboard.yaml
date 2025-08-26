@@ -64,7 +64,6 @@ jobs:
       - name: cargo doc
         run: |
           set -e
-          cargo doc --help
           RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
   test-frontend:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
