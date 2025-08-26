@@ -1,8 +1,13 @@
-//! Contains useful types to deserialize the result of the API calls
-//! made available by the rollout dashboard REST API.
+//! These are the types used to deserialize inputs and results of the API calls
+//! made available by the rollout dashboard REST / SSE API.
+//!
+//! See [crate::api_server] for a listing of API endpoints.
 
+/// Types used by version 1 of the API.
+///
+/// This is deprecated and should not be used.
 pub mod v1 {
-    use crate::airflow_client::{DagsResponse, DagsResponseItem};
+    use super::super::airflow_client::{DagsResponse, DagsResponseItem};
     use chrono::{DateTime, Utc};
     use indexmap::IndexMap;
     use reqwest::StatusCode;
@@ -253,20 +258,50 @@ pub mod v1 {
     }
 }
 
+/// Types used by version 2 of the API.
 pub mod v2 {
-
-    use crate::airflow_client::{DagsResponse, DagsResponseItem};
+    use super::super::airflow_client::{DagsResponse, DagsResponseItem};
     use chrono::{DateTime, Utc};
     use indexmap::IndexMap;
     use reqwest::StatusCode;
+    use serde::Deserialize;
+    use serde::Deserializer;
     use serde::Serialize;
     use serde::Serializer;
+    use serde::de;
     use std::collections::VecDeque;
     use std::convert::Infallible;
+    use std::fmt;
     use std::fmt::Display;
     use std::str::FromStr;
     use strum::EnumString;
 
+    /// Serde deserialization decorator to map empty Strings to None,
+    fn empty_value_as_true<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: FromStr,
+        T::Err: fmt::Display,
+    {
+        let opt = Option::<String>::deserialize(de)?;
+        match opt.as_deref() {
+            Some("") | None => FromStr::from_str("true")
+                .map_err(de::Error::custom)
+                .map(Some),
+            Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
+        }
+    }
+
+    #[derive(Deserialize)]
+    /// Query string parameters for the SSE endpoint.
+    pub struct SseHandlerParameters {
+        #[serde(default, deserialize_with = "empty_value_as_true")]
+        /// Should events be incremental?  Or just full events every update?
+        /// Defaults to true in API v2, false in API v1.
+        pub incremental: Option<bool>,
+    }
+
+    /// Types used when dealing with GuestOS rollouts.
     pub mod guestos {
         pub use super::super::v1::{
             Batch, RolloutState as State, Subnet, SubnetRolloutState as SubnetState,
@@ -285,6 +320,7 @@ pub mod v2 {
         }
     }
 
+    /// Types used when dealing with API boundary node rollouts.
     pub mod api_boundary_nodes {
         use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
@@ -369,6 +405,7 @@ pub mod v2 {
         }
     }
 
+    /// Types used when dealing with HostOS rollouts.
     pub mod hostos {
 
         use chrono::{DateTime, Utc};
@@ -410,7 +447,7 @@ pub mod v2 {
 
         #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
         #[serde(rename_all = "snake_case")]
-        /// Represents the rollout state of a subnet.
+        /// Represents the rollout state of a HostOS rollout batch.
         // Ordering matters here.
         pub enum BatchState {
             Error,
@@ -423,8 +460,8 @@ pub mod v2 {
             WaitingForAdoption,
             WaitingUntilNodesHealthy,
             Complete,
-            /// The state a batch is when plan skips ahead (wait_until_start_time is skipped)
-            /// or collect_nodes skips ahead (create_proposal_if_none_exists is skipped).
+            /// The state a batch is when plan skips ahead (`wait_until_start_time` is skipped)
+            /// or `collect_nodes` skips ahead (`create_proposal_if_none_exists` is skipped).
             Skipped,
             Unknown,
         }
@@ -701,6 +738,7 @@ pub mod v2 {
             pub actual_start_time: Option<DateTime<Utc>>,
             /// The time of the last action associated with this batch, if any.
             pub end_time: Option<DateTime<Utc>>,
+            /// Current state of this batch.
             pub state: BatchState,
             /// Shows a comment for the batch if it is available; else it contains an empty string.
             pub comment: String,
@@ -770,12 +808,16 @@ pub mod v2 {
         #[strum(serialize_all = "lowercase")]
         pub enum StageName {
             #[serde(rename = "canary")]
+            /// Serialized as `canary`.
             Canary,
             #[serde(rename = "main")]
+            /// Serialized as `main`.
             Main,
             #[serde(rename = "unassigned")]
             Unassigned,
+            /// Serialized as `unassigned`.
             #[serde(rename = "stragglers")]
+            /// Serialized as `stragglers`.
             Stragglers,
         }
 
@@ -811,6 +853,7 @@ pub mod v2 {
         /// important information (either known or pending) at its current
         /// state.
         pub struct BatchResponse {
+            /// The name of the HostOS rollout stage.
             pub stage: StageName,
             pub batch_number: NonZero<usize>,
             /// The time the batch was programmed to start at.
@@ -819,6 +862,7 @@ pub mod v2 {
             pub actual_start_time: Option<DateTime<Utc>>,
             /// The time of the last action associated with this batch, if any.
             pub end_time: Option<DateTime<Utc>>,
+            /// Current state of this batch.
             pub state: BatchState,
             /// Shows a comment for the batch if it is available; else it contains an empty string.
             pub comment: String,
@@ -857,18 +901,33 @@ pub mod v2 {
         }
 
         #[derive(Clone, Debug, PartialEq, Eq)]
+        /// Error response for batch detail requests.
         pub enum BatchError {
+            /// The dashboard has not yet completely synced data from Airflow.
             NotYetSynced,
+            /// The rollout in question does not yet have a plan.  A plan may
+            /// be computed in the future.
             NoPlanDataYet,
+            /// The batch has not yet appeared in the rollout.  It may not appear
+            /// ever.
             NoBatchDataYet,
+            /// The supplied batch number is invalid.
             InvalidBatchNumber,
+            /// The supplied stage name ([StageName]) is invalid.
             InvalidStageName,
+            /// The supplied DAG ID ([super::RolloutKind]) is invalid.
             InvalidDagID,
+            /// The supplied DAG ID is not a HostOS rollout.
             WrongDagRunKind,
+            /// The supplied DAG run ID (rollout name, [super::DagID]) is invalid.
             InvalidDagRunID,
+            /// No HostOS rollout with that name.
             NoSuchDagRun,
+            /// The rollout never computed a plan.
             NoPlanData,
+            /// The requested batch definitely does not exist.
             NoSuchBatch,
+            /// The dashboard failed to synchronize data from Airflow.
             RolloutDataGatherError(String),
         }
 
@@ -1089,22 +1148,34 @@ pub mod v2 {
         }
     }
 
+    /// A kind of rollout (e.g. rollout to API boundary nodes).
+    ///
+    /// Used in the [Rollout] type to add information specific
+    /// to the kind of rollout it contains.  Adds a tag `kind`
+    /// to the [Rollout] with this type's name serialized as
+    /// indicated by the variant.
     #[derive(Debug, Serialize, Clone)]
     #[serde(tag = "kind")]
     #[serde(rename_all = "snake_case")]
     #[allow(clippy::large_enum_variant)]
     pub enum RolloutKind {
+        /// GuestOS rollout. Serialized as `rollout_ic_os_to_mainnet_subnets`.
         RolloutIcOsToMainnetSubnets(guestos::Rollout),
+        /// API boundary node rollout. Serialized as `rollout_ic_os_to_mainnet_api_boundary_nodes`.
         RolloutIcOsToMainnetApiBoundaryNodes(api_boundary_nodes::Rollout),
+        /// HostOS rollout. Serialized as `rollout_ic_os_to_mainnet_nodes`.
         RolloutIcOsToMainnetNodes(hostos::Rollout),
     }
 
-    // Types to prevent type confusion.
+    /// Rollout kind, available as an identifier.
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, EnumString)]
     #[strum(serialize_all = "snake_case")]
     pub enum DagID {
+        /// GuestOS rollout. Serialized to `rollout_ic_os_to_mainnet_subnets`.
         RolloutIcOsToMainnetSubnets,
+        /// API boundary node rollout. Serialized as `rollout_ic_os_to_mainnet_api_boundary_nodes`.
         RolloutIcOsToMainnetApiBoundaryNodes,
+        /// HostOS rollout. Serialized as `rollout_ic_os_to_mainnet_nodes`.
         RolloutIcOsToMainnetNodes,
     }
 
@@ -1123,6 +1194,7 @@ pub mod v2 {
         }
     }
 
+    /// Name of a rollout.
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub struct DagRunID(String);
 
@@ -1160,8 +1232,8 @@ pub mod v2 {
         /// to determine which rollouts have changed in the SSE API.
         pub update_count: usize,
         #[serde(flatten)]
-        /// Data about the specific type of rollout this is.  Tagged "kind" before
-        /// serializing the specific data in question.
+        /// Data about the specific type of rollout this is.  Used as `kind` tag when
+        /// serializing the specific rollout in question.
         pub kind: RolloutKind,
     }
 
@@ -1213,7 +1285,13 @@ pub mod v2 {
     /// has been removed from Airflow.
     #[derive(Serialize)]
     pub struct DeletedRollout {
+        /// The kind of rollout that was deleted.
+        ///
+        /// Internally this is a [DagID].
         pub kind: String,
+        /// The name of the rollout that was deleted.
+        ///
+        /// Internally this is a [DagRunID].
         pub name: String,
     }
 
@@ -1228,11 +1306,16 @@ pub mod v2 {
         Active,
     }
 
-    /// Represents one or more engine update states.  May be empty,
-    /// but it usually contains the states of each rollout engine in a
-    /// full status update, and the states changed in between incremental
-    /// updates.  The key of the dictionary is the kind of the rollout,
-    /// and the value is the state of that rollout's engine.
+    /// Represents one or more engine update states.
+    ///
+    /// When sent in a
+    /// full status update, it contains an exhaustive map of rollout
+    /// kind (see [RolloutKind]) and its corresponding [RolloutEngineState].
+    ///
+    /// In the case of incremental updates (usually sent by SSE endpoints)
+    /// it contains only the rollout engine states that changed since the
+    /// last incremental update.  The key of the dictionary is a [RolloutKind],
+    /// and the value is its [RolloutEngineState].
     pub type RolloutEngineStates = IndexMap<String, RolloutEngineState>;
 
     impl From<DagsResponse> for RolloutEngineStates {
@@ -1281,14 +1364,17 @@ pub mod v2 {
         }
     }
 
+    /// List of rollout information.
     pub type Rollouts = VecDeque<Rollout>;
 
+    /// Represents the current state of the rollouts and the rollout engines.
     #[derive(Serialize, Clone, Default)]
     pub struct State {
         pub rollouts: Rollouts,
         pub rollout_engine_states: RolloutEngineStates,
     }
 
+    #[doc(hidden)]
     pub fn serialize_status_code<S>(e: &StatusCode, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1331,39 +1417,40 @@ pub mod v2 {
         }
     }
 
-    /// The two variants of full state that can be sent by
-    /// non-SSE endpoints, and also stored internally.
-    /// Contains either a list of rollouts ordered from newest to oldest,
-    /// dated from the last time it was successfully updated, or an HTTP
-    /// status code corresponding to -- and with -- a message for the last error.
-    #[derive(Serialize, Clone)]
-    #[serde(tag = "untagged")]
-    pub enum StateResponse {
-        State(State),
-        Error(Error),
-    }
-
+    /// Types used by server-side events endpoints.
     pub mod sse {
         use super::{DeletedRollout, Error, Rollout, RolloutEngineStates, State};
         use serde::Serialize;
         use std::collections::VecDeque;
 
+        /// Represents changes from a prior rollouts state update.
         #[derive(Serialize)]
         pub struct RolloutsDelta {
+            /// Updated rollouts.
+            ///
+            /// Client should use its existing knowledge and this data
+            /// to produce an updated view of the rollouts.
             pub updated: VecDeque<Rollout>,
+            /// Rollouts that were deleted from the state.
+            ///
+            /// Client should
+            /// use this information to delete rollouts from its state.
             pub deleted: VecDeque<DeletedRollout>,
         }
 
-        /// Represents a state update sent by the dashboard backend
-        /// via its SSE update endpoint at the /api/v2/sse path.
+        /// Streamed state update sent by the dashboard backend
+        /// via its SSE update endpoint designated for rollouts.
         ///
         /// Messages are sent as SSE events, where the name of the event
         /// is the name of the struct embedded in each variant below,
         /// and the data field is a JSON serialization of the data.
-        /// E.g. a CompleteState variant would look like this on the wire:
+        /// E.g. a [Message::CompleteState] variant would look like this
+        /// on the wire:
         ///
-        ///   event: State
-        ///   data: {"rollouts": ..., "rollout_engine_states": ...}
+        /// ```yaml
+        /// event: State
+        /// data: {"rollouts": ..., "rollout_engine_states": ...}
+        /// ```
         #[derive(Serialize)]
         #[serde(tag = "untagged")]
         pub enum Message {
@@ -1371,28 +1458,38 @@ pub mod v2 {
             ///
             /// In SSE use, only sent during initial update or after a state update error,
             /// in order to fully synchronize the client with the state of the world.
+            ///
+            /// Event name: `State`.
             CompleteState(State),
             /// Error state sent by the dashboard backend via its
             /// SSE update endpoint.
             ///
             /// Clients should invalidate their view of the world
             /// when an error is received.
+            ///
+            /// Event name: `Error`.
             Error(Error),
-            /// Incremental rollout info update sent by the dashboard backend via its SSE update endpoint.  Updated rollouts must
+            /// Incremental rollout info update sent by the dashboard backend via its
+            /// SSE update endpoint.  Updated rollouts must
             /// be replaced in clients' local state, while deleted rollouts
             /// must be deleted fromm clients' local state.
-            /// Only sent after a full state update.  Clients are meant to use this
+            /// Only sent after a full state update and if the caller requested incremental
+            /// updates (false by default for API v1 and true by default for API v2).
+            /// Clients are meant to use this
             /// to synchronize their internal state to the state of the world that the
             /// servers see.
+            ///
+            /// Event Name: `RolloutsDelta`.
             RolloutsDelta(RolloutsDelta),
             /// Engine info update sent by the dashboard backend via its SSE update endpoint.
             /// Upon receipt, clients must replace their own local
-            /// copy of the states of all engines with the update sent
+            /// copy of the states of each engine with the update for that engine sent
             /// here.
             ///
             /// Only sent after a full state update.  Clients are meant to use this
             /// to synchronize their internal state to the state of the world that the
             /// servers see.
+            /// Event Name: `RolloutEngineStates`.
             RolloutEngineStatesUpdate(RolloutEngineStates),
         }
 
@@ -1433,13 +1530,41 @@ pub mod v2 {
                 }
             }
         }
+
+        #[derive(PartialEq, Eq)]
+        /// Streamed HostOS batch detail result.
+        pub struct HostOsBatchResult(
+            pub Result<super::hostos::BatchResponse, super::hostos::BatchError>,
+        );
+
+        #[allow(clippy::from_over_into)]
+        impl Into<HostOsBatchResult> for Result<super::hostos::BatchResponse, super::hostos::BatchError> {
+            fn into(self) -> HostOsBatchResult {
+                HostOsBatchResult(self)
+            }
+        }
+
+        impl From<&HostOsBatchResult> for (bool, axum::response::sse::Event) {
+            /// Transforms a Message into a pair (bool, SSE event).
+            /// If the boolean is true, the caller running the SSE stream must interrupt
+            /// the connection after sending the event.
+            fn from(m: &HostOsBatchResult) -> (bool, axum::response::sse::Event) {
+                match &m.0 {
+                    Ok(sok) => (false, sok.into()),
+                    Err(e) => (e.permanent(), e.into()),
+                }
+            }
+        }
     }
 }
 
+/// Types used by API calls not yet stabilized.
+///
+/// This is not exposed in production and should not be relied upon.
 pub mod unstable {
-    pub use crate::airflow_client::DagRunsResponseItem;
-    pub use crate::airflow_client::TaskInstancesResponseItem;
-    pub use crate::airflow_client::XComEntryResponse;
+    pub use super::super::airflow_client::DagRunsResponseItem;
+    pub use super::super::airflow_client::TaskInstancesResponseItem;
+    pub use super::super::airflow_client::XComEntryResponse;
     use chrono::{DateTime, Utc};
     use serde::Serialize;
 

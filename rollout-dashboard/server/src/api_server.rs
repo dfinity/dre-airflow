@@ -1,7 +1,49 @@
-use crate::live_state::SuccessfulSyncCycleState;
-use crate::live_state::{
+//! The following documentation contains a list of REST and SSE (server-sent events)
+//! endpoints that are available as API for clients of the rollout dashboard.
+//!
+//! See [crate::types] for structured type information on API responses.
+//!
+//! # v2 (current)
+//!
+//! Mounted at `/api/v2`.
+//!
+//! ## REST endpoints
+//!
+//! * `/api/v2/state`
+//!   * Retrieves the current state of rollouts and rollout engines.
+//!   * On success, returns [crate::types::v2::State].
+//!   * On failure, returns [crate::live_state::RolloutDataGatherError].
+//! * `/api/v2/rollouts/rollout_ic_os_to_mainnet_nodes/{dag_run_id}/stages/{stage_name}/batches/{batch_number}`
+//!   * Retrieves a detailed view of a [crate::types::v2::hostos::Rollout].
+//!   * Requires the [crate::types::v2::DagID], [crate::types::v2::DagRunID], [crate::types::v2::hostos::StageName] and (natural number) batch number as part
+//!     of the request path.
+//!   * On success, returns a [crate::types::v2::hostos::BatchResponse].
+//!   * On failure, returns a [crate::types::v2::hostos::BatchError].
+//!
+//! ## SSE (server-sent events) endpoints
+//!
+//! * `/api/v2/sse`
+//!   * Streams the current state of rollouts and rollout engines.
+//!   * Supports query string parameters [crate::types::v2::SseHandlerParameters].
+//!   * Events streamed to the client are of type [crate::types::v2::sse::Message].
+//!   * If a permanent error occurs, the SSE connection is closed
+//!     shortly after indicating so through a
+//!     [crate::types::v2::sse::Message::Error].
+//! * `/api/v2/rollouts/rollout_ic_os_to_mainnet_nodes/{dag_run_id}/stages/{stage_name}/batches/{batch_number}/sse`
+//!   * Streams a detailed view of a [crate::types::v2::hostos::Rollout], sending
+//!     complete updates to the client when the batch is updated by Airflow.
+//!   * Requires the [crate::types::v2::DagID], [crate::types::v2::DagRunID], [crate::types::v2::hostos::StageName] and (natural number) batch number as part
+//!     of the request path.
+//!   * Events streamed to the client are of type [crate::types::v2::sse::HostOsBatchResult].
+//!   * If a permanent error occurs, the SSE connection is closed
+//!     shortly after indicating so through a
+//!     [crate::types::v2::hostos::BatchError].
+use super::airflow_client::AirflowClient;
+use super::live_state::SuccessfulSyncCycleState;
+use super::live_state::{
     AirflowStateSyncer, Live, Parser, RolloutState, RolloutStates, SyncCycleState, SyncerState,
 };
+use super::types::{unstable, v1, v2};
 use async_stream::try_stream;
 use axum::extract::Path;
 use axum::extract::Query;
@@ -12,12 +54,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use futures::stream::Stream;
 use log::debug;
-use rollout_dashboard::airflow_client::AirflowClient;
-use rollout_dashboard::types::{unstable, v1, v2};
-use serde::{Deserialize, Deserializer, Serialize, de};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
-use std::fmt;
 use std::iter::Iterator;
 use std::num::NonZero;
 use std::str::FromStr;
@@ -25,22 +64,6 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
-
-/// Serde deserialization decorator to map empty Strings to None,
-fn empty_value_as_true<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: FromStr,
-    T::Err: fmt::Display,
-{
-    let opt = Option::<String>::deserialize(de)?;
-    match opt.as_deref() {
-        Some("") | None => FromStr::from_str("true")
-            .map_err(de::Error::custom)
-            .map(Some),
-        Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
-    }
-}
 
 macro_rules! http_error {
     ($code:expr) => {{
@@ -92,13 +115,8 @@ macro_rules! sse {
     };
 }
 
-#[derive(Deserialize)]
-struct SseHandlerParameters {
-    #[serde(default, deserialize_with = "empty_value_as_true")]
-    incremental: Option<bool>,
-}
-
-pub(crate) struct ApiServer {
+#[doc(hidden)]
+pub struct ApiServer {
     state_syncer: Arc<AirflowStateSyncer<Live>>,
     airflow_api: Arc<AirflowClient>,
     unstable_api_enabled: bool,
@@ -537,36 +555,14 @@ impl ApiServer {
         stage_name: String,
         batch_number: usize,
     ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
-        #[derive(PartialEq, Eq)]
-        struct HostOsBatchResult(Result<v2::hostos::BatchResponse, v2::hostos::BatchError>);
-
-        #[allow(clippy::from_over_into)]
-        impl Into<HostOsBatchResult> for Result<v2::hostos::BatchResponse, v2::hostos::BatchError> {
-            fn into(self) -> HostOsBatchResult {
-                HostOsBatchResult(self)
-            }
-        }
-
-        impl From<&HostOsBatchResult> for (bool, axum::response::sse::Event) {
-            /// Transforms a Message into a pair (bool, SSE event).
-            /// If the boolean is true, the caller running the SSE stream must interrupt
-            /// the connection after sending the event.
-            fn from(m: &HostOsBatchResult) -> (bool, axum::response::sse::Event) {
-                match &m.0 {
-                    Ok(sok) => (false, sok.into()),
-                    Err(e) => (e.permanent(), e.into()),
-                }
-            }
-        }
-
         // Stream status updates.
         let mut stream = WatchStream::new(self.state_syncer.subscribe_to_syncer_updates());
         // Set an initial message to diff the first broadcast message against.
-        let mut last = HostOsBatchResult(Err(v2::hostos::BatchError::NotYetSynced));
+        let mut last = v2::sse::HostOsBatchResult(Err(v2::hostos::BatchError::NotYetSynced));
 
         sse!({
             while let Some(new) = stream.next().await {
-                let current = HostOsBatchResult(self.get_hostos_rollout_batch(
+                let current = v2::sse::HostOsBatchResult(self.get_hostos_rollout_batch(
                     &dag_run_id,
                     &stage_name,
                     batch_number,
@@ -603,8 +599,8 @@ impl ApiServer {
                 )
                 .route(
                     "/rollouts/sse",
-                    get(handle!(self, s, |options: Query<SseHandlerParameters>|, {
-                        let options: SseHandlerParameters = options.0;
+                    get(handle!(self, s, |options: Query<v2::SseHandlerParameters>|, {
+                        let options: v2::SseHandlerParameters = options.0;
                         s.stream_state_v1(options.incremental.unwrap_or_default()).await
                     })),
                 )
@@ -618,7 +614,7 @@ impl ApiServer {
                 .route("/state", get(handle!(self, s, { s.get_state().await })))
                 .route(
                     "/sse",
-                    get(handle!(self, s, |options: Query<SseHandlerParameters>|, {
+                    get(handle!(self, s, |options: Query<v2::SseHandlerParameters>|, {
                         s.stream_state(options.incremental.unwrap_or(true))
                     })),
                 )

@@ -107,9 +107,8 @@
     <FooterLinkGroup
       class="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0"
     >
-      <FooterLink
-        href="https://github.com/dfinity/dre-airflow/tree/main/rollout-dashboard"
-        target="_blank">Documentation</FooterLink
+      <FooterLink href="/doc/rollout_dashboard" target="_blank"
+        >Documentation</FooterLink
       >
       <FooterLink
         href="https://dfinity.enterprise.slack.com/archives/C01DB8MQ5M1"

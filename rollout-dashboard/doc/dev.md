@@ -48,12 +48,7 @@ This is very fast either way.
 
 ## Building the frontend static files
 
-To build the static parts of the frontend, within the `frontend` folder
-use `npm run build`.  Build files will be in folder `dist/`.
-
-Remember that the environment variable `FRONTEND_STATIC_DIR`, when
-running the backend, should point to the folder containing the result
-of the build (`dist` as built above).
+See [../frontend/README.md](../frontend/README.md) for more info.
 
 ## Things this project uses
 

@@ -17,6 +17,10 @@ In production, it is composed of two distinct pieces:
 
 *[Find the live dashboard in production here](https://rollout-dashboard.ch1-rel1.dfinity.network/)*
 
+## Frontend information
+
+See [frontend/README.md](frontend/README.md) for information on the frontend.
+
 ## Production information
 
 To upgrade the dashboard in production, simply approve the latest

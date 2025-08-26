@@ -1,9 +1,9 @@
+use super::super::airflow_client::{AirflowClient, AirflowError, EventLogsResponseFilters};
 use super::{DagID, DagRunID};
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use log::{debug, trace};
 use regex::Regex;
-use rollout_dashboard::airflow_client::{AirflowClient, AirflowError, EventLogsResponseFilters};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;

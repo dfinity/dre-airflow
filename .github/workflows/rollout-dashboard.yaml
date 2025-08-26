@@ -61,6 +61,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+      - name: cargo doc
+        run: |
+          set -e
+          cargo doc --help
+          RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
   test-frontend:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     name: Test rollout dashboard frontend

@@ -1,19 +1,19 @@
-use crate::live_state::python::PythonDateTime;
+use python::PythonDateTime;
 
+use super::super::airflow_client::{
+    AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
+};
+use super::super::types::v2::RolloutKind;
+use super::super::types::v2::hostos::{
+    ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeFailureTolerance,
+    NodeInfo, NodeSelectors, NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
+};
 use super::plan::{PlanQueryResult, fetch_xcom};
 use super::{RolloutDataGatherError, plan::PlanCache, python};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use log::{trace, warn};
 use regex::Regex;
-use rollout_dashboard::airflow_client::{
-    AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
-};
-use rollout_dashboard::types::v2::RolloutKind;
-use rollout_dashboard::types::v2::hostos::{
-    ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeFailureTolerance,
-    NodeInfo, NodeSelectors, NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
-};
 use serde::{Deserialize, Serialize, Serializer};
 use std::cmp::max;
 use std::cmp::min;
@@ -708,12 +708,12 @@ impl Parser {
 mod tests {
     use std::str::FromStr;
 
-    use rollout_dashboard::types::v2::hostos::{
+    use super::super::super::types::v2::hostos::{
         NodeAssignment, NodeFailureTolerance, NodeOwner, NodeSelectors, NodeSpecifier, NodeStatus,
         NodesPerGroup,
     };
 
-    use crate::live_state::hostos_rollout::ProvisionalHostOSPlan;
+    use super::super::super::live_state::hostos_rollout::ProvisionalHostOSPlan;
 
     #[test]
 

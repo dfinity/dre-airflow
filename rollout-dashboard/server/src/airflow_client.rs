@@ -25,7 +25,7 @@ use urlencoding::decode;
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
-/// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
+/// Exists to mitigate <https://github.com/apache/airflow/issues/41283> .
 /// The issue is now fixed but we will have to upgrade to Airflow 2.10.5 (we may have to also upgrade our Helm chart!) for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 // API sub-URL for Airflow.
@@ -621,18 +621,33 @@ impl Pageable for EventLogsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// Problem communicating with Airflow.
+///
+/// When returned by a REST endpoint, this is serialized as an error HTTP
+/// status code and a brief explanation.
 pub enum AirflowError {
-    #[serde(serialize_with = "serialize_status_code")]
-    StatusCode(reqwest::StatusCode),
+    /// The dashboard client to Airflow could not connect to Airflow.
+    /// Serialized when responding to a REST request as the bad gateway HTTP status code.
     ReqwestError(String),
+    #[serde(serialize_with = "serialize_status_code")]
+    /// The dashboard client to Airflow received this status code as reply.
+    /// Serialized when responding to a REST request as the contained HTTP status.
+    StatusCode(reqwest::StatusCode),
+    /// Airflow responded with malformed JSON to the dashboard's request.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     JSONDecodeError {
         explanation: String,
         payload: String,
     },
+    /// Airflow responded with an unexpected JSON data structure to the dashboard's request.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     DeserializeError {
         explanation: String,
         payload: String,
     },
+    /// Cannot communicate with Airflow because Airflow rejects the dashboard's
+    /// requests as unauthorized.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     AuthenticationError(String),
 }
 
