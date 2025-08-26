@@ -143,7 +143,7 @@
                         name="states"
                         choices={stateChoices}
                         bind:group={visibleStates}
-                        classes={{ div: "p-3" }}
+                        divClass="p-3"
                     />
                 </Listgroup>
             </Dropdown>
@@ -158,7 +158,7 @@
                         name="kinds"
                         choices={kindChoices}
                         bind:group={visibleKinds}
-                        classes={{ div: "p-3" }}
+                        divClass="p-3"
                     />
                 </Listgroup>
             </Dropdown>

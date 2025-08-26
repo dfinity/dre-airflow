@@ -2,8 +2,6 @@
     import {
         hostOsBatchStateIcon,
         type AlertStatus,
-        type HostOsBatchResponse,
-        type NodeInfo,
         type UpgradeStatus,
     } from "./types";
     import {
