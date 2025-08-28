@@ -26,7 +26,7 @@ use urlencoding::decode;
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
 /// Exists to mitigate <https://github.com/apache/airflow/issues/41283> .
-/// The issue is now fixed but we will have to upgrade to Airflow 2.10.5 (we may have to also upgrade our Helm chart!) for this code to be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
+/// After upgrade to Airflow >= 2.10.5 in prod this code should be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 // API sub-URL for Airflow.
 const API_SUBURL: &str = "api/v1/";
@@ -229,7 +229,7 @@ pub struct XComEntryResponse {
     pub timestamp: DateTime<Utc>,
     #[allow(dead_code)]
     pub execution_date: DateTime<Utc>,
-    #[serde(deserialize_with = "negative_is_none")]
+    #[serde(deserialize_with = "negative_and_null_are_none")]
     #[allow(dead_code)]
     pub map_index: Option<usize>,
     #[allow(dead_code)]
@@ -256,17 +256,22 @@ pub enum TaskInstanceState {
     Restarting,
 }
 
-fn negative_is_none<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+fn negative_and_null_are_none<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let s = i64::deserialize(deserializer)?;
-    if s < 0 {
-        Ok(None)
-    } else {
-        match usize::try_from(s) {
-            Ok(ss) => Ok(Some(ss)),
-            Err(e) => Err(D::Error::custom(format!("cannot fit in usize: {e}"))),
+    let s: Option<i64> = Option::deserialize(deserializer)?;
+    match s {
+        None => Ok(None),
+        Some(s) => {
+            if s < 0 {
+                Ok(None)
+            } else {
+                match usize::try_from(s) {
+                    Ok(ss) => Ok(Some(ss)),
+                    Err(e) => Err(D::Error::custom(format!("cannot fit {s} in usize: {e}"))),
+                }
+            }
         }
     }
 }
@@ -306,7 +311,7 @@ pub struct TaskInstancesResponseItem {
     pub state: Option<TaskInstanceState>,
     #[allow(dead_code)]
     pub try_number: usize,
-    #[serde(deserialize_with = "negative_is_none")]
+    #[serde(deserialize_with = "negative_and_null_are_none")]
     pub map_index: Option<usize>,
     #[allow(dead_code)]
     pub max_tries: usize,
@@ -530,6 +535,8 @@ pub struct EventLogsResponseItem {
     pub dag_id: Option<String>,
     pub task_id: Option<String>,
     pub run_id: Option<String>,
+    #[serde(deserialize_with = "negative_and_null_are_none")]
+    #[serde(default)]
     pub map_index: Option<usize>,
     pub try_number: Option<usize>,
     pub event: String,
