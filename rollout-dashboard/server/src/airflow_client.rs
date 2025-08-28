@@ -25,7 +25,7 @@ use urlencoding::decode;
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
-/// Exists to mitigate https://github.com/apache/airflow/issues/41283 .
+/// Exists to mitigate <https://github.com/apache/airflow/issues/41283> .
 /// After upgrade to Airflow >= 2.10.5 in prod this code should be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 // API sub-URL for Airflow.
