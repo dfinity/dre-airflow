@@ -1,3 +1,8 @@
+use super::super::airflow_client::{
+    AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
+};
+use super::super::types::v2::RolloutKind;
+use super::super::types::v2::guestos::{Batch, Rollout, State, Subnet, SubnetState};
 use super::plan::{PlanQueryResult, fetch_xcom};
 use super::{RolloutDataGatherError, plan::PlanCache, python};
 use chrono::{DateTime, Utc};
@@ -5,11 +10,6 @@ use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use log::{trace, warn};
 use regex::Regex;
-use rollout_dashboard::airflow_client::{
-    AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
-};
-use rollout_dashboard::types::v2::RolloutKind;
-use rollout_dashboard::types::v2::guestos::{Batch, Rollout, State, Subnet, SubnetState};
 use serde::Serialize;
 use std::cmp::max;
 use std::cmp::min;

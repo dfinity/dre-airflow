@@ -1,15 +1,15 @@
+use super::airflow_client::{
+    AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
+    TaskInstancesResponseItem,
+};
+use super::types::v2::{Rollout, RolloutEngineState, RolloutKind};
+use super::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use chrono::{DateTime, Utc};
 use derive_more::IntoIterator;
 use futures::future::join_all;
 use indexmap::IndexMap;
 use log::{debug, error, info};
 use reqwest::StatusCode;
-use rollout_dashboard::airflow_client::{
-    AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
-    TaskInstancesResponseItem,
-};
-use rollout_dashboard::types::v2::{Rollout, RolloutEngineState, RolloutKind};
-use rollout_dashboard::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use std::cmp::max;
@@ -53,9 +53,15 @@ where
     }
 }
 
+/// Problem gathering rollout data.
+///
+/// For purposes of REST requests, this is serialized as a reply with an
+/// error HTTP status code and a short explanatory message.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub enum RolloutDataGatherError {
+    /// Problem communicating with Airflow.
     AirflowError(AirflowError),
+    /// Unexpected cyclic dependency in task data served by Airflow.
     CyclicDependency(task_sorter::CyclicDependencyError),
 }
 
@@ -132,8 +138,12 @@ impl From<SuccessfulSyncCycleState> for v2::State {
 
 #[derive(Clone, Serialize, Debug)]
 pub enum SyncCycleState {
+    /// The dashboard is loading data from Airflow after start.
     Initial,
+    /// Rollout and engine data from the last update cycle.
     Successful(SuccessfulSyncCycleState),
+    /// An error occurred gathering data from Airflow during the
+    /// last update cycle.
     Error(RolloutDataGatherError),
 }
 
@@ -401,17 +411,17 @@ impl RolloutStates {
 }
 
 #[derive(Clone)]
-pub(super) struct SyncerState {
+pub struct SyncerState {
     /// Map from DAG ID and DAG run ID to updater.
     pub(super) rollout_states: RolloutStates,
     log_inspectors: HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
     pub(super) cycle_state: SyncCycleState,
 }
 
-pub(crate) struct Initial;
-pub(crate) struct Live;
+pub struct Initial;
+pub struct Live;
 
-pub(crate) struct AirflowStateSyncer<S> {
+pub struct AirflowStateSyncer<S> {
     airflow_api: Arc<AirflowClient>,
     syncer_state: Arc<Mutex<Arc<SyncerState>>>,
     stream_tx: Sender<Arc<SyncerState>>,
@@ -478,6 +488,10 @@ impl Rollouts {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.len() == 0
     }
 }
 

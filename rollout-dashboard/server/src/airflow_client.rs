@@ -628,18 +628,33 @@ impl Pageable for EventLogsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// Problem communicating with Airflow.
+///
+/// When returned by a REST endpoint, this is serialized as an error HTTP
+/// status code and a brief explanation.
 pub enum AirflowError {
-    #[serde(serialize_with = "serialize_status_code")]
-    StatusCode(reqwest::StatusCode),
+    /// The dashboard client to Airflow could not connect to Airflow.
+    /// Serialized when responding to a REST request as the bad gateway HTTP status code.
     ReqwestError(String),
+    #[serde(serialize_with = "serialize_status_code")]
+    /// The dashboard client to Airflow received this status code as reply.
+    /// Serialized when responding to a REST request as the contained HTTP status.
+    StatusCode(reqwest::StatusCode),
+    /// Airflow responded with malformed JSON to the dashboard's request.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     JSONDecodeError {
         explanation: String,
         payload: String,
     },
+    /// Airflow responded with an unexpected JSON data structure to the dashboard's request.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     DeserializeError {
         explanation: String,
         payload: String,
     },
+    /// Cannot communicate with Airflow because Airflow rejects the dashboard's
+    /// requests as unauthorized.
+    /// Serialized when responding to a REST request as an HTTP internal server error.
     AuthenticationError(String),
 }
 

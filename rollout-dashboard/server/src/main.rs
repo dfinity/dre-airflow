@@ -2,9 +2,11 @@ use axum::Router;
 use axum::http::HeaderValue;
 use axum::response::Redirect;
 use axum::routing::get;
-use live_state::AirflowStateSyncer;
 use log::{error, info};
 use reqwest::{Url, header};
+use rollout_dashboard::airflow_client::AirflowClient;
+use rollout_dashboard::api_server::ApiServer;
+use rollout_dashboard::live_state::AirflowStateSyncer;
 use serde_json::from_str;
 use std::env;
 use std::io::Write;
@@ -19,11 +21,6 @@ use tokio::select;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 use tower_http::services::ServeDir;
-
-mod api_server;
-mod live_state;
-
-use rollout_dashboard::airflow_client::AirflowClient;
 
 const BACKEND_REFRESH_UPDATE_INTERVAL: u64 = 15;
 const MAX_ROLLOUTS: u16 = 10;
@@ -74,7 +71,7 @@ async fn main() -> ExitCode {
     let airflow_client = Arc::new(AirflowClient::new(airflow_url, airflow_timeout).unwrap());
     let syncer = AirflowStateSyncer::new(airflow_client.clone(), max_rollouts, refresh_interval);
     let (syncing_syncer, background_loop_fut) = syncer.start_syncing(end_rx.clone());
-    let server = Arc::new(api_server::ApiServer::new(
+    let server = Arc::new(ApiServer::new(
         syncing_syncer,
         airflow_client,
         enable_unstable_api,
