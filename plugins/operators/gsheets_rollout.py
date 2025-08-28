@@ -101,7 +101,6 @@ class GetFeatureRolloutPlan(GoogleSheetsCreateSpreadsheetOperator):
     def execute(self, context: Any) -> RolloutFeatures:  # type: ignore
         hook = GSheetsHook(
             gcp_conn_id=self.gcp_conn_id,
-            delegate_to=self.delegate_to,
             impersonation_chain=self.impersonation_chain,
         )
 

@@ -60,9 +60,10 @@ function setup_airflow_variables_and_connections() {
     "$AIRFLOW_BIN" connections add "github.node_allocation" --conn-type generic --conn-password "$NODE_ALLOC_PAT" --conn-description "Used by the target topology flow. Permits access to the https://github.com/dfinity/node_allocation repository."
 }
 
+AIRFLOW_SETUP="$VENV_BIN_DIR"/.airflow-2.11.0
 if [ "$1" == "setup" ]
 then
-    PYTHON_VERSION=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 
     # Split version
     PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
@@ -73,12 +74,17 @@ then
         exit 1
     fi
 
-    python -m venv "$VENV_DIR"
-    "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.9.1" \
+    if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]; }; then
+        echo "❌ Python $PYTHON_VERSION is not supported. Please use Python 3.11 or higher."
+        exit 1
+    fi
+
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR"/bin/pip3 install "apache-airflow[celery]==2.11.0" \
         apache-airflow-providers-slack[common.sql] \
         apache-airflow-providers-google \
         "apache-airflow[amazon]" \
-        --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.11.txt
+        --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.11.0/constraints-$PYTHON_MAJOR.$PYTHON_MINOR.txt
     mkdir -p "$AIRFLOW_HOME"
     if ! test -f "$AIRFLOW_HOME"/airflow.db
     then
@@ -87,7 +93,9 @@ then
         PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow db migrate
     fi
     pushd "$AIRFLOW_HOME"
+    rm -f dags
     ln -sfT ../dags dags
+    rm -f plugins
     ln -sfT ../plugins plugins
     sed -i 's/reload_on_plugin_change.*/reload_on_plugin_change = True/' airflow.cfg
     sed -i 's/load_examples.*/load_examples = False/' airflow.cfg
@@ -102,6 +110,8 @@ then
     else
         echo "Skipping Airflow variables and connections setup."
     fi
+
+    touch "$AIRFLOW_SETUP"
 fi
 
 test -x "$VENV_DIR"/bin/airflow || {
@@ -114,6 +124,11 @@ test -f "$AIRFLOW_HOME"/airflow.cfg || {
     echo "Run this command with 'setup' as its only argument to initialize it." >&2
     exit 32
 }
+if ! test -f "$AIRFLOW_SETUP"
+then
+    echo "Sorry, you have to upgrade your Airflow stack to 2.11.0.  Run '$0 setup' to do so." >&2
+    exit 48
+fi
 
 if [ "$1" == "check-setup" ]
 then
@@ -126,6 +141,7 @@ then
     PATH="$VENV_DIR/bin:$PATH" "$VENV_DIR"/bin/airflow info >&2
     echo "You can now run this command with 'standalone' as its only argument." >&2
     echo "When you do that, note the admin password in the scrollback buffer -- you will need it to log in." >&2
+    echo "Also, please exit any IDEs that have this project open, in order to cause it to refresh its Python configuration." >&2
     exit
 fi
 

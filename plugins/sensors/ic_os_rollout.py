@@ -5,7 +5,7 @@ IC-OS rollout sensors.
 import datetime
 import itertools
 import time
-from typing import Any, Sequence, TypedDict, cast
+from typing import Any, NoReturn, Sequence, TypedDict, cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
@@ -25,7 +25,8 @@ from airflow.models.dagrun import DagRun
 from airflow.sensors.base import BaseSensorOperator
 from airflow.sensors.date_time import DateTimeSensorAsync
 from airflow.serialization.pydantic.dag_run import DagRunPydantic
-from airflow.triggers.temporal import TimeDeltaTrigger
+from airflow.triggers.temporal import DateTimeTrigger, TimeDeltaTrigger
+from airflow.utils import timezone
 from airflow.utils.context import Context
 from airflow.utils.state import DagRunState
 
@@ -80,11 +81,18 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
         else:
             self.target_time = target_time
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Context) -> NoReturn:
         if self.simulate:
             print("Nominally we would sleep, but this is a simulation.  Returning now.")
-            return
-        super().execute(context=context)
+            self.defer(
+                method_name="execute_complete",
+                trigger=DateTimeTrigger(
+                    moment=timezone.parse("1980-01-01"),
+                    end_from_trigger=self.end_from_trigger,
+                ),
+            )
+        else:
+            super().execute(context=context)
 
 
 class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):

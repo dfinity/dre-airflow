@@ -1,37 +1,51 @@
 VENV_DIR = venv
-VENV_BINDIR = $(VENV_DIR)/bin
-.PHONY = test ruff mypy pytest
+VENV_BIN_DIR = $(VENV_DIR)/bin
+AIRFLOW_SETUP = $(VENV_BIN_DIR)/.airflow-2.11.0
+AIRFLOW_CFG = airflow/airflow.cfg
+AIRFLOW_TESTS_HOME = $(PWD)/tests
+AIRFLOW_TESTS_CFG = $(AIRFLOW_TESTS_HOME)/airflow.cfg
+AIRFLOW_TESTS_DB = $(AIRFLOW_TESTS_HOME)/airflow.db
 
-$(VENV_BINDIR):
+.PHONY = airflow-setup test ruff mypy pytest
+
+$(AIRFLOW_CFG):
 	bin/airflow setup
-	touch $(VENV_BINDIR)
 
-$(VENV_DIR)/lib/*/site-packages/mock: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install mock
+$(AIRFLOW_SETUP): $(AIRFLOW_CFG)
+	touch $(AIRFLOW_SETUP)
+
+airflow-setup: $(AIRFLOW_SETUP)
+
+$(VENV_DIR)/lib/*/site-packages/mock: $(AIRFLOW_SETUP)
+	$(VENV_BIN_DIR)/pip3 install mock
 	touch $(VENV_DIR)/lib/*/site-packages/mock
 
-$(VENV_BINDIR)/pytest: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install pytest pytest-mock
-	touch $(VENV_BINDIR)/pytest
+$(VENV_BIN_DIR)/pytest: $(AIRFLOW_SETUP)
+	$(VENV_BIN_DIR)/pip3 install pytest pytest-mock
+	touch $(VENV_BIN_DIR)/pytest
 
-$(VENV_BINDIR)/mypy: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install mypy types-PyYAML types-requests types-mock
-	touch $(VENV_BINDIR)/mypy
+$(VENV_BIN_DIR)/mypy: $(AIRFLOW_SETUP)
+	$(VENV_BIN_DIR)/pip3 install mypy types-PyYAML types-requests types-mock
+	touch $(VENV_BIN_DIR)/mypy
 
-$(VENV_BINDIR)/ruff: $(VENV_BINDIR)
-	$(VENV_BINDIR)/pip3 install ruff
-	touch $(VENV_BINDIR)/ruff
+$(VENV_BIN_DIR)/ruff: $(AIRFLOW_SETUP)
+	$(VENV_BIN_DIR)/pip3 install ruff
+	touch $(VENV_BIN_DIR)/ruff
 
-mypy: $(VENV_BINDIR)/mypy
-	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared MYPY_PATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/mypy --config=mypy.ini
+mypy: $(VENV_BIN_DIR)/mypy
+	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared MYPY_PATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/mypy --config=mypy.ini
 
-ruff: $(VENV_BINDIR)/ruff
-	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/ruff check shared plugins dags
+ruff: $(VENV_BIN_DIR)/ruff
+	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/ruff check shared plugins dags
 
-tests/airflow.db: $(VENV_BINDIR)
-	AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/airflow db migrate
+$(AIRFLOW_TESTS_CFG): $(AIRFLOW_SETUP)
+	mkdir -p $(AIRFLOW_TESTS_HOME)
+	cp -f $(AIRFLOW_CFG) $(AIRFLOW_TESTS_CFG)
 
-pytest: tests/airflow.db $(VENV_BINDIR)/pytest $(VENV_DIR)/lib/*/site-packages/mock
-	AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(airflow|dfinity)[.].*" AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BINDIR)/pytest -vv tests
+tests/airflow.db: $(AIRFLOW_SETUP) $(AIRFLOW_TESTS_CFG)
+	AIRFLOW__CORE__EXECUTOR=SequentialExecutor  AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW_HOME=$(AIRFLOW_TESTS_HOME) PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/airflow db migrate
+
+pytest: tests/airflow.db $(VENV_BIN_DIR)/pytest $(VENV_DIR)/lib/*/site-packages/mock
+	AIRFLOW__CORE__EXECUTOR=SequentialExecutor AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS=False AIRFLOW__CORE__LOAD_EXAMPLES=False AIRFLOW__CORE__UNIT_TEST_MODE=True AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES_REGEXP="(airflow|dfinity)[.].*" AIRFLOW_HOME=$(PWD)/tests PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/pytest -vv tests
 
 test: ruff mypy pytest
