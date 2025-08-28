@@ -8,7 +8,7 @@ runs:
       id: prep
       run: |
         ret=0
-        out=$(make venv/bin venv/bin/mypy venv/bin/ruff venv/bin/pytest venv/lib/*/site-packages/mock 2>&1) || ret=$?
+        out=$(make airflow-setup venv/bin/mypy venv/bin/ruff venv/bin/pytest venv/lib/*/site-packages/mock 2>&1) || ret=$?
         if [ $ret != 0 ]
         then
           echo "$out" >&2

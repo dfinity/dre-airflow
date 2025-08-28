@@ -6,13 +6,15 @@ AIRFLOW_TESTS_HOME = $(PWD)/tests
 AIRFLOW_TESTS_CFG = $(AIRFLOW_TESTS_HOME)/airflow.cfg
 AIRFLOW_TESTS_DB = $(AIRFLOW_TESTS_HOME)/airflow.db
 
-.PHONY = test ruff mypy pytest
+.PHONY = airflow-setup test ruff mypy pytest
 
 $(AIRFLOW_CFG):
 	bin/airflow setup
 
 $(AIRFLOW_SETUP): $(AIRFLOW_CFG)
 	touch $(AIRFLOW_SETUP)
+
+airflow-setup: $(AIRFLOW_SETUP)
 
 $(VENV_DIR)/lib/*/site-packages/mock: $(AIRFLOW_SETUP)
 	$(VENV_BIN_DIR)/pip3 install mock
