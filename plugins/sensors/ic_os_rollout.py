@@ -72,7 +72,7 @@ class CustomDateTimeSensorAsync(DateTimeSensorAsync):
     ) -> None:
         """Exists to work around inability to pass target_time as xcom arg."""
         self.simulate = simulate
-        BaseSensorOperator.__init__(self, **kwargs)
+        DateTimeSensorAsync.__init__(self, **kwargs)
 
         if isinstance(target_time, datetime.datetime):
             self.target_time = target_time.isoformat()
