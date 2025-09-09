@@ -98,14 +98,6 @@ stages:
           - datacenter: ct1
           - datacenter: jb1
           - datacenter: jb2
-          - datacenter: hk1
-          - datacenter: kr1
-    tolerance: 1
-  - selectors:
-      assignment: assigned
-      owner: DFINITY
-      status: Healthy
-      nodes_per_group: 10%
   - selectors:
       intersect:
       - join:
@@ -123,9 +115,6 @@ stages:
           - datacenter: ct1
           - datacenter: jb1
           - datacenter: jb2
-          - datacenter: hk1
-          - datacenter: kr1
-    tolerance: 1
   main:
     selectors:
       join:
@@ -153,6 +142,6 @@ allowed_days:
 - Thursday
 resume_at: 7:00
 suspend_at: 15:00
-minimum_minutes_per_batch: 90
+minimum_minutes_per_batch: 60
 """.strip()
 }

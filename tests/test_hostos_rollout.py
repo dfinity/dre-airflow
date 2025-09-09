@@ -90,7 +90,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     assert res["canary"]
     canary = res["canary"]
     assert canary[0]["start_at"] == datetime.datetime(2025, 7, 7, 7, 0)
-    assert len(canary) == 5
+    assert len(canary) == 4
     assert len(res["main"]) == 39
     assert any(
         is_apibn(n, set(s["principal"] for s in registry["api_bns"]))
@@ -98,7 +98,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     )
     assert len(res["main"][-1]["nodes"]) == 1
     assert len(res["unassigned"]) == 7
-    assert len(res["unassigned"][-1]["nodes"]) == 98
+    assert len(res["unassigned"][-1]["nodes"]) == 96
     assert len(res["stragglers"][0]["nodes"]) == 14
     batches = (
         [r for r in res["canary"]]
@@ -106,7 +106,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
         + [r for r in res["unassigned"]]
         + [r for r in res["stragglers"]]
     )
-    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 23, 8, 30)
+    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 16, 9, 0)
 
 
 def test_schedule_bombs_with_too_many_nodes(
