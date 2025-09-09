@@ -99,11 +99,6 @@ stages:
           - datacenter: jb1
           - datacenter: jb2
   - selectors:
-      assignment: assigned
-      owner: DFINITY
-      status: Healthy
-      nodes_per_group: 10%
-  - selectors:
       intersect:
       - join:
         - assignment: assigned
