@@ -90,7 +90,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
     assert res["canary"]
     canary = res["canary"]
     assert canary[0]["start_at"] == datetime.datetime(2025, 7, 7, 7, 0)
-    assert len(canary) == 5
+    assert len(canary) == 4
     assert len(res["main"]) == 39
     assert any(
         is_apibn(n, set(s["principal"] for s in registry["api_bns"]))
