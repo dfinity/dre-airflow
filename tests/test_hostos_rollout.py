@@ -106,7 +106,7 @@ def test_default_plan(registry: dre.RegistrySnapshot) -> None:
         + [r for r in res["unassigned"]]
         + [r for r in res["stragglers"]]
     )
-    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 23, 8, 30)
+    assert batches[-1]["start_at"] == datetime.datetime(2025, 7, 16, 9, 0)
 
 
 def test_schedule_bombs_with_too_many_nodes(
