@@ -2,7 +2,7 @@ use super::types::v2::serialize_status_code;
 use async_recursion::async_recursion;
 use chrono::{DateTime, TimeDelta, Utc};
 use indexmap::IndexMap;
-use log::{debug, trace, warn};
+use log::{debug, error, trace, warn};
 use regex::Regex;
 use reqwest::StatusCode;
 use reqwest::cookie::Jar;
@@ -21,6 +21,7 @@ use std::time::Duration;
 use std::{f64, fmt};
 use std::{vec, vec::Vec};
 use strum::Display;
+use tokio::time::Instant;
 use urlencoding::{decode, encode};
 
 /// Default maximum batch size for paged requests in Airflow.
@@ -995,6 +996,7 @@ impl AirflowClient {
 
         let c = self.client.clone();
 
+        let start_time = Instant::now();
         let res = match c
             .get(url.clone())
             .header(ACCEPT, "application/json")
@@ -1004,7 +1006,6 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                debug!(target: "airflow_client::http_client", "GET {url} HTTP {status}");
                 match status {
                     reqwest::StatusCode::OK => {
                         let bytes = match resp.bytes().await {
@@ -1013,11 +1014,12 @@ impl AirflowClient {
                                 return Err(AirflowError::from(fetcherror));
                             }
                         };
+                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
                         decode_json_from_bytes(bytes.to_vec())
                     }
                     reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
                         if attempt_login {
-                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status}");
+                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
                             match self._login().await {
                                 Ok(..) => (),
                                 Err(err) => return Err(err),
@@ -1031,12 +1033,19 @@ impl AirflowClient {
                         }
                     }
                     reqwest::StatusCode::NOT_FOUND => {
+                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
                         Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
                     }
-                    other => Err(AirflowError::StatusCode(other)),
+                    other => {
+                        error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                        Err(AirflowError::StatusCode(other))
+                    }
                 }
             }
-            Err(err) => Err(AirflowError::from(err)),
+            Err(err) => {
+                debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
+                Err(AirflowError::from(err))
+            }
         };
         trace!(target: "airflow_client::http_client", "Result: {res:#?}");
         res
@@ -1058,6 +1067,7 @@ impl AirflowClient {
 
         let c = self.client.clone();
 
+        let start_time = Instant::now();
         let res = match c
             .post(url.clone())
             .header(ACCEPT, "application/json")
@@ -1068,7 +1078,6 @@ impl AirflowClient {
         {
             Ok(resp) => {
                 let status = resp.status();
-                debug!(target: "airflow_client::http_client", "POST {url} HTTP {status}");
                 match status {
                     reqwest::StatusCode::OK => {
                         let bytes = match resp.bytes().await {
@@ -1077,10 +1086,12 @@ impl AirflowClient {
                                 return Err(AirflowError::from(fetcherror));
                             }
                         };
+                        debug!(target: "airflow_client::http_client", "POST {url} HTTP {status} after {:?}", Instant::now() - start_time);
                         decode_json_from_bytes(bytes.to_vec())
                     }
                     reqwest::StatusCode::FORBIDDEN => {
                         if attempt_login {
+                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
                             match self._login().await {
                                 Ok(..) => (),
                                 Err(err) => return Err(err),
@@ -1094,12 +1105,19 @@ impl AirflowClient {
                         }
                     }
                     reqwest::StatusCode::NOT_FOUND => {
+                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
                         Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
                     }
-                    other => Err(AirflowError::StatusCode(other)),
+                    other => {
+                        error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                        Err(AirflowError::StatusCode(other))
+                    }
                 }
             }
-            Err(err) => Err(AirflowError::from(err)),
+            Err(err) => {
+                debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
+                Err(AirflowError::from(err))
+            }
         };
         trace!(target: "airflow_client::http_client", "Result: {res:#?}");
         res
