@@ -49,8 +49,8 @@ fn make_a_planned_host_os_batch(
     val: &ProvisionalHostOSPlanBatch,
     selectors: &NodeSelectors,
     tolerance: &Option<NodeFailureTolerance>,
-    upgrade_checks_bypassed: bool,
-    alert_checks_bypassed: bool,
+    adoption_checks_bypassed: Option<bool>,
+    health_checks_bypassed: Option<bool>,
 ) -> BatchResponse {
     BatchResponse {
         stage,
@@ -67,8 +67,8 @@ fn make_a_planned_host_os_batch(
         actual_nodes: None,
         upgraded_nodes: None,
         alerting_nodes: None,
-        adoption_checks_bypassed: upgrade_checks_bypassed,
-        health_checks_bypassed: alert_checks_bypassed,
+        adoption_checks_bypassed,
+        health_checks_bypassed,
     }
 }
 
@@ -80,8 +80,8 @@ fn make_a_discovered_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
     val: &TaskInstancesResponseItem,
-    upgrade_checks_bypassed: bool,
-    alert_checks_bypassed: bool,
+    adoption_checks_bypassed: Option<bool>,
+    health_checks_bypassed: Option<bool>,
 ) -> BatchResponse {
     BatchResponse {
         stage,
@@ -98,8 +98,8 @@ fn make_a_discovered_host_os_batch(
         tolerance: None,
         upgraded_nodes: None,
         alerting_nodes: None,
-        adoption_checks_bypassed: upgrade_checks_bypassed,
-        health_checks_bypassed: alert_checks_bypassed,
+        adoption_checks_bypassed,
+        health_checks_bypassed,
     }
 }
 
@@ -215,8 +215,8 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                                         b,
                                         &b.selectors,
                                         &b.tolerance,
-                                        false,
-                                        false,
+                                        None,
+                                        None,
                                     ),
                                 )
                             })
@@ -522,8 +522,8 @@ impl Parser {
                             stage_name_enum.clone(),
                             stage_batch_number,
                             &task_instance,
-                            false,
-                            false,
+                            None,
+                            None,
                         ));
                 let batch_xcom_data = self
                     .batch_data
@@ -695,7 +695,7 @@ impl Parser {
                                         task_instance
                                     );
                                     batch.adoption_checks_bypassed =
-                                        task_facts.is_some_and(|f| f.forcibly_succeeded);
+                                        task_facts.map(|f| f.forcibly_succeeded);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
@@ -711,7 +711,7 @@ impl Parser {
                                         task_instance
                                     );
                                     batch.health_checks_bypassed =
-                                        task_facts.is_some_and(|f| f.forcibly_succeeded);
+                                        task_facts.map(|f| f.forcibly_succeeded);
                                 }
                                 "join" => {
                                     if batch.state != BatchState::Skipped {

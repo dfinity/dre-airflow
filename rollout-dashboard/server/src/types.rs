@@ -889,10 +889,10 @@ pub mod v2 {
             /// waiting for alerts to subside phase has not yet been reached, or for very
             /// old rollouts that do not have this information.
             pub alerting_nodes: Option<NodeAlertStatuses>,
-            /// If true, the checks for upgraded nodes were manually bypassed by the administrator.
-            pub adoption_checks_bypassed: bool,
-            /// If true, the checks for alerting nodes were manually bypassed by the administrator.
-            pub health_checks_bypassed: bool,
+            /// If true, the checks for upgraded nodes were manually bypassed by the administrator.  None indicates unknown.
+            pub adoption_checks_bypassed: Option<bool>,
+            /// If true, the checks for alerting nodes were manually bypassed by the administrator.  None indicates unknown.
+            pub health_checks_bypassed: Option<bool>,
         }
 
         impl From<&BatchResponse> for axum::response::sse::Event {
