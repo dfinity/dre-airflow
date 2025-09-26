@@ -7,6 +7,7 @@ use super::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use chrono::{DateTime, Utc};
 use derive_more::IntoIterator;
 use futures::future::join_all;
+use futures::join;
 use indexmap::IndexMap;
 use log::{debug, error, info};
 use reqwest::StatusCode;
@@ -592,26 +593,29 @@ impl AirflowStateSyncer<Live> {
                 .into_iter().map(|(dag_id, log_inspector)|
                     {
                         async move {
-                            // Call the log inspectors to determine which tasks need to be updated.
-                            // Each log inspector knows about all updated tasks of all DAG runs for a DAG.
-                            // Then insert any newly needed inspector into the in-flight inspectors map.
-                            let (log_inspector, dag_run_updates_required) = log_inspector
-                                .incrementally_detect_dag_updates(&self.airflow_api, &dag_id)
-                                .await?;
-
-                            debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG runs and tasks.");
-
+                            debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG runs, audit events and tasks.");
                             let dis = dag_id.to_string();
+
+                            let (runs_result, audit_result, tasks_result) = join!(
+                                // Retrieve the latest X DAG runs for the DAG we're operating with.
+                                self.airflow_api
+                                    .dag_runs(&dis, max_rollouts, 0, None, None),
+                                // Call the log inspectors to determine which tasks need to be updated.
+                                // Each log inspector knows about all updated tasks of all DAG runs for a DAG.
+                                // Then insert any newly needed inspector into the in-flight inspectors map.
+                                log_inspector
+                                    .incrementally_detect_dag_updates(&self.airflow_api, &dag_id),
+                                self.airflow_api.tasks(&dis),
+                            );
+
+                            let (dag_runs, (log_inspector, dag_run_updates_required), tasks) = (runs_result?.dag_runs, audit_result?, tasks_result?);
+
                             Ok((
                                 dag_id,
                                 dag_run_updates_required,
-                                // Retrieve the latest X DAG runs for the DAG we're operating with.
-                                self.airflow_api
-                                    .dag_runs(&dis, max_rollouts, 0, None, None)
-                                    .await?
-                                    .dag_runs,
+                                dag_runs,
                                 // Fetch tasks of the DAG to later construct a topological sorter.
-                                self.airflow_api.tasks(&dis).await?,
+                                tasks,
                                 log_inspector,
                             ))
                         }
@@ -704,7 +708,16 @@ impl AirflowStateSyncer<Live> {
                     (log_inspector::DagRunUpdateType::SomeTaskInstances(updated_task_instances), Some(lut)) => {
                         let updated_task_instances =
                             updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                        debug!(target: tgt, "{}: collecting data about task instances updated since {} and a specific set of tasks too: {:?}.", rollout_state.dag_run_id, lut, updated_task_instances);
+                        debug!(
+                            target: tgt,
+                            "{}: collecting data about task instances updated since {}{}.",
+                            rollout_state.dag_run_id,
+                            lut,
+                            match updated_task_instances.is_empty() {
+                                true => "".to_string(),
+                                false => format!(" and a specific set of tasks too: {:?}", updated_task_instances),
+                            }
+                        );
                         [
                             self.airflow_api
                                 .task_instances_batch(
@@ -772,7 +785,7 @@ impl AirflowStateSyncer<Live> {
                             self.airflow_api.clone(),
                             retrieved_task_instances,
                             last_event_log_update,
-                            &sorter
+                            &sorter,
                         ).await?;
                         Ok((rollout_state, rollout))
                     }
