@@ -88,9 +88,10 @@ def have_hostos_nodes_adopted_revision(
             print(f"* Node {n} is {s}")
     else:
         print(
-            "All required %s HostOS nodes have updated to revision %s (%s)."
+            "Of %s HostOS nodes, %s have updated to revision %s (%s)."
             % (
                 len(upgradeds),
+                len(upgradeds) - not_done_count,
                 git_revision,
                 (
                     "tolerance ratio: %s -- actually not done: %s"
@@ -172,7 +173,7 @@ def are_hostos_nodes_healthy(
         )
     else:
         print(
-            "All required %s HostOS nodes have stopped alerting (%s)."
+            "Of %s HostOS nodes, sufficient nodes have stopped alerting (%s)."
             % (
                 len(nodestatuses),
                 (
