@@ -21,7 +21,7 @@ use std::time::Duration;
 use std::{f64, fmt};
 use std::{vec, vec::Vec};
 use strum::Display;
-use urlencoding::decode;
+use urlencoding::{decode, encode};
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
@@ -566,6 +566,16 @@ pub struct EventLogsResponseFilters<'a> {
     pub owner: Option<&'a String>,
     pub before: Option<DateTime<Utc>>,
     pub after: Option<DateTime<Utc>>,
+}
+
+fn querify(parms: Vec<(&str, &str)>) -> String {
+    let mut s = "".to_string();
+    for (k, v) in parms {
+        let kencoded = encode(k).to_string();
+        let vencoded = encode(v).to_string();
+        s += format!("{}={}&", kencoded, vencoded).as_str()
+    }
+    s
 }
 
 impl<'a> EventLogsResponseFilters<'a> {
@@ -1171,11 +1181,10 @@ impl AirflowClient {
         order_by: Option<String>,
     ) -> Result<DagsResponse, AirflowError> {
         let qpairs = filter.as_queryparams();
-        let qparams: querystring::QueryParams =
-            qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let suburl = "dags".to_string()
             + (if !qparams.is_empty() {
-                "?".to_string() + querystring::stringify(qparams).as_str()
+                "?".to_string() + querify(qparams).as_str()
             } else {
                 "".to_string()
             })
@@ -1361,11 +1370,10 @@ impl AirflowClient {
         order_by: Option<String>,
     ) -> Result<EventLogsResponse, AirflowError> {
         let qpairs = filters.as_queryparams();
-        let qparams: querystring::QueryParams =
-            qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let suburl = "eventLogs".to_string()
             + (if !qparams.is_empty() {
-                "?".to_string() + querystring::stringify(qparams).as_str()
+                "?".to_string() + querify(qparams).as_str()
             } else {
                 "".to_string()
             })
