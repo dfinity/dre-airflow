@@ -298,7 +298,12 @@
                         >
                         {#if upgraded_nodes_summary}
                             <TableBodyRow
-                                ><TableHeadCell>Upgrade status</TableHeadCell
+                                ><TableHeadCell
+                                    ><span
+                                        class="tooltip"
+                                        title="This information is only updated during the wait for revision adoption"
+                                        >Upgrade status</span
+                                    ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
                                     >{Object.entries(upgraded_nodes_summary)
                                         .map(([k, v]) => `${v} nodes ${k}`)
@@ -308,7 +313,12 @@
                         {/if}
                         {#if alerting_nodes_summary}
                             <TableBodyRow
-                                ><TableHeadCell>Health status</TableHeadCell
+                                ><TableHeadCell
+                                    ><span
+                                        class="tooltip"
+                                        title="This information is only updated during the wait for nodes to return to a healthy status"
+                                        >Health status</span
+                                    ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
                                     >{Object.entries(alerting_nodes_summary)
                                         .map(([k, v]) => `${v} nodes ${k}`)
@@ -324,7 +334,11 @@
                             These are the nodes selected at the start of the
                             batch just prior to submitting the upgrade proposal.
                             They may differ from the planned nodes, originally
-                            selected at the beginning of the rollout.
+                            selected at the beginning of the rollout. The
+                            upgrade status information ceases to be updated once
+                            the batch has moved on to checking node health, and
+                            the health information ceases to update after the
+                            batch is finished.
                         </InfoBlock>
                         <RegularTable striped={true}>
                             <TableHead>
