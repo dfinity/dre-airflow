@@ -1361,7 +1361,8 @@ impl AirflowClient {
     }
 
     /// Return event logs matching the filters specified.
-    /// Events are returned in chronological order (old to new).
+    /// Events are returned by default in ID order (smallest to largest)
+    /// which corresponds to chronological order.
     pub async fn event_logs(
         &self,
         limit: usize,
