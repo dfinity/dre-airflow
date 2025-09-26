@@ -288,6 +288,14 @@ pub async fn fetch_audit_logs(
     dag_run_id: &str,
     task_instance_id: &str,
 ) -> Result<Vec<EventLogsResponseItem>, AirflowError> {
+    // We retrieve all task instances regardless of map index,
+    // because the caller wants to know if a task was marked as
+    // successful, and this can be done per-map-index or for all
+    // map indexes (indicated with map_index None).
+    //
+    // Tasks are retrieved from the most recent to the earliest,
+    // but the caller may want to elect to process them in a
+    // different order.
     Ok(airflow_api
         .event_logs(
             10,

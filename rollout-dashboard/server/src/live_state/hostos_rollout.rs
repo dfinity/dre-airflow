@@ -1,6 +1,6 @@
-use python::PythonDateTime;
-
 use crate::airflow_client::EventLogsResponseItem;
+use itertools::Itertools;
+use python::PythonDateTime;
 
 use super::super::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
@@ -158,31 +158,40 @@ impl From<&Stages> for V2Stages {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct TaskInstanceAuditData {
+pub(super) struct TaskInstanceAuditFacts {
     pub(super) forcibly_succeeded: bool,
 }
 
-impl TaskInstanceAuditData {
-    fn process_event(
+impl TaskInstanceAuditFacts {
+    fn process_events(
         &mut self,
         task_instance: &TaskInstancesResponseItem,
-        event: &EventLogsResponseItem,
+        events: Vec<EventLogsResponseItem>,
     ) {
-        if let (Some(_), Some(_), Some(_)) = (&event.dag_id, &event.run_id, &event.task_id) {
-            if event.try_number.is_none()
-                && event.event == "success"
-                && event
-                    .extra_hash()
-                    .is_some_and(|hash| hash.get("confirmed") == Some(&"true"))
-            {
-                // Task was forcibly succeeded.  Unless another event is processed later
-                // where the task runs, then the event was forcibly succeeded.
-                if event.map_index.is_none() || task_instance.map_index == event.map_index {
+        let tgt = &format!("{LOG_TARGET}::process_events");
+        // We process events in reverse order.  As soon as an
+        // event confirms a fact we want to know, we break.
+        for event in events.iter().sorted_by_key(|e| e.event_log_id).rev() {
+            trace!(target: tgt, "Processing event {}", event.event_log_id);
+            if let (Some(_), Some(_), Some(_)) = (&event.dag_id, &event.run_id, &event.task_id) {
+                if event.try_number.is_none()
+                    && event.event == "success"
+                    && event
+                        .extra_hash()
+                        .is_some_and(|hash| hash.get("confirmed") == Some(&"true"))
+                    && (event.map_index.is_none() || task_instance.map_index == event.map_index)
+                {
+                    // Task was forcibly succeeded.  Unless another event is processed later
+                    // where the task runs, then the event was forcibly succeeded.
+                    trace!(target: tgt, "Event indicates task instance was forcibly succeeded: {:?}", event);
                     self.forcibly_succeeded = true;
+                    break;
+                } else if event.try_number.is_some() && event.map_index == task_instance.map_index {
+                    // Task ran and Airflow recorded it.
+                    trace!(target: tgt, "Event indicates task instance is running normally: {:?}", event);
+                    self.forcibly_succeeded = false;
+                    break;
                 }
-            } else if event.try_number.is_some() && event.map_index == task_instance.map_index {
-                // Task ran and Airflow recorded it.
-                self.forcibly_succeeded = false;
             }
         }
     }
@@ -280,8 +289,8 @@ fn annotate_batch_state(
 }
 
 #[derive(Clone, Default, Serialize)]
-struct BatchXcomData {
-    actual_plans: PlanCache<ActuallyTargetedNodes>,
+struct BatchRelatedData {
+    actual_plan: PlanCache<ActuallyTargetedNodes>,
     nodes_upgrade_status: PlanCache<NodeUpgradeStatuses>,
     nodes_alert_status: PlanCache<NodeAlertStatuses>,
     selectors: PlanCache<NodeSelectors>,
@@ -293,7 +302,7 @@ struct BatchXcomData {
 #[derive(Clone, Default)]
 pub(crate) struct Parser {
     provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    batch_xcoms: HashMap<(StageName, NonZero<usize>), BatchXcomData>,
+    batch_data: HashMap<(StageName, NonZero<usize>), BatchRelatedData>,
     pub(crate) stages: Option<Stages>,
 }
 
@@ -307,14 +316,14 @@ impl Serialize for Parser {
         #[derive(Serialize)]
         struct SerializedParser {
             provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-            batch_xcoms: HashMap<String, BatchXcomData>,
+            batch_data: HashMap<String, BatchRelatedData>,
             stages: Option<Stages>,
         }
 
         let p = SerializedParser {
             provisional_plan: self.provisional_plan.clone(),
-            batch_xcoms: self
-                .batch_xcoms
+            batch_data: self
+                .batch_data
                 .iter()
                 .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
                 .collect(),
@@ -377,7 +386,7 @@ impl Parser {
             };
         }
 
-        macro_rules! retrieve_audit_events_from_cache_or_server {
+        macro_rules! retrieve_task_audit_facts_from_cache_or_server {
             ($member:expr, $task_instance:expr) => {
                 match $member
                     .get_struct(
@@ -391,13 +400,11 @@ impl Parser {
                     )
                     .await
                 {
-                    PlanQueryResult::Found(event_logs) => {
-                        let mut audit_data = TaskInstanceAuditData::default();
-                        for event in event_logs.iter().rev() {
-                            audit_data.process_event(&$task_instance, event);
-                        }
-                        Some(audit_data)
-                    }
+                    PlanQueryResult::Found(event_logs) => Some({
+                        let mut facts = TaskInstanceAuditFacts::default();
+                        facts.process_events(&$task_instance, event_logs);
+                        facts
+                    }),
                     PlanQueryResult::Error(e) => {
                         return Err(RolloutDataGatherError::AirflowError(e));
                     }
@@ -519,7 +526,7 @@ impl Parser {
                             false,
                         ));
                 let batch_xcom_data = self
-                    .batch_xcoms
+                    .batch_data
                     .entry((stage_name_enum.clone(), stage_batch_number))
                     .or_default();
 
@@ -659,7 +666,7 @@ impl Parser {
                                 }
                                 "collect_nodes" => {
                                     if let Some(plan) = retrieve_xcom_from_cache_or_server!(
-                                        batch_xcom_data.actual_plans,
+                                        batch_xcom_data.actual_plan,
                                         task_instance,
                                         "nodes"
                                     ) {
@@ -683,12 +690,12 @@ impl Parser {
                                         "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
-                                    let audit_data = retrieve_audit_events_from_cache_or_server!(
+                                    let task_facts = retrieve_task_audit_facts_from_cache_or_server!(
                                         batch_xcom_data.adoption_audit_data,
                                         task_instance
                                     );
                                     batch.adoption_checks_bypassed =
-                                        audit_data.is_some_and(|f| f.forcibly_succeeded);
+                                        task_facts.is_some_and(|f| f.forcibly_succeeded);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
@@ -699,12 +706,12 @@ impl Parser {
                                         "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
-                                    let audit_data = retrieve_audit_events_from_cache_or_server!(
+                                    let task_facts = retrieve_task_audit_facts_from_cache_or_server!(
                                         batch_xcom_data.health_audit_data,
                                         task_instance
                                     );
                                     batch.health_checks_bypassed =
-                                        audit_data.is_some_and(|f| f.forcibly_succeeded);
+                                        task_facts.is_some_and(|f| f.forcibly_succeeded);
                                 }
                                 "join" => {
                                     if batch.state != BatchState::Skipped {

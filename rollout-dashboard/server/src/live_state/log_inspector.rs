@@ -108,7 +108,7 @@ impl AirflowIncrementalLogInspector {
                     None => continue,
                 };
 
-                trace!(target: tgt, "Processing event:\n{event:#?}\n");
+                trace!(target: tgt, "Processing event {}", event.event_log_id);
 
                 // Under the following circumstances, the whole rollout has to be refreshed because
                 // administrative action was taken to clear / fail / succeed tasks that may not in
