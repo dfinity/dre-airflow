@@ -102,6 +102,7 @@ pub struct DagsResponseItem {
     pub is_paused: bool,
     pub is_active: bool,
     pub has_import_errors: bool,
+    pub last_parsed_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -492,7 +493,7 @@ pub struct TasksResponseItem {
     pub downstream_task_ids: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 
 pub struct TasksResponse {
     pub tasks: Vec<TasksResponseItem>,
