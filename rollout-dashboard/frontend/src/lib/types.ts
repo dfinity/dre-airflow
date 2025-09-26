@@ -428,6 +428,8 @@ export type HostOsBatchResponse = {
     tolerance: number | string | null;
     upgraded_nodes: { [key: string]: UpgradeStatus } | null
     alerting_nodes: { [key: string]: AlertStatus } | null
+    adoption_checks_bypassed: boolean
+    health_checks_bypassed: boolean
 }
 
 // End HostOS rollout types.

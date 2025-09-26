@@ -545,6 +545,14 @@ pub struct EventLogsResponseItem {
     pub extra: Option<String>,
 }
 
+impl EventLogsResponseItem {
+    pub fn extra_hash(&self) -> Option<HashMap<&str, &str>> {
+        match &self.extra {
+            Some(extra_str) => serde_json::from_str::<HashMap<&str, &str>>(extra_str).ok(),
+            None => None,
+        }
+    }
+}
 #[derive(Debug, Deserialize, Default)]
 
 pub struct EventLogsResponse {

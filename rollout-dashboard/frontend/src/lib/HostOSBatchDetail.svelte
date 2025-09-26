@@ -17,6 +17,7 @@
     import { hostOsBatchStateName } from "./types";
     import { cap } from "./lib";
     import InfoBlock from "./InfoBlock.svelte";
+    import WarningBlock from "./WarningBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
     import Selectors from "./Selectors.svelte";
     import { batch_view_with_cancellation, type FullState } from "./stores";
@@ -296,7 +297,7 @@
                                     alerting state.{/if}</TableBodyCell
                             ></TableBodyRow
                         >
-                        {#if upgraded_nodes_summary}
+                        {#if upgraded_nodes_summary || $batch.adoption_checks_bypassed}
                             <TableBodyRow
                                 ><TableHeadCell
                                     ><span
@@ -305,13 +306,22 @@
                                         >Upgrade status</span
                                     ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
-                                    >{Object.entries(upgraded_nodes_summary)
-                                        .map(([k, v]) => `${v} nodes ${k}`)
-                                        .join(", ")}</TableBodyCell
+                                    >{#if upgraded_nodes_summary}{Object.entries(
+                                            upgraded_nodes_summary,
+                                        )
+                                            .map(([k, v]) => `${v} nodes ${k}`)
+                                            .join(
+                                                ", ",
+                                            )}.{/if}{#if $batch.adoption_checks_bypassed}
+                                        <WarningBlock shrink_to_content="true">
+                                            The check for upgrades was forcibly
+                                            skippped in this batch.
+                                        </WarningBlock>
+                                    {/if}</TableBodyCell
                                 ></TableBodyRow
                             >
                         {/if}
-                        {#if alerting_nodes_summary}
+                        {#if alerting_nodes_summary || $batch.health_checks_bypassed}
                             <TableBodyRow
                                 ><TableHeadCell
                                     ><span
@@ -320,9 +330,18 @@
                                         >Health status</span
                                     ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
-                                    >{Object.entries(alerting_nodes_summary)
-                                        .map(([k, v]) => `${v} nodes ${k}`)
-                                        .join(", ")}</TableBodyCell
+                                    >{#if alerting_nodes_summary}{Object.entries(
+                                            alerting_nodes_summary,
+                                        )
+                                            .map(([k, v]) => `${v} nodes ${k}`)
+                                            .join(
+                                                ", ",
+                                            )}.{/if}{#if $batch.health_checks_bypassed}
+                                        <WarningBlock shrink_to_content="true">
+                                            The health check on nodes was
+                                            forcibly skippped in this batch.
+                                        </WarningBlock>
+                                    {/if}</TableBodyCell
                                 ></TableBodyRow
                             >
                         {/if}
