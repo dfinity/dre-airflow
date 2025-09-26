@@ -74,7 +74,7 @@
         </InfoBlock>
     {/if}
     {#if rollout.batches && Object.keys(rollout.batches).length > 0}
-        <ul>
+        <ul class="batch_list">
             {#each Object.entries(rollout.batches) as [batch_num, batch]}
                 <SubnetBatch {batch_num} {batch} />
             {/each}
@@ -88,7 +88,7 @@
 </section>
 
 <style>
-    ul {
+    ul.batch_list {
         display: flex;
         gap: 0.6em;
         flex-direction: row;

@@ -350,10 +350,8 @@
                 {#if actual_items !== null}
                     <TabItem title="Actual nodes">
                         <InfoBlock>
-                            These are the nodes selected at the start of the
-                            batch just prior to submitting the upgrade proposal.
-                            They may differ from the planned nodes, originally
-                            selected at the beginning of the rollout. The
+                            Nodes listed here may differ from the planned nodes,
+                            due to shifts in node availability over time. The
                             upgrade status information ceases to be updated once
                             the batch has moved on to checking node health, and
                             the health information ceases to update after the
