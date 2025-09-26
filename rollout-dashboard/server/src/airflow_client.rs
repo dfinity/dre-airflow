@@ -1016,10 +1016,11 @@ impl AirflowClient {
                         let bytes = match resp.bytes().await {
                             Ok(bytes) => bytes,
                             Err(fetcherror) => {
+                                debug!(target: "airflow_client::http_client", "GET {url} interrupted during response after {:?}", Instant::now() - start_time);
                                 return Err(AirflowError::from(fetcherror));
                             }
                         };
-                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} retrieved {} bytes after {:?}", bytes.len(), Instant::now() - start_time);
                         decode_json_from_bytes(bytes.to_vec())
                     }
                     reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
