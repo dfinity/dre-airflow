@@ -951,6 +951,10 @@ impl AirflowClient {
         let jar = Jar::default();
         let arcjar = Arc::new(jar);
         let c = reqwest::Client::builder()
+            .brotli(true)
+            .zstd(true)
+            .gzip(true)
+            .deflate(true)
             .timeout(timeout)
             .cookie_provider(arcjar.clone())
             .build()?;
