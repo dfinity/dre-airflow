@@ -9,11 +9,11 @@ from typing import cast
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
+from airflow.models.param import Param
+from airflow.utils import timezone
 from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG
-from airflow.models.param import Param
-from airflow.utils import timezone
 
 now = timezone.utcnow().strftime("%Y-%m-%dT%H:%M:%S%z")
 if not now.endswith("Z"):

@@ -12,6 +12,8 @@ from typing import NotRequired, TypedDict, cast
 
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
+from airflow.hooks.subprocess import SubprocessHook
+from airflow.models.taskinstance import TaskInstance
 from dfinity.ic_os_rollout import api_boundary_node_batch_timetable
 from dfinity.rollout_types import (
     DCId,
@@ -31,9 +33,6 @@ from dfinity.rollout_types import (
     to_selectors,
     yaml_to_HostOSRolloutPlanSpec,
 )
-
-from airflow.hooks.subprocess import SubprocessHook
-from airflow.models.taskinstance import TaskInstance
 
 CANARY_BATCH_COUNT: int = 5
 MAIN_BATCH_COUNT: int = 50

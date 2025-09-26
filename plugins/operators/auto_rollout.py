@@ -6,6 +6,10 @@ import datetime
 from typing import Any, cast
 
 import yaml
+from airflow.exceptions import DagRunAlreadyExists
+from airflow.models.baseoperator import BaseOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.utils.context import Context
 from dfinity.rollout_types import (
     Releases,
     RolloutFeatures,
@@ -14,11 +18,6 @@ from dfinity.rollout_types import (
     SubnetRolloutPlanSpec,
     yaml_to_ApiBoundaryNodeRolloutPlanSpec,
 )
-
-from airflow.exceptions import DagRunAlreadyExists
-from airflow.models.baseoperator import BaseOperator
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils.context import Context
 
 
 def next_weekday(d: datetime.date, weekday: int) -> datetime.date:

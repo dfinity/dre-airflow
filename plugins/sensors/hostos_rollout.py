@@ -1,11 +1,10 @@
-from dfinity import dre, ic_types, rollout_types
-from dfinity import prom_api as prom
-from operators.hostos_rollout import DagParams
-
 from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.taskinstance import TaskInstance
 from airflow.sensors.base import PokeReturnValue
 from airflow.utils.xcom import XCOM_RETURN_KEY
+from dfinity import dre, ic_types, rollout_types
+from dfinity import prom_api as prom
+from operators.hostos_rollout import DagParams
 
 
 def has_network_adopted_hostos_revision(

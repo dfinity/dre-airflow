@@ -7,19 +7,12 @@ import itertools
 import time
 from typing import Any, NoReturn, Sequence, TypedDict, cast
 
+import airflow.models.taskinstance
+import airflow.providers.slack.operators.slack as slack
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 import dfinity.rollout_types as rollout_types
-from dfinity.ic_os_rollout import (
-    SLACK_CHANNEL,
-    SLACK_CONNECTION_ID,
-    subnet_id_and_git_revision_from_args,
-)
-from operators.ic_os_rollout import NotifyAboutStalledSubnet, RolloutParams
-
-import airflow.models.taskinstance
-import airflow.providers.slack.operators.slack as slack
 from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.dagrun import DagRun
 from airflow.sensors.base import BaseSensorOperator
@@ -29,6 +22,12 @@ from airflow.triggers.temporal import DateTimeTrigger, TimeDeltaTrigger
 from airflow.utils import timezone
 from airflow.utils.context import Context
 from airflow.utils.state import DagRunState
+from dfinity.ic_os_rollout import (
+    SLACK_CHANNEL,
+    SLACK_CONNECTION_ID,
+    subnet_id_and_git_revision_from_args,
+)
+from operators.ic_os_rollout import NotifyAboutStalledSubnet, RolloutParams
 
 SUBNET_UPDATE_STALL_TIMEOUT_SECONDS = 3600  # One hour between messages.
 

@@ -28,15 +28,16 @@ $(VENV_BIN_DIR)/mypy: $(AIRFLOW_SETUP)
 	$(VENV_BIN_DIR)/pip3 install mypy types-PyYAML types-requests types-mock
 	touch $(VENV_BIN_DIR)/mypy
 
-$(VENV_BIN_DIR)/ruff: $(AIRFLOW_SETUP)
-	$(VENV_BIN_DIR)/pip3 install ruff
+$(VENV_BIN_DIR)/ruff-0.13.2: $(AIRFLOW_SETUP)
+	$(VENV_BIN_DIR)/pip3 install ruff==0.13.2
 	touch $(VENV_BIN_DIR)/ruff
+	ln -sf ./ruff $(VENV_BIN_DIR)/ruff-0.13.2
 
 mypy: $(VENV_BIN_DIR)/mypy
 	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared MYPY_PATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/mypy --config=mypy.ini
 
-ruff: $(VENV_BIN_DIR)/ruff
-	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/ruff check shared plugins dags
+ruff: $(VENV_BIN_DIR)/ruff-0.13.2
+	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/ruff-0.13.2 check shared plugins dags
 
 $(AIRFLOW_TESTS_CFG): $(AIRFLOW_SETUP)
 	mkdir -p $(AIRFLOW_TESTS_HOME)

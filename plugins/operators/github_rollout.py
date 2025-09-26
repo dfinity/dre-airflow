@@ -6,9 +6,8 @@ from typing import Any, Sequence, cast
 
 import requests
 import yaml
-from dfinity.rollout_types import Releases
-
 from airflow.models import BaseOperator
+from dfinity.rollout_types import Releases
 
 
 class GetReleases(BaseOperator):
