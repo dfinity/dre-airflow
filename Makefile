@@ -33,6 +33,8 @@ $(VENV_BIN_DIR)/ruff-0.13.2: $(AIRFLOW_SETUP)
 	touch $(VENV_BIN_DIR)/ruff
 	ln -sf ./ruff $(VENV_BIN_DIR)/ruff-0.13.2
 
+$(VENV_BIN_DIR)/ruff: $(VENV_BIN_DIR)/ruff-0.13.2
+
 mypy: $(VENV_BIN_DIR)/mypy
 	PYTHONPATH=$(PWD)/plugins:$(PWD)/shared MYPY_PATH=$(PWD)/plugins:$(PWD)/shared $(VENV_BIN_DIR)/mypy --config=mypy.ini
 
