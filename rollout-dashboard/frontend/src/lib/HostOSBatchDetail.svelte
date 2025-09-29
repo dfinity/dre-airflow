@@ -315,7 +315,7 @@
                                             )}.{/if}{#if $batch.adoption_checks_bypassed}
                                         <WarningBlock shrink_to_content="true">
                                             The check for upgrades was forcibly
-                                            skippped in this batch.
+                                            skipped in this batch.
                                         </WarningBlock>
                                     {/if}</TableBodyCell
                                 ></TableBodyRow
@@ -339,7 +339,7 @@
                                             )}.{/if}{#if $batch.health_checks_bypassed}
                                         <WarningBlock shrink_to_content="true">
                                             The health check on nodes was
-                                            forcibly skippped in this batch.
+                                            forcibly skipped in this batch.
                                         </WarningBlock>
                                     {/if}</TableBodyCell
                                 ></TableBodyRow
