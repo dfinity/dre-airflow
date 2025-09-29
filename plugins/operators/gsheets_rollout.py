@@ -4,15 +4,14 @@ import datetime
 from logging import Logger
 from typing import Any
 
+from airflow.providers.google.suite.hooks.sheets import GSheetsHook
+from airflow.providers.google.suite.operators.sheets import (
+    GoogleSheetsCreateSpreadsheetOperator,
+)
 from dfinity.rollout_types import (
     FeatureName,
     RolloutFeatures,
     SubnetId,
-)
-
-from airflow.providers.google.suite.hooks.sheets import GSheetsHook
-from airflow.providers.google.suite.operators.sheets import (
-    GoogleSheetsCreateSpreadsheetOperator,
 )
 
 

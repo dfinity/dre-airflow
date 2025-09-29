@@ -1,19 +1,14 @@
+use crate::airflow_client::EventLogsResponseItem;
+
 use super::super::airflow_client::{AirflowClient, AirflowError, EventLogsResponseFilters};
 use super::{DagID, DagRunID};
 use chrono::{DateTime, Utc};
-use lazy_static::lazy_static;
 use log::{debug, trace};
-use regex::Regex;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::vec::Vec;
 
 const LOG_TARGET: &str = "live_state::log_inspector";
-
-lazy_static! {
-    static ref confirmed_or_true_regex: Regex = Regex::new(r".*.confirmed.: .true.*").unwrap();
-}
 
 #[derive(Debug, Clone)]
 /// DAG run update type.
@@ -24,6 +19,16 @@ pub(super) enum DagRunUpdateType {
     /// refreshed, as well as incremental queries of tasks
     /// finished, updated, or started since last query.
     SomeTaskInstances(HashSet<String>),
+}
+
+impl DagRunUpdateType {
+    fn nothing() -> Self {
+        Self::SomeTaskInstances(HashSet::new())
+    }
+
+    fn task_id(task_id: &str) -> Self {
+        Self::SomeTaskInstances(HashSet::from_iter(vec![task_id.to_owned()]))
+    }
 }
 
 /// Describe what kind of update each DAG run needs.
@@ -51,6 +56,7 @@ impl DagRunUpdatesRequired {
         }
     }
 }
+
 #[derive(Clone, Default)]
 /// Inspects the Airflow log every time its incrementally_detect_dag_updates
 /// function is called.
@@ -68,7 +74,6 @@ impl AirflowIncrementalLogInspector {
     ) -> Result<(Self, DagRunUpdatesRequired), AirflowError> {
         let tgt = &format!("{LOG_TARGET}::{dag_id}");
         let mut task_instances_to_update_per_dag = DagRunUpdatesRequired::new();
-
         let mut last_event_log_update = self.last_event_log_update;
 
         if last_event_log_update.is_some() {
@@ -76,7 +81,7 @@ impl AirflowIncrementalLogInspector {
             // Airflow event log as a deciding factor.
             let event_logs = airflow_api
                 .event_logs(
-                    1000,
+                    100000,
                     0,
                     &EventLogsResponseFilters {
                         after: last_event_log_update,
@@ -89,8 +94,6 @@ impl AirflowIncrementalLogInspector {
 
             // Process log events.
             for event in event_logs.event_logs.iter() {
-                // Remember the date of the latest event.
-                last_event_log_update = Some(event.when);
                 // Ignore events with no dag ID or wrong dag ID.
                 match &event.dag_id {
                     Some(d) => match *d == dag_id.to_string() {
@@ -101,80 +104,107 @@ impl AirflowIncrementalLogInspector {
                 };
                 // Ignore events that have no run ID.
                 let event_run_id = match &event.run_id {
-                    Some(r) => r,
+                    Some(r) => DagRunID::from_str(r).unwrap(),
                     None => continue,
                 };
-                // Ignore events that just change the DAG run note.  We already
-                // retrieve the full DAG (not necessarily its tasks or instances),
-                // so this event is not interesting.
-                if event.event == "ui.set_dag_run_note" {
-                    continue;
-                }
-                // Also ignore UI confirmation events to mark tasks as failed/success.
-                if event.event == "confirm" {
-                    continue;
-                }
-                // Also ignore UI clearing events of tasks not yet confirmed.
-                if event.event == "clear" {
-                    match &event.extra {
-                        None => continue,
-                        Some(extra) => {
-                            if confirmed_or_true_regex.captures(extra.as_str()).is_none() {
-                                // No confirmation.  We continue.
-                                continue;
-                            }
-                            // We found it.  We won't continue.
-                        }
-                    }
-                }
+
+                trace!(target: tgt, "Processing event {}", event.event_log_id);
 
                 // Under the following circumstances, the whole rollout has to be refreshed because
                 // administrative action was taken to clear / fail / succeed tasks that may not in
-                // fact appear listed in the log as such.
-                let force_refresh_all_tasks = (event.event == "success" && event.extra.is_some())
-                    || (event.event == "failed" && event.extra.is_some())
-                    || (event.event == "clear" && event.extra.is_some());
-
-                trace!(target: tgt, "Processing event:\n{event:#?}\n");
-
-                match task_instances_to_update_per_dag
-                    .dag_runs
-                    .entry(DagRunID::from_str(event_run_id).unwrap())
-                {
-                    // No entry.  Let's initialize it (all tasks if event has no run_id or forced, else the single task).
-                    Vacant(ventry) => {
-                        ventry.insert(match (&event.task_id, force_refresh_all_tasks) {
-                (Some(t), false) => {
-                    trace!(target: tgt, "{event_run_id}: initializing plan with a request to update task {t}");
-                    let mut init = HashSet::new();
-                    init.insert(t.clone());
-                    DagRunUpdateType::SomeTaskInstances(init)
-                },
-                _ => {
-                    trace!(target: tgt, "{event_run_id}: initializing plan with a request to update all tasks");
-                    DagRunUpdateType::AllTaskInstances
-                },
-            });
-                    }
-                    // There's an entry.  Update to all tasks if this event has no run_id.
-                    Occupied(mut entry) => match (&event.task_id, force_refresh_all_tasks) {
-                        (Some(t), false) => {
-                            if let DagRunUpdateType::SomeTaskInstances(thevec) = entry.get_mut() {
-                                let ts = t.to_string();
-                                if !thevec.contains(&ts) {
-                                    trace!(target: tgt, "{event_run_id}: adding task {ts} to plan");
-                                    thevec.insert(ts);
+                // fact appear listed in the log as such.  The circumstances are explained below.
+                fn event_impact(event: &EventLogsResponseItem) -> DagRunUpdateType {
+                    match (&event.task_id, event.event.as_str()) {
+                        (None, "success" | "failed" | "clear" | "dagrun_failed") => {
+                            // 1. the event is success / failed / clear / dagrun_failed involving the whole DAG.
+                            DagRunUpdateType::AllTaskInstances
+                        }
+                        (Some(task_id), "success" | "failed" | "clear") => {
+                            // 1. the event is success / failed / clear, for a specific task,
+                            // and there is some extra data.
+                            match &event.extra {
+                                Some(extra_str) => {
+                                    match serde_json::from_str::<HashMap<&str, &str>>(extra_str) {
+                                        // 2. the extra data successfully decoded to a JSON dict.
+                                        Ok(extra) => {
+                                            // 3. the extra data says the event is confirmed
+                                            match extra.get("confirmed") == Some(&"true") {
+                                                true => {
+                                                    // 4. the extra data says any of past, future, upstream
+                                                    // or downstream tasks were affected
+                                                    if extra.get("past") == Some(&"true")
+                                                        || extra.get("future") == Some(&"true")
+                                                        || extra.get("upstream") == Some(&"true")
+                                                        || extra.get("downstream") == Some(&"true")
+                                                    {
+                                                        DagRunUpdateType::AllTaskInstances
+                                                    } else {
+                                                        DagRunUpdateType::task_id(task_id)
+                                                    }
+                                                }
+                                                false => {
+                                                    // The event was not confirmed, so nothing changed.
+                                                    DagRunUpdateType::nothing()
+                                                }
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // The extra data cannot be deserialized as dict.
+                                            // Does not affect other tasks.
+                                            DagRunUpdateType::nothing()
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // There is no extra data.
+                                    // Does not affect other tasks.
+                                    DagRunUpdateType::task_id(task_id)
                                 }
                             }
                         }
-                        _ => {
-                            if let DagRunUpdateType::SomeTaskInstances(_) = entry.get() {
-                                trace!(target: tgt, "{event_run_id}: switching plan to request to update all tasks");
-                                entry.insert(DagRunUpdateType::AllTaskInstances);
-                            }
+                        (Some(task_id), _) => {
+                            // Standard success / failed / clear or some other kind of event we do not handle.
+                            // Does not affect other tasks.
+                            DagRunUpdateType::task_id(task_id)
+                        }
+                        _ => DagRunUpdateType::nothing(),
+                    }
+                }
+
+                let update_type = task_instances_to_update_per_dag
+                        .dag_runs
+                        .entry(event_run_id.clone())
+                        .or_insert_with(|| {
+                            let impact = event_impact(event);
+                            match &impact {
+                                DagRunUpdateType::AllTaskInstances => {
+                                    trace!(target: tgt, "{event_run_id}: needs an update of all tasks")
+                                }
+                                DagRunUpdateType::SomeTaskInstances(sumtasks) => {
+                                    trace!(target: tgt, "{event_run_id}: needs an update of tasks {sumtasks:?}")
+                                }
+                            };
+                            impact
+                        });
+
+                match update_type {
+                    DagRunUpdateType::AllTaskInstances => {}
+                    DagRunUpdateType::SomeTaskInstances(existing) => match event_impact(event) {
+                        DagRunUpdateType::AllTaskInstances => {
+                            trace!(target: tgt, "{event_run_id}: switching plan to request to update all tasks");
+                            *update_type = DagRunUpdateType::AllTaskInstances;
+                        }
+                        DagRunUpdateType::SomeTaskInstances(new) => {
+                            trace!(target: tgt, "{event_run_id}: adding {new:?} to tasks that need updating");
+                            let union = new.union(existing);
+                            *update_type =
+                                DagRunUpdateType::SomeTaskInstances(union.cloned().collect());
                         }
                     },
                 }
+
+                // Remember the date of the latest event.
+                last_event_log_update = Some(event.when);
             }
 
             // Now that we have a plan, we know what data to fetch from Airflow, minimizing the load on the server.
@@ -184,13 +214,10 @@ impl AirflowIncrementalLogInspector {
                     DagRunUpdateType::SomeTaskInstances(set_of_tasks) => set_of_tasks.iter().cloned().collect::<Vec<String>>().join(", "),
                 });
             }
-            if !event_logs.event_logs.is_empty()
-                && !task_instances_to_update_per_dag.dag_runs.is_empty()
-            {
-                debug!(
-                    target: tgt, "Setting incremental refresh date to {last_event_log_update:?}"
-                )
-            };
+
+            debug!(
+                target: tgt, "Setting incremental refresh date to {last_event_log_update:?}"
+            )
         } else {
             let event_logs = airflow_api
                 .event_logs(
@@ -204,10 +231,10 @@ impl AirflowIncrementalLogInspector {
                     Some("-event_log_id".to_string()),
                 )
                 .await?;
-            for event in event_logs.event_logs.iter() {
-                last_event_log_update = Some(event.when);
-            }
             if !event_logs.event_logs.is_empty() {
+                for event in event_logs.event_logs.iter() {
+                    last_event_log_update = Some(event.when);
+                }
                 debug!(target: tgt, "Setting initial refresh date to {last_event_log_update:?}");
             }
         }

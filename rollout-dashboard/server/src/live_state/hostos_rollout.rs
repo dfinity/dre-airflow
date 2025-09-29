@@ -1,3 +1,5 @@
+use crate::airflow_client::EventLogsResponseItem;
+use itertools::Itertools;
 use python::PythonDateTime;
 
 use super::super::airflow_client::{
@@ -8,7 +10,7 @@ use super::super::types::v2::hostos::{
     ActuallyTargetedNodes, BatchResponse, BatchState, NodeAlertStatuses, NodeFailureTolerance,
     NodeInfo, NodeSelectors, NodeUpgradeStatuses, Rollout, StageName, Stages as V2Stages, State,
 };
-use super::plan::{PlanQueryResult, fetch_xcom};
+use super::plan::{PlanQueryResult, fetch_audit_logs, fetch_xcom};
 use super::{RolloutDataGatherError, plan::PlanCache, python};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -47,6 +49,8 @@ fn make_a_planned_host_os_batch(
     val: &ProvisionalHostOSPlanBatch,
     selectors: &NodeSelectors,
     tolerance: &Option<NodeFailureTolerance>,
+    adoption_checks_bypassed: Option<bool>,
+    health_checks_bypassed: Option<bool>,
 ) -> BatchResponse {
     BatchResponse {
         stage,
@@ -63,6 +67,8 @@ fn make_a_planned_host_os_batch(
         actual_nodes: None,
         upgraded_nodes: None,
         alerting_nodes: None,
+        adoption_checks_bypassed,
+        health_checks_bypassed,
     }
 }
 
@@ -74,6 +80,8 @@ fn make_a_discovered_host_os_batch(
     stage: StageName,
     batch_number: NonZero<usize>,
     val: &TaskInstancesResponseItem,
+    adoption_checks_bypassed: Option<bool>,
+    health_checks_bypassed: Option<bool>,
 ) -> BatchResponse {
     BatchResponse {
         stage,
@@ -90,6 +98,8 @@ fn make_a_discovered_host_os_batch(
         tolerance: None,
         upgraded_nodes: None,
         alerting_nodes: None,
+        adoption_checks_bypassed,
+        health_checks_bypassed,
     }
 }
 
@@ -147,6 +157,46 @@ impl From<&Stages> for V2Stages {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub(super) struct TaskInstanceAuditFacts {
+    pub(super) forcibly_succeeded: bool,
+}
+
+impl TaskInstanceAuditFacts {
+    fn process_events(
+        &mut self,
+        task_instance: &TaskInstancesResponseItem,
+        events: Vec<EventLogsResponseItem>,
+    ) {
+        let tgt = &format!("{LOG_TARGET}::process_events");
+        // We process events in reverse order.  As soon as an
+        // event confirms a fact we want to know, we break.
+        for event in events.iter().sorted_by_key(|e| e.event_log_id).rev() {
+            trace!(target: tgt, "Processing event {}", event.event_log_id);
+            if let (Some(_), Some(_), Some(_)) = (&event.dag_id, &event.run_id, &event.task_id) {
+                if event.try_number.is_none()
+                    && event.event == "success"
+                    && event
+                        .extra_hash()
+                        .is_some_and(|hash| hash.get("confirmed") == Some(&"true"))
+                    && (event.map_index.is_none() || task_instance.map_index == event.map_index)
+                {
+                    // Task was forcibly succeeded.  Unless another event is processed later
+                    // where the task runs, then the event was forcibly succeeded.
+                    trace!(target: tgt, "Event indicates task instance was forcibly succeeded: {:?}", event);
+                    self.forcibly_succeeded = true;
+                    break;
+                } else if event.try_number.is_some() && event.map_index == task_instance.map_index {
+                    // Task ran and Airflow recorded it.
+                    trace!(target: tgt, "Event indicates task instance is running normally: {:?}", event);
+                    self.forcibly_succeeded = false;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 impl From<&ProvisionalHostOSPlan> for Stages {
     fn from(val: &ProvisionalHostOSPlan) -> Self {
         macro_rules! transform_to_stages {
@@ -165,6 +215,8 @@ impl From<&ProvisionalHostOSPlan> for Stages {
                                         b,
                                         &b.selectors,
                                         &b.tolerance,
+                                        None,
+                                        None,
                                     ),
                                 )
                             })
@@ -237,18 +289,20 @@ fn annotate_batch_state(
 }
 
 #[derive(Clone, Default, Serialize)]
-struct BatchXcomData {
-    actual_plans: PlanCache<ActuallyTargetedNodes>,
+struct BatchRelatedData {
+    actual_plan: PlanCache<ActuallyTargetedNodes>,
     nodes_upgrade_status: PlanCache<NodeUpgradeStatuses>,
     nodes_alert_status: PlanCache<NodeAlertStatuses>,
     selectors: PlanCache<NodeSelectors>,
     tolerance: PlanCache<NodeFailureTolerance>,
+    adoption_audit_data: PlanCache<Vec<EventLogsResponseItem>>,
+    health_audit_data: PlanCache<Vec<EventLogsResponseItem>>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct Parser {
     provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-    batch_xcoms: HashMap<(StageName, NonZero<usize>), BatchXcomData>,
+    batch_data: HashMap<(StageName, NonZero<usize>), BatchRelatedData>,
     pub(crate) stages: Option<Stages>,
 }
 
@@ -262,14 +316,14 @@ impl Serialize for Parser {
         #[derive(Serialize)]
         struct SerializedParser {
             provisional_plan: PlanCache<ProvisionalHostOSPlan>,
-            batch_xcoms: HashMap<String, BatchXcomData>,
+            batch_data: HashMap<String, BatchRelatedData>,
             stages: Option<Stages>,
         }
 
         let p = SerializedParser {
             provisional_plan: self.provisional_plan.clone(),
-            batch_xcoms: self
-                .batch_xcoms
+            batch_data: self
+                .batch_data
                 .iter()
                 .map(|(k, v)| (format!("{}/{}", k.0, k.1), v.clone()))
                 .collect(),
@@ -323,6 +377,34 @@ impl Parser {
                     .await
                 {
                     PlanQueryResult::Found(plan) => Some(plan),
+                    PlanQueryResult::Error(e) => {
+                        return Err(RolloutDataGatherError::AirflowError(e));
+                    }
+                    PlanQueryResult::Invalid => None,
+                    PlanQueryResult::NotFound => None,
+                }
+            };
+        }
+
+        macro_rules! retrieve_task_audit_facts_from_cache_or_server {
+            ($member:expr, $task_instance:expr) => {
+                match $member
+                    .get_struct(
+                        &$task_instance,
+                        fetch_audit_logs(
+                            airflow_api.clone(),
+                            dag_run.dag_id.as_str(),
+                            dag_run.dag_run_id.as_str(),
+                            $task_instance.task_id.as_str(),
+                        ),
+                    )
+                    .await
+                {
+                    PlanQueryResult::Found(event_logs) => Some({
+                        let mut facts = TaskInstanceAuditFacts::default();
+                        facts.process_events(&$task_instance, event_logs);
+                        facts
+                    }),
                     PlanQueryResult::Error(e) => {
                         return Err(RolloutDataGatherError::AirflowError(e));
                     }
@@ -440,9 +522,11 @@ impl Parser {
                             stage_name_enum.clone(),
                             stage_batch_number,
                             &task_instance,
+                            None,
+                            None,
                         ));
                 let batch_xcom_data = self
-                    .batch_xcoms
+                    .batch_data
                     .entry((stage_name_enum.clone(), stage_batch_number))
                     .or_default();
 
@@ -582,7 +666,7 @@ impl Parser {
                                 }
                                 "collect_nodes" => {
                                     if let Some(plan) = retrieve_xcom_from_cache_or_server!(
-                                        batch_xcom_data.actual_plans,
+                                        batch_xcom_data.actual_plan,
                                         task_instance,
                                         "nodes"
                                     ) {
@@ -606,6 +690,12 @@ impl Parser {
                                         "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
+                                    let task_facts = retrieve_task_audit_facts_from_cache_or_server!(
+                                        batch_xcom_data.adoption_audit_data,
+                                        task_instance
+                                    );
+                                    batch.adoption_checks_bypassed =
+                                        task_facts.map(|f| f.forcibly_succeeded);
                                 }
                                 "wait_until_nodes_healthy" => {
                                     // We don't have a state for when this task is completed,
@@ -616,6 +706,12 @@ impl Parser {
                                         "return_value"
                                     );
                                     trans_exact!(BatchState::WaitingUntilNodesHealthy);
+                                    let task_facts = retrieve_task_audit_facts_from_cache_or_server!(
+                                        batch_xcom_data.health_audit_data,
+                                        task_instance
+                                    );
+                                    batch.health_checks_bypassed =
+                                        task_facts.map(|f| f.forcibly_succeeded);
                                 }
                                 "join" => {
                                     if batch.state != BatchState::Skipped {

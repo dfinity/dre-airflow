@@ -4,13 +4,13 @@ Rollout IC os to subnets.
 
 import datetime
 
+import airflow.operators.python as python_operator
 import operators.test_operator as test_operator
 import pendulum
-
-import airflow.operators.python as python_operator
-from airflow import DAG
 from airflow.decorators import task
 from airflow.sensors.time_delta import TimeDeltaSensorAsync
+
+from airflow import DAG
 
 with DAG(
     dag_id="test_dag",

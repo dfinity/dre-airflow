@@ -6,9 +6,8 @@ from typing import Any, Sequence, cast
 
 import requests
 import yaml
-from dfinity.rollout_types import Releases
-
 from airflow.models import BaseOperator
+from dfinity.rollout_types import Releases
 
 
 class GetReleases(BaseOperator):
@@ -40,9 +39,7 @@ class GetReleases(BaseOperator):
             if prospective_date:
                 release["rc_date"] = datetime.datetime.strptime(
                     prospective_date.group(1), "%Y-%m-%d_%H-%M"
-                ).replace(
-                    tzinfo=datetime.timezone.utc
-                )  # Times in UTC.
+                ).replace(tzinfo=datetime.timezone.utc)  # Times in UTC.
             else:
                 raise ValueError(
                     f"Release item {release['rc_name']} has no valid date/time in name"

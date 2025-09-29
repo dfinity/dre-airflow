@@ -5,11 +5,18 @@ IC-OS rollout operators.
 import itertools
 from typing import Any, Sequence
 
+import airflow.providers.slack.operators.slack as slack
 import dfinity.dre as dre
 import dfinity.ic_types as ic_types
 import dfinity.prom_api as prom
 import dfinity.rollout_types as rollout_types
 import yaml
+from airflow.decorators import task
+from airflow.exceptions import AirflowException
+from airflow.hooks.subprocess import SubprocessHook
+from airflow.models.baseoperator import BaseOperator
+from airflow.template.templater import Templater
+from airflow.utils.context import Context
 from dfinity.ic_os_rollout import (
     DR_DRE_SLACK_ID,
     SLACK_CHANNEL,
@@ -21,14 +28,6 @@ from dfinity.ic_os_rollout import (
     rollout_planner,
     subnet_id_and_git_revision_from_args,
 )
-
-import airflow.providers.slack.operators.slack as slack
-from airflow.decorators import task
-from airflow.exceptions import AirflowException
-from airflow.hooks.subprocess import SubprocessHook
-from airflow.models.baseoperator import BaseOperator
-from airflow.template.templater import Templater
-from airflow.utils.context import Context
 
 
 class RolloutParams(Templater):

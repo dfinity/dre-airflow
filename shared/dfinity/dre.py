@@ -13,13 +13,13 @@ import time
 from contextlib import contextmanager
 from typing import IO, Generator, TypedDict, cast
 
-import requests
-
 import airflow.models
-import dfinity.ic_types as ic_types
-import dfinity.rollout_types as rollout_types
+import requests
 from airflow.exceptions import AirflowException
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
+
+import dfinity.ic_types as ic_types
+import dfinity.rollout_types as rollout_types
 
 DRE_URL = (
     "https://github.com/dfinity/dre/releases/latest/download/dre-x86_64-unknown-linux"

@@ -106,7 +106,7 @@
         <div class="stages">
             {#each stage_names as stage_name}
                 {#if rollout.stages[stage_name]["1"] !== undefined}
-                    <ul class="stage-{stage_name}">
+                    <ul class="batch_list stage-{stage_name}">
                         {#each Object.entries(rollout.stages[stage_name]) as [batch_num, batch]}
                             <HostOSBatch
                                 dag_run_id={rollout.name.toString()}
@@ -137,7 +137,7 @@
 </section>
 
 <style>
-    ul {
+    ul.batch_list {
         display: flex;
         gap: 0.6em;
         flex-direction: row;

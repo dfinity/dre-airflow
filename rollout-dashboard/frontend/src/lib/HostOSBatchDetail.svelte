@@ -17,6 +17,7 @@
     import { hostOsBatchStateName } from "./types";
     import { cap } from "./lib";
     import InfoBlock from "./InfoBlock.svelte";
+    import WarningBlock from "./WarningBlock.svelte";
     import ExternalLinkIcon from "./ExternalLinkIcon.svelte";
     import Selectors from "./Selectors.svelte";
     import { batch_view_with_cancellation, type FullState } from "./stores";
@@ -296,23 +297,51 @@
                                     alerting state.{/if}</TableBodyCell
                             ></TableBodyRow
                         >
-                        {#if upgraded_nodes_summary}
+                        {#if upgraded_nodes_summary || $batch.adoption_checks_bypassed}
                             <TableBodyRow
-                                ><TableHeadCell>Upgrade status</TableHeadCell
+                                ><TableHeadCell
+                                    ><span
+                                        class="tooltip"
+                                        title="This information is only updated during the wait for revision adoption"
+                                        >Upgrade status</span
+                                    ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
-                                    >{Object.entries(upgraded_nodes_summary)
-                                        .map(([k, v]) => `${v} nodes ${k}`)
-                                        .join(", ")}</TableBodyCell
+                                    >{#if upgraded_nodes_summary}{Object.entries(
+                                            upgraded_nodes_summary,
+                                        )
+                                            .map(([k, v]) => `${v} nodes ${k}`)
+                                            .join(
+                                                ", ",
+                                            )}.{/if}{#if $batch.adoption_checks_bypassed}
+                                        <WarningBlock shrink_to_content="true">
+                                            The check for upgrades was forcibly
+                                            skipped in this batch.
+                                        </WarningBlock>
+                                    {/if}</TableBodyCell
                                 ></TableBodyRow
                             >
                         {/if}
-                        {#if alerting_nodes_summary}
+                        {#if alerting_nodes_summary || $batch.health_checks_bypassed}
                             <TableBodyRow
-                                ><TableHeadCell>Health status</TableHeadCell
+                                ><TableHeadCell
+                                    ><span
+                                        class="tooltip"
+                                        title="This information is only updated during the wait for nodes to return to a healthy status"
+                                        >Health status</span
+                                    ></TableHeadCell
                                 ><TableBodyCell style="white-space: normal"
-                                    >{Object.entries(alerting_nodes_summary)
-                                        .map(([k, v]) => `${v} nodes ${k}`)
-                                        .join(", ")}</TableBodyCell
+                                    >{#if alerting_nodes_summary}{Object.entries(
+                                            alerting_nodes_summary,
+                                        )
+                                            .map(([k, v]) => `${v} nodes ${k}`)
+                                            .join(
+                                                ", ",
+                                            )}.{/if}{#if $batch.health_checks_bypassed}
+                                        <WarningBlock shrink_to_content="true">
+                                            The health check on nodes was
+                                            forcibly skipped in this batch.
+                                        </WarningBlock>
+                                    {/if}</TableBodyCell
                                 ></TableBodyRow
                             >
                         {/if}
@@ -321,10 +350,12 @@
                 {#if actual_items !== null}
                     <TabItem title="Actual nodes">
                         <InfoBlock>
-                            These are the nodes selected at the start of the
-                            batch just prior to submitting the upgrade proposal.
-                            They may differ from the planned nodes, originally
-                            selected at the beginning of the rollout.
+                            Nodes listed here may differ from the planned nodes,
+                            due to shifts in node availability over time. The
+                            upgrade status information ceases to be updated once
+                            the batch has moved on to checking node health, and
+                            the health information ceases to update after the
+                            batch is finished.
                         </InfoBlock>
                         <RegularTable striped={true}>
                             <TableHead>

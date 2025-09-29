@@ -11,11 +11,11 @@ import operators.auto_rollout as auto_rollout
 import operators.github_rollout as github_rollout
 import operators.gsheets_rollout as gsheets_rollout
 import pendulum
+from airflow.models.param import Param
+from airflow.operators.python import BranchPythonOperator
 from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG, __version__
-from airflow.models.param import Param
-from airflow.operators.python import BranchPythonOperator
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))

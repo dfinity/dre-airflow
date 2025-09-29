@@ -12,6 +12,11 @@ from typing import Any, cast
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
+from airflow.decorators import task
+from airflow.models.baseoperator import chain
+from airflow.models.param import Param
+from airflow.operators.empty import EmptyOperator
+from airflow.utils.task_group import TaskGroup
 from dfinity.ic_os_rollout import (
     MAX_BATCHES,
     SubnetIdWithRevision,
@@ -20,11 +25,6 @@ from dfinity.ic_os_rollout import (
 from dfinity.ic_types import IC_NETWORKS
 
 from airflow import DAG, __version__
-from airflow.decorators import task
-from airflow.models.baseoperator import chain
-from airflow.models.param import Param
-from airflow.operators.empty import EmptyOperator
-from airflow.utils.task_group import TaskGroup
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))

@@ -10,21 +10,21 @@ import os
 import sys
 import typing
 
+import airflow.operators.python as python_operator
+import airflow.sensors.python as python_sensor
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
+from airflow.decorators import dag, task, task_group
+from airflow.models.baseoperator import chain
+from airflow.models.param import Param
+from airflow.operators.empty import EmptyOperator
 from dfinity.ic_types import IC_NETWORKS
 from dfinity.rollout_types import HostOSStage
 from operators import hostos_rollout as hostos_operators
 from operators.ic_os_rollout import RequestProposalVote
 from sensors import hostos_rollout as hostos_sensors
 
-import airflow.operators.python as python_operator
-import airflow.sensors.python as python_sensor
 from airflow import __version__
-from airflow.decorators import dag, task, task_group
-from airflow.models.baseoperator import chain
-from airflow.models.param import Param
-from airflow.operators.empty import EmptyOperator
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))

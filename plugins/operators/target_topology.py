@@ -9,14 +9,13 @@ from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, Sequence, cast
 
-import requests
-from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
-
 import airflow.providers.slack.operators.slack as slack
+import requests
 from airflow.hooks.base import BaseHook
 from airflow.hooks.subprocess import SubprocessHook, SubprocessResult
 from airflow.models.baseoperator import BaseOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from dfinity.ic_os_rollout import SLACK_CHANNEL, SLACK_CONNECTION_ID
 
 REPO_DIR = Path("/tmp/target_topology")
 GITHUB_CONNECTION_ID = "github.node_allocation"

@@ -1,3 +1,6 @@
+use crate::airflow_client::TasksResponse;
+use crate::live_state::log_inspector::{AirflowIncrementalLogInspector, DagRunUpdatesRequired};
+
 use super::airflow_client::{
     AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
     TaskInstancesResponseItem,
@@ -7,6 +10,7 @@ use super::types::{unstable, v2, v2::DagID, v2::DagRunID};
 use chrono::{DateTime, Utc};
 use derive_more::IntoIterator;
 use futures::future::join_all;
+use futures::join;
 use indexmap::IndexMap;
 use log::{debug, error, info};
 use reqwest::StatusCode;
@@ -17,6 +21,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt::{self, Display};
 use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{vec, vec::Vec};
@@ -415,6 +420,7 @@ pub struct SyncerState {
     /// Map from DAG ID and DAG run ID to updater.
     pub(super) rollout_states: RolloutStates,
     log_inspectors: HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
+    tasks_caches: HashMap<DagID, (TasksResponse, Option<DateTime<Utc>>)>,
     pub(super) cycle_state: SyncCycleState,
 }
 
@@ -441,6 +447,7 @@ impl AirflowStateSyncer<Initial> {
         let init_syncer_state = Arc::new(SyncerState {
             rollout_states: RolloutStates(HashMap::new()),
             log_inspectors: HashMap::new(),
+            tasks_caches: HashMap::new(),
             cycle_state: init,
         });
         let (stream_tx, _stream_rx) = watch::channel::<Arc<SyncerState>>(init_syncer_state.clone());
@@ -545,6 +552,7 @@ impl AirflowStateSyncer<Live> {
         &self,
         mut rollout_states: RolloutStates,
         mut log_inspectors: HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
+        mut tasks_caches: HashMap<DagID, (TasksResponse, Option<DateTime<Utc>>)>,
         max_rollouts: usize,
     ) -> Result<
         (
@@ -552,26 +560,79 @@ impl AirflowStateSyncer<Live> {
             Rollouts,
             RolloutStates,
             HashMap<DagID, log_inspector::AirflowIncrementalLogInspector>,
+            HashMap<DagID, (TasksResponse, Option<DateTime<Utc>>)>,
         ),
         RolloutDataGatherError,
     > {
         debug!(target: LOG_TARGET, "Retrieving engine states.");
 
         // Retrieve the state of each DAG.
-        let mut engine_states: v2::RolloutEngineStates = {
-            let mut dags_response = self
-                .airflow_api
-                .dags(1000, 0, &DagsQueryFilter::default(), None)
-                .await?;
-            dags_response.dags.retain(|dag| {
-                Parser::valid_dag_ids()
-                    .iter()
-                    .any(|s| s.to_string() == dag.dag_id)
-            });
-            dags_response
-        }
-        .into();
+        let mut dags_response = self
+            .airflow_api
+            .dags(1000, 0, &DagsQueryFilter::default(), None)
+            .await?;
+        dags_response.dags.retain(|dag| {
+            Parser::valid_dag_ids()
+                .iter()
+                .any(|s| s.to_string() == dag.dag_id)
+        });
 
+        let dag_ids_and_last_reread_times: Vec<_> = dags_response
+            .dags
+            .iter()
+            .map(|d| {
+                (
+                    DagID::from_str(&d.dag_id).expect("Must be valid DAG ID"),
+                    d.last_parsed_time,
+                    d.has_import_errors,
+                )
+            })
+            .collect();
+
+        // Refresh tasks cache for each DAGs that is not known or has been reread by Airflow lately.
+        let mut tasks_collectors: Vec<Pin<Box<_>>> = vec![];
+        for (dag_id, last_parsed_time, has_import_errors) in dag_ids_and_last_reread_times.iter() {
+            // Remove from tasks caches any with import errors.
+            if *has_import_errors {
+                error!(target: LOG_TARGET, "Airflow says DAG {} is broken, will not update this cycle.", dag_id);
+                tasks_caches.remove(dag_id);
+                continue;
+            }
+            if match tasks_caches.get(dag_id) {
+                // Mismatches in last parsed times require refresh.
+                Some((_, cached_last_parsed_time)) => last_parsed_time != cached_last_parsed_time,
+                // DAGs whose tasks are not known require refresh.
+                None => true,
+            } {
+                tasks_collectors.push(Box::pin(async move {
+                    debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG tasks.");
+                    (
+                        dag_id.clone(),
+                        *last_parsed_time,
+                        self.airflow_api.tasks(&dag_id.to_string()).await,
+                    )
+                }))
+            }
+        }
+        if !tasks_collectors.is_empty() {
+            for (dag_id, last_parsed_time, tasks_result) in join_all(tasks_collectors).await {
+                match tasks_result {
+                    Ok(tasks) => {
+                        tasks_caches.insert(dag_id.clone(), (tasks.clone(), last_parsed_time));
+                    }
+                    Err(AirflowError::StatusCode(StatusCode::NOT_FOUND)) => {
+                        error!(target: LOG_TARGET, "Airflow responded {} to request tasks of DAG {} -- DAG probably broken, will not update this cycle.", StatusCode::NOT_FOUND, dag_id);
+                        tasks_caches.remove(&dag_id);
+                    }
+                    Err(e) => return Err(RolloutDataGatherError::AirflowError(e)),
+                }
+            }
+        }
+
+        // Manufacture the engine states structure  based on the DAGs response.
+        let mut engine_states: v2::RolloutEngineStates = dags_response.into();
+
+        // Complete the list by adding a broken tag to any DAG missing from the DAGs response.
         for d in Parser::valid_dag_ids() {
             engine_states
                 .entry(d.to_string())
@@ -579,62 +640,46 @@ impl AirflowStateSyncer<Live> {
         }
 
         let rollout_state_futures: Vec<_> = join_all(
-            Parser::valid_dag_ids()
-                .into_iter()
-                .map(|dag_id| {
-                    let inspector = log_inspectors.entry(dag_id.clone())
-                    .or_default().clone();
-                    (
-                        dag_id.clone(),
-                        inspector,
-                    )
-                }).collect::<Vec<_>>()
-                .into_iter().map(|(dag_id, log_inspector)|
-                    {
-                        async move {
-                            // Call the log inspectors to determine which tasks need to be updated.
-                            // Each log inspector knows about all updated tasks of all DAG runs for a DAG.
-                            // Then insert any newly needed inspector into the in-flight inspectors map.
-                            let (log_inspector, dag_run_updates_required) = log_inspector
-                                .incrementally_detect_dag_updates(&self.airflow_api, &dag_id)
-                                .await?;
-
-                            debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG runs and tasks.");
-
-                            let dis = dag_id.to_string();
-                            Ok((
-                                dag_id,
-                                dag_run_updates_required,
-                                // Retrieve the latest X DAG runs for the DAG we're operating with.
-                                self.airflow_api
-                                    .dag_runs(&dis, max_rollouts, 0, None, None)
-                                    .await?
-                                    .dag_runs,
-                                // Fetch tasks of the DAG to later construct a topological sorter.
-                                self.airflow_api.tasks(&dis).await?,
-                                log_inspector,
-                            ))
-                        }
-                }),
-        )
-        .await
-        .into_iter()
-        .filter_map(|r: std::result::Result<_, AirflowError>| {
-            // Here we handle the circumstance whereby a DAG itself went missing because it was broken.
-            // Positive confirmation of this phenomenon will be available in the v2::RolloutEngineStates
-            // returned at the end of this function.
-            //
-            // We handle this by filtering because, that way, at least we can collect information on
-            // existing DAGs that are *not* broken.
-            match r {
-                Err(AirflowError::StatusCode(StatusCode::NOT_FOUND)) => {
-                    error!(target: LOG_TARGET, "Airflow responded {} to request for DAG runs and tasks of some DAG -- DAG probably broken.", StatusCode::NOT_FOUND);
-                    None
+        tasks_caches.iter().map(
+                |(dag_id, (tasks, _))|
+                {
+                    let log_inspector = log_inspectors.get(dag_id).unwrap_or(&AirflowIncrementalLogInspector::default()).clone();
+                    (dag_id.clone(), tasks.clone(), log_inspector)
                 }
-                _ => Some(r),
-            }
-        })
-        .collect::<Result<Vec<_>, AirflowError>>()?
+            )
+            .map(|(dag_id, tasks, log_inspector)|
+                {
+                    async move {
+                        debug!(target: &format!("{LOG_TARGET}::{dag_id}"), "Retrieving DAG runs.");
+                        let dis = dag_id.to_string();
+
+                        let (runs_result, audit_result) = join!(
+                            // Retrieve the latest X DAG runs for the DAG we're operating with.
+                            self.airflow_api
+                                .dag_runs(&dis, max_rollouts, 0, None, None),
+                                // Call the log inspectors to determine which tasks need to be updated.
+                                // Each log inspector knows about all updated tasks of all DAG runs for a DAG.
+                                // Then insert any newly needed inspector into the in-flight inspectors map.
+                                log_inspector
+                                    .incrementally_detect_dag_updates(&self.airflow_api, &dag_id),
+                        );
+
+                        let (dag_runs, (log_inspector, dag_run_updates_required)) = (runs_result?.dag_runs, audit_result?);
+
+                        Ok((
+                            dag_id,
+                            dag_run_updates_required,
+                            dag_runs,
+                            // Fetch tasks of the DAG to later construct a topological sorter.
+                            tasks,
+                            log_inspector,
+                        ))
+                    }
+                }
+            )
+        ).await
+        .into_iter()
+        .collect::<Result<Vec<(DagID, DagRunUpdatesRequired, Vec<DagRunsResponseItem>, TasksResponse, AirflowIncrementalLogInspector)>, AirflowError>>()?
         .into_iter()
         .map(
             |(
@@ -648,7 +693,6 @@ impl AirflowStateSyncer<Live> {
                 // But before peeling off the log inspector, copy its last event log update.
                 let last_event_log_update = log_inspector.last_event_log_update;
                 log_inspectors.insert(dag_id.clone(), log_inspector);
-
                 Ok((
                     dag_id,
                     last_event_log_update,
@@ -704,7 +748,16 @@ impl AirflowStateSyncer<Live> {
                     (log_inspector::DagRunUpdateType::SomeTaskInstances(updated_task_instances), Some(lut)) => {
                         let updated_task_instances =
                             updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                        debug!(target: tgt, "{}: collecting data about task instances updated since {} and a specific set of tasks too: {:?}.", rollout_state.dag_run_id, lut, updated_task_instances);
+                        debug!(
+                            target: tgt,
+                            "{}: collecting data about task instances updated since {}{}.",
+                            rollout_state.dag_run_id,
+                            lut,
+                            match updated_task_instances.is_empty() {
+                                true => "".to_string(),
+                                false => format!(" and a specific set of tasks too: {:?}", updated_task_instances),
+                            }
+                        );
                         [
                             self.airflow_api
                                 .task_instances_batch(
@@ -772,7 +825,7 @@ impl AirflowStateSyncer<Live> {
                             self.airflow_api.clone(),
                             retrieved_task_instances,
                             last_event_log_update,
-                            &sorter
+                            &sorter,
                         ).await?;
                         Ok((rollout_state, rollout))
                     }
@@ -808,26 +861,34 @@ impl AirflowStateSyncer<Live> {
             ),
             rollout_states,
             log_inspectors,
+            tasks_caches,
         ))
     }
 
     async fn sync_state(&self, max_rollouts: usize) -> Arc<SyncerState> {
         let syncer_state = self.syncer_state.lock().await;
-        let (rollout_states, log_inspectors) = (
+        let (rollout_states, log_inspectors, tasks_caches) = (
             syncer_state.rollout_states.clone(),
             syncer_state.log_inspectors.clone(),
+            syncer_state.tasks_caches.clone(),
         );
         drop(syncer_state);
 
         match self
-            .update(rollout_states.clone(), log_inspectors.clone(), max_rollouts)
+            .update(
+                rollout_states.clone(),
+                log_inspectors.clone(),
+                tasks_caches.clone(),
+                max_rollouts,
+            )
             .await
         {
-            Ok((engine_state, rollouts, rollout_states, log_inspectors)) => {
+            Ok((engine_state, rollouts, rollout_states, log_inspectors, tasks_caches)) => {
                 let mut syncer_state = self.syncer_state.lock().await;
                 *syncer_state = Arc::new(SyncerState {
                     log_inspectors,
                     rollout_states,
+                    tasks_caches,
                     cycle_state: SyncCycleState::Successful(SuccessfulSyncCycleState {
                         rollout_engine_states: engine_state,
                         rollouts,
@@ -838,8 +899,9 @@ impl AirflowStateSyncer<Live> {
             Err(e) => {
                 let mut syncer_state = self.syncer_state.lock().await;
                 *syncer_state = Arc::new(SyncerState {
-                    log_inspectors: syncer_state.log_inspectors.clone(),
-                    rollout_states: syncer_state.rollout_states.clone(),
+                    log_inspectors,
+                    rollout_states,
+                    tasks_caches,
                     cycle_state: SyncCycleState::Error(e),
                 });
                 syncer_state.clone()
