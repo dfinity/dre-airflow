@@ -1394,7 +1394,7 @@ pub mod v2 {
     /// After receiving this, the client should consider its internal state stale.
     #[derive(Serialize, Clone, PartialEq, Eq)]
     pub struct Error {
-        // fixme does not need to be struct, or code and message shoudl be separate instead of a tuple
+        // FIXME does not need to be struct, or code and message should be separate instead of a tuple.
         #[serde(serialize_with = "serialize_status_code")]
         pub code: StatusCode,
         pub message: String,
