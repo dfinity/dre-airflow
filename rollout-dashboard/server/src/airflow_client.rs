@@ -1,28 +1,18 @@
 use super::types::v2::serialize_status_code;
-use async_recursion::async_recursion;
 use chrono::{DateTime, TimeDelta, Utc};
-use indexmap::IndexMap;
-use log::{debug, error, trace, warn};
-use regex::Regex;
+use log::{trace, warn};
 use reqwest::StatusCode;
-use reqwest::cookie::Jar;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error as ErrorTrait;
+use std::fmt;
 use std::fmt::Display;
 use std::future::Future;
 use std::string::FromUtf8Error;
-use std::sync::Arc;
-use std::time::Duration;
-use std::{f64, fmt};
-use std::{vec, vec::Vec};
-use strum::Display;
-use tokio::time::Instant;
-use urlencoding::{decode, encode};
+use std::vec::Vec;
+use urlencoding::encode;
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 100;
@@ -30,7 +20,6 @@ const MAX_BATCH_SIZE: usize = 100;
 /// After upgrade to Airflow >= 2.10.5 in prod this code should be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
 // API sub-URL for Airflow.
-const API_SUBURL: &str = "api/v1/";
 
 fn add_date_parm(url: String, parm_name: &str, date: Option<DateTime<Utc>>) -> String {
     let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
@@ -82,7 +71,7 @@ fn add_ended_parameters(
     )
 }
 
-trait Pageable {
+pub(crate) trait Pageable {
     fn len(&self) -> usize;
     /// Append all elements from other into self (to the end
     /// of the storage), replacing any element that already
@@ -128,130 +117,999 @@ macro_rules! pageable_impl {
         }
     };
 }
+pub(crate) use pageable_impl;
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct DagsResponseItem {
-    /// dag_id is unique, enforced by Airflow.
-    pub dag_id: String,
-    #[allow(dead_code)]
-    pub dag_display_name: String,
-    pub is_paused: bool,
-    pub is_active: bool,
-    pub has_import_errors: bool,
-    pub last_parsed_time: Option<DateTime<Utc>>,
-}
+pub use v1::{
+    AirflowClient,
+    dag_runs::{
+        Response as DagRunsResponse, ResponseItem as DagRunsResponseItem, State as DagRunState,
+    },
+    dags::{
+        QueryFilter as DagsQueryFilter, Response as DagsResponse, ResponseItem as DagsResponseItem,
+    },
+    event_logs::{
+        QueryFilter as EventLogsResponseFilters, Response as EventLogsResponse,
+        ResponseItem as EventLogsResponseItem,
+    },
+    task_instances::{
+        QueryFilter as TaskInstanceRequestFilters, Response as TaskInstancesResponse,
+        ResponseItem as TaskInstancesResponseItem, State as TaskInstanceState,
+    },
+    tasks::{Response as TasksResponse, ResponseItem as TasksResponseItem},
+    xcom_entries::Response as XComEntryResponse,
+};
 
-impl DagsResponseItem {
-    fn unique_id(&self) -> String {
-        self.dag_id.clone()
+mod v1 {
+    use super::{
+        _paged_get, _post, AirflowClientCreationError, AirflowError, MAX_BATCH_SIZE,
+        MAX_TASK_INSTANCE_BATCH_SIZE, PagingParameters, add_ended_parameters,
+        add_executed_parameters, add_updated_parameters, decode_json_from_bytes, querify,
+    };
+    use async_recursion::async_recursion;
+    use chrono::{DateTime, Utc};
+    use log::{debug, error, trace, warn};
+    use regex::Regex;
+    use reqwest::cookie::Jar;
+    use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER};
+    use serde::{Deserialize, Serialize};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use std::{vec, vec::Vec};
+    use tokio::time::Instant;
+    use urlencoding::decode;
+
+    // API sub-URL for Airflow.
+    const API_SUBURL: &str = "api/v1/";
+
+    /// DAGs query and response.
+    pub(super) mod dags {
+        use super::super::{Pageable, pageable_impl};
+        use chrono::{DateTime, Utc};
+        use serde::Deserialize;
+        use std::collections::HashMap;
+
+        #[allow(dead_code)]
+        #[derive(Default)]
+        pub struct QueryFilter<'a> {
+            pub dag_id_pattern: Option<&'a String>,
+        }
+
+        impl<'a> QueryFilter<'a> {
+            pub(super) fn as_queryparams(&self) -> Vec<(&str, String)> {
+                let shit = [self
+                    .dag_id_pattern
+                    .as_ref()
+                    .map(|v| ("dag_id_pattern", (*v).clone()))];
+                let res: Vec<_> = shit
+                    .iter()
+                    .flatten()
+                    .map(|(k, v)| (*k, (*v).clone()))
+                    .collect();
+                res
+            }
+        }
+
+        #[derive(Debug, Deserialize, Clone)]
+        pub struct ResponseItem {
+            /// dag_id is unique, enforced by Airflow.
+            pub dag_id: String,
+            #[allow(dead_code)]
+            pub dag_display_name: String,
+            pub is_paused: bool,
+            pub is_active: bool,
+            pub has_import_errors: bool,
+            pub last_parsed_time: Option<DateTime<Utc>>,
+        }
+
+        impl ResponseItem {
+            fn unique_id(&self) -> String {
+                self.dag_id.clone()
+            }
+        }
+
+        #[derive(Debug, Deserialize, Default)]
+        pub struct Response {
+            pub dags: Vec<ResponseItem>,
+            #[serde(skip_serializing, skip_deserializing)]
+            position_cache: HashMap<String, usize>,
+            total_entries: usize,
+        }
+
+        pageable_impl!(Response, dags);
+    }
+
+    /// DAG runs query and response.
+    pub(super) mod dag_runs {
+        use super::super::{Pageable, pageable_impl};
+        use chrono::{DateTime, Utc};
+        use indexmap::IndexMap;
+        use serde::{Deserialize, Serialize};
+        use std::collections::HashMap;
+
+        #[derive(Debug, Serialize, Deserialize, Clone)]
+        #[serde(rename_all = "snake_case")]
+        pub enum State {
+            Queued,
+            Running,
+            Success,
+            Failed,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone)]
+        pub struct ResponseItem {
+            pub conf: IndexMap<String, serde_json::Value>,
+            /// dag_run_id is unique, enforced by Airflow.
+            pub dag_run_id: String,
+            pub dag_id: String,
+            pub logical_date: DateTime<Utc>,
+            #[allow(dead_code)]
+            pub start_date: Option<DateTime<Utc>>,
+            #[allow(dead_code)]
+            pub end_date: Option<DateTime<Utc>>,
+            pub last_scheduling_decision: Option<DateTime<Utc>>,
+            pub state: State,
+            pub note: Option<String>,
+        }
+
+        impl ResponseItem {
+            fn unique_id(&self) -> String {
+                self.dag_id.clone() + self.dag_run_id.as_str()
+            }
+        }
+
+        #[derive(Debug, Deserialize, Default)]
+        pub struct Response {
+            pub dag_runs: Vec<ResponseItem>,
+            #[serde(skip_serializing, skip_deserializing)]
+            position_cache: HashMap<String, usize>,
+            total_entries: usize,
+        }
+
+        pageable_impl!(Response, dag_runs);
+    }
+
+    /// Task instances query and response.
+    pub(super) mod task_instances {
+        use super::super::{Pageable, negative_and_null_are_none, pageable_impl};
+        use chrono::{DateTime, Utc};
+        use serde::{Deserialize, Serialize};
+        use std::collections::HashMap;
+        use strum::Display;
+
+        #[derive(Default)]
+        pub struct QueryFilter {
+            pub executed_at_lte: Option<DateTime<Utc>>,
+            pub executed_at_gte: Option<DateTime<Utc>>,
+            pub updated_at_lte: Option<DateTime<Utc>>,
+            pub updated_at_gte: Option<DateTime<Utc>>,
+            pub ended_at_lte: Option<DateTime<Utc>>,
+            pub ended_at_gte: Option<DateTime<Utc>>,
+        }
+
+        impl QueryFilter {
+            #[allow(dead_code)]
+            pub fn executed_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.executed_at_lte = date;
+                self
+            }
+            pub fn executed_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.executed_at_gte = date;
+                self
+            }
+            #[allow(dead_code)]
+            pub fn updated_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.updated_at_lte = date;
+                self
+            }
+            pub fn updated_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.updated_at_gte = date;
+                self
+            }
+            #[allow(dead_code)]
+            pub fn ended_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.ended_at_lte = date;
+                self
+            }
+            pub fn ended_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
+                self.ended_at_gte = date;
+                self
+            }
+        }
+
+        #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Display)]
+        #[serde(rename_all = "snake_case")]
+        pub enum State {
+            Success,
+            Running,
+            Failed,
+            UpstreamFailed,
+            Skipped,
+            UpForRetry,
+            UpForReschedule,
+            Queued,
+            Scheduled,
+            Deferred,
+            Removed,
+            Restarting,
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone)]
+        pub struct ResponseItem {
+            pub task_id: String,
+            #[allow(dead_code)]
+            pub task_display_name: String,
+            pub dag_id: String,
+            pub dag_run_id: String,
+            #[allow(dead_code)]
+            pub execution_date: DateTime<Utc>,
+            #[allow(dead_code)]
+            pub start_date: Option<DateTime<Utc>>,
+            pub end_date: Option<DateTime<Utc>>,
+            #[allow(dead_code)]
+            pub duration: Option<f64>,
+            pub state: Option<State>,
+            #[allow(dead_code)]
+            pub try_number: usize,
+            #[serde(deserialize_with = "negative_and_null_are_none")]
+            pub map_index: Option<usize>,
+            #[allow(dead_code)]
+            pub max_tries: usize,
+            #[allow(dead_code)]
+            pub operator: Option<String>,
+            #[allow(dead_code)]
+            pub rendered_map_index: Option<String>,
+            #[allow(dead_code)]
+            pub note: Option<String>,
+        }
+
+        impl ResponseItem {
+            #[allow(dead_code)]
+            pub fn latest_date(&self) -> DateTime<Utc> {
+                let mut d = self.execution_date;
+                if let Some(dd) = self.start_date {
+                    if dd > d {
+                        d = dd
+                    }
+                }
+                if let Some(dd) = self.end_date {
+                    if dd > d {
+                        d = dd
+                    }
+                }
+                d
+            }
+            #[allow(dead_code)]
+            pub fn earliest_date(&self) -> DateTime<Utc> {
+                let mut d = self.execution_date;
+                if let Some(dd) = self.start_date {
+                    if dd < d {
+                        d = dd
+                    }
+                }
+                if let Some(dd) = self.end_date {
+                    if dd < d {
+                        d = dd
+                    }
+                }
+                d
+            }
+            fn unique_id(&self) -> String {
+                self.dag_id.clone()
+                    + self.dag_run_id.as_str()
+                    + self.task_id.as_str()
+                    + format!("{:?}", self.map_index).as_str()
+            }
+        }
+
+        #[derive(Debug, Deserialize, Default)]
+
+        pub struct Response {
+            pub task_instances: Vec<ResponseItem>,
+            #[serde(skip_serializing, skip_deserializing)]
+            position_cache: HashMap<String, usize>,
+            total_entries: usize,
+        }
+
+        pageable_impl!(Response, task_instances);
+    }
+
+    /// Event logs query and response.
+    pub(super) mod event_logs {
+        use super::super::negative_and_null_are_none;
+        use super::super::{Pageable, pageable_impl};
+        use chrono::{DateTime, Utc};
+        use serde::{Deserialize, Serialize};
+        use std::collections::HashMap;
+
+        #[allow(dead_code)]
+        #[derive(Default)]
+        pub struct QueryFilter<'a> {
+            pub dag_id: Option<&'a String>,
+            pub task_id: Option<&'a String>,
+            pub run_id: Option<&'a String>,
+            pub map_index: Option<usize>,
+            pub try_number: Option<usize>,
+            pub event: Option<&'a String>,
+            pub owner: Option<&'a String>,
+            pub before: Option<DateTime<Utc>>,
+            pub after: Option<DateTime<Utc>>,
+        }
+
+        impl<'a> QueryFilter<'a> {
+            pub(super) fn as_queryparams(&self) -> Vec<(&str, String)> {
+                let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
+                let shit = [
+                    self.dag_id.as_ref().map(|v| ("dag_id", (*v).clone())),
+                    self.task_id.as_ref().map(|v| ("task_id", (*v).clone())),
+                    self.run_id.as_ref().map(|v| ("run_id", (*v).clone())),
+                    self.map_index
+                        .as_ref()
+                        .map(|v| ("map_index", format!("{v}").to_owned())),
+                    self.try_number
+                        .as_ref()
+                        .map(|v| ("try_number", format!("{v}").to_owned())),
+                    self.event.as_ref().map(|v| ("event", (*v).clone())),
+                    self.owner.as_ref().map(|v| ("owner", (*v).clone())),
+                    self.before
+                        .as_ref()
+                        .map(|v| ("before", format!("{}", v.format(dfmt)).to_owned())),
+                    self.after
+                        .as_ref()
+                        .map(|v| ("after", format!("{}", v.format(dfmt)).to_owned())),
+                ];
+                let res: Vec<_> = shit
+                    .iter()
+                    .flatten()
+                    .map(|(k, v)| (*k, (*v).clone()))
+                    .collect();
+                res
+            }
+        }
+
+        #[derive(Debug, Serialize, Deserialize, Clone)]
+        pub struct ResponseItem {
+            pub event_log_id: u64,
+            pub when: DateTime<Utc>,
+            pub dag_id: Option<String>,
+            pub task_id: Option<String>,
+            pub run_id: Option<String>,
+            #[serde(deserialize_with = "negative_and_null_are_none")]
+            #[serde(default)]
+            pub map_index: Option<usize>,
+            pub try_number: Option<usize>,
+            pub event: String,
+            pub execution_date: Option<DateTime<Utc>>,
+            pub owner: Option<String>,
+            pub extra: Option<String>,
+        }
+
+        impl ResponseItem {
+            fn unique_id(&self) -> u64 {
+                self.event_log_id
+            }
+            pub fn extra_hash(&self) -> Option<HashMap<&str, &str>> {
+                match &self.extra {
+                    Some(extra_str) => serde_json::from_str::<HashMap<&str, &str>>(extra_str).ok(),
+                    None => None,
+                }
+            }
+        }
+
+        #[derive(Debug, Deserialize, Default)]
+        pub struct Response {
+            pub event_logs: Vec<ResponseItem>,
+            #[serde(skip_serializing, skip_deserializing)]
+            position_cache: HashMap<u64, usize>,
+            total_entries: usize,
+        }
+
+        pageable_impl!(Response, event_logs);
+    }
+
+    /// Tasks of DAG query and response.
+    pub(super) mod tasks {
+        use super::super::airflow_timedelta;
+        use super::super::{Pageable, pageable_impl};
+        use chrono::{DateTime, TimeDelta, Utc};
+        use serde::Deserialize;
+        use std::collections::HashMap;
+
+        #[derive(Debug, Deserialize, Clone)]
+        #[serde(rename_all = "snake_case")]
+        pub enum TriggerRule {
+            AllSuccess,
+            AllFailed,
+            AllDone,
+            AllDoneSetupSuccess,
+            OneSuccess,
+            OneFailed,
+            OneDone,
+            NoneFailed,
+            NoneSkipped,
+            NoneFailedOrSkipped,
+            NoneFailedMinOneSuccess,
+            Dummy,
+            AllSkipped,
+            Always,
+        }
+
+        #[derive(Debug, Deserialize, Clone)]
+        pub struct ResponseItem {
+            pub task_id: String,
+            #[allow(dead_code)]
+            pub task_display_name: String,
+            #[allow(dead_code)]
+            pub owner: String,
+            #[allow(dead_code)]
+            pub start_date: Option<DateTime<Utc>>,
+            #[allow(dead_code)]
+            pub end_date: Option<DateTime<Utc>>,
+            #[allow(dead_code)]
+            pub trigger_rule: TriggerRule,
+            #[allow(dead_code)]
+            pub is_mapped: bool,
+            #[allow(dead_code)]
+            pub wait_for_downstream: bool,
+            #[allow(dead_code)]
+            pub retries: f64,
+            #[serde(deserialize_with = "airflow_timedelta")]
+            #[allow(dead_code)]
+            pub execution_timeout: Option<TimeDelta>,
+            #[serde(deserialize_with = "airflow_timedelta")]
+            #[allow(dead_code)]
+            pub retry_delay: Option<TimeDelta>,
+            #[allow(dead_code)]
+            pub retry_exponential_backoff: bool,
+            #[allow(dead_code)]
+            pub ui_color: String,
+            #[allow(dead_code)]
+            pub ui_fgcolor: String,
+            #[allow(dead_code)]
+            pub template_fields: Vec<String>,
+            pub downstream_task_ids: Vec<String>,
+        }
+
+        impl ResponseItem {
+            fn unique_id(&self) -> String {
+                self.task_id.clone()
+            }
+        }
+
+        #[derive(Debug, Deserialize, Default, Clone)]
+
+        pub struct Response {
+            pub tasks: Vec<ResponseItem>,
+            #[serde(skip_serializing, skip_deserializing)]
+            position_cache: HashMap<String, usize>,
+            total_entries: usize,
+        }
+
+        // FIXME tasks are not pageable!  Replace with typed_get instead of paged_get in fn tasks getter.
+        pageable_impl!(Response, tasks);
+    }
+
+    /// XCom entry query and response.
+    pub(super) mod xcom_entries {
+        use super::super::negative_and_null_are_none;
+        use chrono::{DateTime, Utc};
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Deserialize, Serialize, Clone)]
+        pub struct Response {
+            #[allow(dead_code)]
+            pub key: String,
+            #[allow(dead_code)]
+            pub timestamp: DateTime<Utc>,
+            #[allow(dead_code)]
+            pub execution_date: DateTime<Utc>,
+            #[serde(deserialize_with = "negative_and_null_are_none")]
+            #[allow(dead_code)]
+            pub map_index: Option<usize>,
+            #[allow(dead_code)]
+            pub task_id: String,
+            #[allow(dead_code)]
+            pub dag_id: String,
+            pub value: String,
+        }
+    }
+
+    pub struct AirflowClient {
+        pub url: reqwest::Url,
+        username: String,
+        password: String,
+        client: Arc<reqwest::Client>,
+    }
+
+    impl AirflowClient {
+        pub fn new(
+            airflow_url: reqwest::Url,
+            timeout: Duration,
+        ) -> Result<Self, AirflowClientCreationError> {
+            let jar = Jar::default();
+            let arcjar = Arc::new(jar);
+            let c = reqwest::Client::builder()
+                .brotli(true)
+                .zstd(true)
+                .gzip(true)
+                .deflate(true)
+                .timeout(timeout)
+                .cookie_provider(arcjar.clone())
+                .build()?;
+            let username = decode(airflow_url.username())?.into_owned();
+            let password = decode(airflow_url.password().unwrap_or(""))?.into_owned();
+            let mut censored_url = airflow_url.clone();
+            let _ = censored_url.set_username("");
+            let _ = censored_url.set_password(None);
+
+            Ok(Self {
+                client: Arc::new(c),
+                url: censored_url,
+                username,
+                password,
+            })
+        }
+
+        /// Return DAG info, by default in alphabetical order.
+        #[allow(dead_code)]
+        pub async fn dags(
+            &self,
+            limit: usize,
+            offset: usize,
+            filter: &dags::QueryFilter<'_>,
+            order_by: Option<String>,
+        ) -> Result<dags::Response, AirflowError> {
+            let qpairs = filter.as_queryparams();
+            let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            let suburl = "dags".to_string()
+                + (if !qparams.is_empty() {
+                    "?".to_string() + querify(qparams).as_str()
+                } else {
+                    "".to_string()
+                })
+                .as_str();
+            _paged_get(
+                suburl,
+                match order_by {
+                    Some(x) => Some(x),
+                    None => Some("dag_id".into()),
+                },
+                Some(PagingParameters { limit, offset }),
+                MAX_BATCH_SIZE,
+                |x| self._get_logged_in(x),
+            )
+            .await
+        }
+
+        /// Return DAG runs from newest to oldest.
+        /// Optionally only return DAG runs updated between a certain time frame.
+        pub async fn dag_runs(
+            &self,
+            dag_id: &str,
+            limit: usize,
+            offset: usize,
+            updated_at_lte: Option<DateTime<Utc>>,
+            updated_at_gte: Option<DateTime<Utc>>,
+        ) -> Result<dag_runs::Response, AirflowError> {
+            let mut url = format!("dags/{dag_id}/dagRuns");
+            url = add_updated_parameters(url, updated_at_lte, updated_at_gte);
+            _paged_get(
+                url,
+                Some("-execution_date".into()),
+                Some(PagingParameters { limit, offset }),
+                MAX_BATCH_SIZE,
+                |x| self._get_logged_in(x),
+            )
+            .await
+        }
+
+        /// Return DAG runs from newest to oldest.
+        /// Optionally only return DAG runs updated between a certain time frame.
+        pub async fn dag_run(
+            &self,
+            dag_id: &str,
+            dag_run_id: &str,
+        ) -> Result<dag_runs::ResponseItem, AirflowError> {
+            let url = format!("dags/{dag_id}/dagRuns/{dag_run_id}");
+            let json_value = self._get_logged_in(url).await?;
+            match <dag_runs::ResponseItem>::deserialize(json_value.clone()) {
+                Ok(deserialized) => Ok(deserialized),
+                Err(e) => {
+                    warn!(target: "airflow_client::dag_run" ,"Error deserializing ({e})\n{json_value:?}");
+                    Err(AirflowError::DeserializeError {
+                        explanation: format!(
+                            "Could not deserialize {}: {}",
+                            std::any::type_name::<dag_runs::ResponseItem>(),
+                            e
+                        ),
+                        payload: json_value.to_string(),
+                    })
+                }
+            }
+        }
+
+        /// Return event logs matching the filters specified.
+        /// Events are returned by default in ID order (smallest to largest)
+        /// which corresponds to chronological order.
+        pub async fn event_logs(
+            &self,
+            limit: usize,
+            offset: usize,
+            filters: &event_logs::QueryFilter<'_>,
+            order_by: Option<String>,
+        ) -> Result<event_logs::Response, AirflowError> {
+            let qpairs = filters.as_queryparams();
+            let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            let suburl = "eventLogs".to_string()
+                + (if !qparams.is_empty() {
+                    "?".to_string() + querify(qparams).as_str()
+                } else {
+                    "".to_string()
+                })
+                .as_str();
+            _paged_get(
+                suburl,
+                match order_by {
+                    Some(x) => Some(x),
+                    None => Some("event_log_id".into()),
+                },
+                Some(PagingParameters { limit, offset }),
+                MAX_BATCH_SIZE,
+                |x| self._get_logged_in(x),
+            )
+            .await
+        }
+
+        /// Return TaskInstances for a DAG ID and run.
+        pub async fn task_instances(
+            &self,
+            dag_id: &str,
+            dag_run_id: &str,
+            limit: usize,
+            offset: usize,
+            filters: task_instances::QueryFilter,
+        ) -> Result<task_instances::Response, AirflowError> {
+            let mut url = format!("dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances");
+            url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
+            url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
+            url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
+            _paged_get(
+                url,
+                None,
+                Some(PagingParameters { limit, offset }),
+                MAX_TASK_INSTANCE_BATCH_SIZE,
+                |x| self._get_logged_in(x),
+            )
+            .await
+        }
+
+        /// Return listed TaskInstances for a number of DAG IDs and DAG runs.
+        pub async fn task_instances_batch(
+            &self,
+            dag_ids: Option<Vec<String>>,
+            dag_run_ids: Option<Vec<String>>,
+            task_ids: Option<Vec<String>>,
+        ) -> Result<task_instances::Response, AirflowError> {
+            if let Some(dag_ids) = &dag_ids {
+                if dag_ids.is_empty() {
+                    return Ok(task_instances::Response::default());
+                }
+            }
+            if let Some(dag_run_ids) = &dag_run_ids {
+                if dag_run_ids.is_empty() {
+                    return Ok(task_instances::Response::default());
+                }
+            }
+            if let Some(task_instances) = &task_ids {
+                if task_instances.is_empty() {
+                    return Ok(task_instances::Response::default());
+                }
+            }
+            let url = "dags/~/dagRuns/~/taskInstances/list";
+            #[derive(Serialize)]
+            struct TaskInstancesRequest {
+                #[serde(skip_serializing_if = "Option::is_none")]
+                dag_ids: Option<Vec<String>>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                dag_run_ids: Option<Vec<String>>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                task_ids: Option<Vec<String>>,
+            }
+            let tr = TaskInstancesRequest {
+                dag_ids,
+                dag_run_ids,
+                task_ids,
+            };
+            _post(url.to_string(), &tr, |x, c| self._post_logged_in(x, c)).await
+        }
+
+        /// Return Tasks for a DAG run.
+        pub async fn tasks(&self, dag_id: &str) -> Result<tasks::Response, AirflowError> {
+            _paged_get(
+                format!("dags/{dag_id}/tasks"),
+                None,
+                None,
+                MAX_BATCH_SIZE,
+                |x| self._get_logged_in(x),
+            )
+            .await
+        }
+
+        /// Return XCom entry of a (possibly mapped) task instance in a DAG run.
+        pub async fn xcom_entry(
+            &self,
+            dag_id: &str,
+            dag_run_id: &str,
+            task_instance_id: &str,
+            map_index: Option<usize>,
+            xcom_key: &str,
+        ) -> Result<xcom_entries::Response, AirflowError> {
+            let suburl = format!(
+                "dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_instance_id}/xcomEntries/{xcom_key}"
+            ) + match map_index {
+                Some(i) => format!("&map_index={i}"),
+                None => "".to_string(),
+            }
+            .as_str();
+            let json_value = match self._get_logged_in(suburl).await {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            match <xcom_entries::Response>::deserialize(json_value.clone()) {
+                Ok(deserialized) => Ok(deserialized),
+                Err(e) => {
+                    warn!(target: "airflow_client::xcom_entry", "Error deserializing {} ({})\n{:?}", std::any::type_name::<xcom_entries::Response>(), e, json_value);
+                    Err(AirflowError::DeserializeError {
+                        explanation: format!(
+                            "Could not deserialize {}: {}",
+                            std::any::type_name::<xcom_entries::Response>(),
+                            e
+                        ),
+                        payload: json_value.to_string(),
+                    })
+                }
+            }
+        }
+
+        async fn _get_logged_in(&self, suburl: String) -> Result<serde_json::Value, AirflowError> {
+            let suburl = API_SUBURL.to_string() + &suburl;
+            self._get_or_login_and_get(suburl, true).await
+        }
+
+        async fn _post_logged_in<T>(
+            &self,
+            suburl: String,
+            content: &T,
+        ) -> Result<serde_json::Value, AirflowError>
+        where
+            T: Serialize + Sync + Send,
+        {
+            let suburl = API_SUBURL.to_string() + &suburl;
+            self._post_or_login_and_post(suburl, content, true).await
+        }
+
+        #[async_recursion]
+        async fn _get_or_login_and_get(
+            &self,
+            suburl: String,
+            attempt_login: bool,
+        ) -> Result<serde_json::Value, AirflowError> {
+            // Next one cannot fail because self.url has already succeeded.
+            let url = self.url.join(suburl.as_str()).unwrap();
+
+            let c = self.client.clone();
+
+            let start_time = Instant::now();
+            let res = match c
+                .get(url.clone())
+                .header(ACCEPT, "application/json")
+                .header(CONTENT_TYPE, "application/json")
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match status {
+                        reqwest::StatusCode::OK => {
+                            let bytes = match resp.bytes().await {
+                                Ok(bytes) => bytes,
+                                Err(fetcherror) => {
+                                    debug!(target: "airflow_client::http_client", "GET {url} interrupted during response after {:?}", Instant::now() - start_time);
+                                    return Err(AirflowError::from(fetcherror));
+                                }
+                            };
+                            debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} retrieved {} bytes after {:?}", bytes.len(), Instant::now() - start_time);
+                            decode_json_from_bytes(bytes.to_vec())
+                        }
+                        reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
+                            if attempt_login {
+                                debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
+                                match self._login().await {
+                                    Ok(..) => (),
+                                    Err(err) => return Err(err),
+                                };
+                                self._get_or_login_and_get(suburl, false).await
+                            } else {
+                                Err(AirflowError::AuthenticationError(
+                                "Proxy could not log into Airflow with its credentials (forbidden)"
+                                    .into(),
+                            ))
+                            }
+                        }
+                        reqwest::StatusCode::NOT_FOUND => {
+                            debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                            Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
+                        }
+                        other => {
+                            error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                            Err(AirflowError::StatusCode(other))
+                        }
+                    }
+                }
+                Err(err) => {
+                    debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
+                    Err(AirflowError::from(err))
+                }
+            };
+            trace!(target: "airflow_client::http_client", "Result: {res:#?}");
+            res
+        }
+
+        // FIXME: deduplicate with get_or_login_and_get
+        #[async_recursion]
+        async fn _post_or_login_and_post<T>(
+            &self,
+            suburl: String,
+            content: &T,
+            attempt_login: bool,
+        ) -> Result<serde_json::Value, AirflowError>
+        where
+            T: Serialize + Sync + Send,
+        {
+            // Next one cannot fail because self.url has already succeeded.
+            let url = self.url.join(suburl.as_str()).unwrap();
+
+            let c = self.client.clone();
+
+            let start_time = Instant::now();
+            let res = match c
+                .post(url.clone())
+                .header(ACCEPT, "application/json")
+                .header(CONTENT_TYPE, "application/json")
+                .json(content)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match status {
+                        reqwest::StatusCode::OK => {
+                            let bytes = match resp.bytes().await {
+                                Ok(bytes) => bytes,
+                                Err(fetcherror) => {
+                                    return Err(AirflowError::from(fetcherror));
+                                }
+                            };
+                            debug!(target: "airflow_client::http_client", "POST {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                            decode_json_from_bytes(bytes.to_vec())
+                        }
+                        reqwest::StatusCode::FORBIDDEN => {
+                            if attempt_login {
+                                debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
+                                match self._login().await {
+                                    Ok(..) => (),
+                                    Err(err) => return Err(err),
+                                };
+                                self._post_or_login_and_post(suburl, content, false).await
+                            } else {
+                                Err(AirflowError::AuthenticationError(
+                                "Proxy could not log into Airflow with its credentials (forbidden)"
+                                    .into(),
+                            ))
+                            }
+                        }
+                        reqwest::StatusCode::NOT_FOUND => {
+                            debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                            Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
+                        }
+                        other => {
+                            error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
+                            Err(AirflowError::StatusCode(other))
+                        }
+                    }
+                }
+                Err(err) => {
+                    debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
+                    Err(AirflowError::from(err))
+                }
+            };
+            trace!(target: "airflow_client::http_client", "Result: {res:#?}");
+            res
+        }
+
+        async fn _login(&self) -> Result<(), AirflowError> {
+            let login_url = self.url.join("login/").unwrap();
+            let c = self.client.clone();
+
+            let page_text = match c.get(login_url.clone()).send().await {
+                Ok(resp) => match resp.status() {
+                    reqwest::StatusCode::OK => match resp.text().await {
+                        Ok(text) => text,
+                        Err(err) => {
+                            return Err(AirflowError::AuthenticationError(format!(
+                                "Error retrieving text that contains CSRF token: {err}"
+                            )));
+                        }
+                    },
+                    _ => {
+                        return Err(AirflowError::AuthenticationError(format!(
+                            "Error retrieving page for CSRF token: {}",
+                            resp.status()
+                        )));
+                    }
+                },
+                Err(err) => {
+                    return Err(AirflowError::from(err));
+                }
+            };
+
+            let re = Regex::new(
+            "<input(?:\\s+(?:(?:type|name|id)\\s*=\\s*\"[^\"]*\"\\s*)+)?\\s+value=\"([^\"]+)\">",
+        )
+        .unwrap();
+
+            let mut csrf_tokens = vec![];
+            for (_, [res]) in re.captures_iter(page_text.as_str()).map(|c| c.extract()) {
+                csrf_tokens.push(res);
+            }
+            if csrf_tokens.is_empty() {
+                return Err(AirflowError::AuthenticationError(
+                    "Could not find CSRF token in login page".into(),
+                ));
+            }
+
+            let rb = c
+                .post(login_url.clone())
+                .header(REFERER, login_url.to_string())
+                .form(&[
+                    ("csrf_token", csrf_tokens[0]),
+                    ("username", self.username.as_str()),
+                    ("password", self.password.as_str()),
+                ]);
+            match rb.send().await {
+                Ok(resp) => match resp.status() {
+                    reqwest::StatusCode::OK => match resp.text().await {
+                        Ok(text) => text,
+                        Err(err) => {
+                            return Err(AirflowError::AuthenticationError(format!(
+                                "Error retrieving logged-in cookie: {err}"
+                            )));
+                        }
+                    },
+                    _ => {
+                        let (status, text) = (resp.status(), resp.text().await);
+                        return Err(AirflowError::AuthenticationError(format!(
+                            "Server rejected login with status {status} and text {text:?}"
+                        )));
+                    }
+                },
+                Err(err) => {
+                    return Err(AirflowError::from(err));
+                }
+            };
+
+            Ok(())
+        }
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct DagsResponse {
-    pub dags: Vec<DagsResponseItem>,
-    #[serde(skip_serializing, skip_deserializing)]
-    position_cache: HashMap<String, usize>,
-    total_entries: usize,
-}
-
-pageable_impl!(DagsResponse, dags);
-
-#[allow(dead_code)]
-#[derive(Default)]
-pub struct DagsQueryFilter<'a> {
-    pub dag_id_pattern: Option<&'a String>,
-}
-
-impl<'a> DagsQueryFilter<'a> {
-    fn as_queryparams(&self) -> Vec<(&str, String)> {
-        let shit = [self
-            .dag_id_pattern
-            .as_ref()
-            .map(|v| ("dag_id_pattern", (*v).clone()))];
-        let res: Vec<_> = shit
-            .iter()
-            .flatten()
-            .map(|(k, v)| (*k, (*v).clone()))
-            .collect();
-        res
+fn querify(parms: Vec<(&str, &str)>) -> String {
+    let mut s = "".to_string();
+    for (k, v) in parms {
+        let kencoded = encode(k).to_string();
+        let vencoded = encode(v).to_string();
+        s += format!("{}={}&", kencoded, vencoded).as_str()
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum DagRunState {
-    Queued,
-    Running,
-    Success,
-    Failed,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DagRunsResponseItem {
-    pub conf: IndexMap<String, serde_json::Value>,
-    /// dag_run_id is unique, enforced by Airflow.
-    pub dag_run_id: String,
-    pub dag_id: String,
-    pub logical_date: DateTime<Utc>,
-    #[allow(dead_code)]
-    pub start_date: Option<DateTime<Utc>>,
-    #[allow(dead_code)]
-    pub end_date: Option<DateTime<Utc>>,
-    pub last_scheduling_decision: Option<DateTime<Utc>>,
-    pub state: DagRunState,
-    pub note: Option<String>,
-}
-
-impl DagRunsResponseItem {
-    fn unique_id(&self) -> String {
-        self.dag_id.clone() + self.dag_run_id.as_str()
-    }
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct DagRunsResponse {
-    pub dag_runs: Vec<DagRunsResponseItem>,
-    #[serde(skip_serializing, skip_deserializing)]
-    position_cache: HashMap<String, usize>,
-    total_entries: usize,
-}
-
-pageable_impl!(DagRunsResponse, dag_runs);
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct XComEntryResponse {
-    #[allow(dead_code)]
-    pub key: String,
-    #[allow(dead_code)]
-    pub timestamp: DateTime<Utc>,
-    #[allow(dead_code)]
-    pub execution_date: DateTime<Utc>,
-    #[serde(deserialize_with = "negative_and_null_are_none")]
-    #[allow(dead_code)]
-    pub map_index: Option<usize>,
-    #[allow(dead_code)]
-    pub task_id: String,
-    #[allow(dead_code)]
-    pub dag_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Display)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskInstanceState {
-    Success,
-    Running,
-    Failed,
-    UpstreamFailed,
-    Skipped,
-    UpForRetry,
-    UpForReschedule,
-    Queued,
-    Scheduled,
-    Deferred,
-    Removed,
-    Restarting,
+    s
 }
 
 fn negative_and_null_are_none<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
@@ -291,292 +1149,6 @@ where
         Some(d) => TimeDelta::new(d.days * 86400 + d.seconds, d.microseconds * 1000),
     })
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TaskInstancesResponseItem {
-    pub task_id: String,
-    #[allow(dead_code)]
-    pub task_display_name: String,
-    pub dag_id: String,
-    pub dag_run_id: String,
-    #[allow(dead_code)]
-    pub execution_date: DateTime<Utc>,
-    #[allow(dead_code)]
-    pub start_date: Option<DateTime<Utc>>,
-    pub end_date: Option<DateTime<Utc>>,
-    #[allow(dead_code)]
-    pub duration: Option<f64>,
-    pub state: Option<TaskInstanceState>,
-    #[allow(dead_code)]
-    pub try_number: usize,
-    #[serde(deserialize_with = "negative_and_null_are_none")]
-    pub map_index: Option<usize>,
-    #[allow(dead_code)]
-    pub max_tries: usize,
-    #[allow(dead_code)]
-    pub operator: Option<String>,
-    #[allow(dead_code)]
-    pub rendered_map_index: Option<String>,
-    #[allow(dead_code)]
-    pub note: Option<String>,
-}
-
-impl TaskInstancesResponseItem {
-    #[allow(dead_code)]
-    pub fn latest_date(&self) -> DateTime<Utc> {
-        let mut d = self.execution_date;
-        if let Some(dd) = self.start_date {
-            if dd > d {
-                d = dd
-            }
-        }
-        if let Some(dd) = self.end_date {
-            if dd > d {
-                d = dd
-            }
-        }
-        d
-    }
-    #[allow(dead_code)]
-    pub fn earliest_date(&self) -> DateTime<Utc> {
-        let mut d = self.execution_date;
-        if let Some(dd) = self.start_date {
-            if dd < d {
-                d = dd
-            }
-        }
-        if let Some(dd) = self.end_date {
-            if dd < d {
-                d = dd
-            }
-        }
-        d
-    }
-    fn unique_id(&self) -> String {
-        self.dag_id.clone()
-            + self.dag_run_id.as_str()
-            + self.task_id.as_str()
-            + format!("{:?}", self.map_index).as_str()
-    }
-}
-
-#[derive(Debug, Deserialize, Default)]
-
-pub struct TaskInstancesResponse {
-    pub task_instances: Vec<TaskInstancesResponseItem>,
-    #[serde(skip_serializing, skip_deserializing)]
-    position_cache: HashMap<String, usize>,
-    total_entries: usize,
-}
-
-pageable_impl!(TaskInstancesResponse, task_instances);
-
-#[derive(Default)]
-pub struct TaskInstanceRequestFilters {
-    executed_at_lte: Option<DateTime<Utc>>,
-    executed_at_gte: Option<DateTime<Utc>>,
-    updated_at_lte: Option<DateTime<Utc>>,
-    updated_at_gte: Option<DateTime<Utc>>,
-    ended_at_lte: Option<DateTime<Utc>>,
-    ended_at_gte: Option<DateTime<Utc>>,
-}
-
-impl TaskInstanceRequestFilters {
-    #[allow(dead_code)]
-    pub fn executed_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.executed_at_lte = date;
-        self
-    }
-    pub fn executed_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.executed_at_gte = date;
-        self
-    }
-    #[allow(dead_code)]
-    pub fn updated_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.updated_at_lte = date;
-        self
-    }
-    pub fn updated_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.updated_at_gte = date;
-        self
-    }
-    #[allow(dead_code)]
-    pub fn ended_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.ended_at_lte = date;
-        self
-    }
-    pub fn ended_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-        self.ended_at_gte = date;
-        self
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerRule {
-    AllSuccess,
-    AllFailed,
-    AllDone,
-    AllDoneSetupSuccess,
-    OneSuccess,
-    OneFailed,
-    OneDone,
-    NoneFailed,
-    NoneSkipped,
-    NoneFailedOrSkipped,
-    NoneFailedMinOneSuccess,
-    Dummy,
-    AllSkipped,
-    Always,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct TasksResponseItem {
-    pub task_id: String,
-    #[allow(dead_code)]
-    pub task_display_name: String,
-    #[allow(dead_code)]
-    pub owner: String,
-    #[allow(dead_code)]
-    pub start_date: Option<DateTime<Utc>>,
-    #[allow(dead_code)]
-    pub end_date: Option<DateTime<Utc>>,
-    #[allow(dead_code)]
-    pub trigger_rule: TriggerRule,
-    #[allow(dead_code)]
-    pub is_mapped: bool,
-    #[allow(dead_code)]
-    pub wait_for_downstream: bool,
-    #[allow(dead_code)]
-    pub retries: f64,
-    #[serde(deserialize_with = "airflow_timedelta")]
-    #[allow(dead_code)]
-    pub execution_timeout: Option<TimeDelta>,
-    #[serde(deserialize_with = "airflow_timedelta")]
-    #[allow(dead_code)]
-    pub retry_delay: Option<TimeDelta>,
-    #[allow(dead_code)]
-    pub retry_exponential_backoff: bool,
-    #[allow(dead_code)]
-    pub ui_color: String,
-    #[allow(dead_code)]
-    pub ui_fgcolor: String,
-    #[allow(dead_code)]
-    pub template_fields: Vec<String>,
-    pub downstream_task_ids: Vec<String>,
-}
-
-impl TasksResponseItem {
-    fn unique_id(&self) -> String {
-        self.task_id.clone()
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-
-pub struct TasksResponse {
-    pub tasks: Vec<TasksResponseItem>,
-    #[serde(skip_serializing, skip_deserializing)]
-    position_cache: HashMap<String, usize>,
-    total_entries: usize,
-}
-
-// FIXME tasks are not pageable!  Replace with typed_get instead of paged_get in fn tasks getter.
-pageable_impl!(TasksResponse, tasks);
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EventLogsResponseItem {
-    pub event_log_id: u64,
-    pub when: DateTime<Utc>,
-    pub dag_id: Option<String>,
-    pub task_id: Option<String>,
-    pub run_id: Option<String>,
-    #[serde(deserialize_with = "negative_and_null_are_none")]
-    #[serde(default)]
-    pub map_index: Option<usize>,
-    pub try_number: Option<usize>,
-    pub event: String,
-    pub execution_date: Option<DateTime<Utc>>,
-    pub owner: Option<String>,
-    pub extra: Option<String>,
-}
-
-impl EventLogsResponseItem {
-    fn unique_id(&self) -> u64 {
-        self.event_log_id
-    }
-    pub fn extra_hash(&self) -> Option<HashMap<&str, &str>> {
-        match &self.extra {
-            Some(extra_str) => serde_json::from_str::<HashMap<&str, &str>>(extra_str).ok(),
-            None => None,
-        }
-    }
-}
-#[derive(Debug, Deserialize, Default)]
-
-pub struct EventLogsResponse {
-    pub event_logs: Vec<EventLogsResponseItem>,
-    #[serde(skip_serializing, skip_deserializing)]
-    position_cache: HashMap<u64, usize>,
-    total_entries: usize,
-}
-
-#[allow(dead_code)]
-#[derive(Default)]
-pub struct EventLogsResponseFilters<'a> {
-    pub dag_id: Option<&'a String>,
-    pub task_id: Option<&'a String>,
-    pub run_id: Option<&'a String>,
-    pub map_index: Option<usize>,
-    pub try_number: Option<usize>,
-    pub event: Option<&'a String>,
-    pub owner: Option<&'a String>,
-    pub before: Option<DateTime<Utc>>,
-    pub after: Option<DateTime<Utc>>,
-}
-
-fn querify(parms: Vec<(&str, &str)>) -> String {
-    let mut s = "".to_string();
-    for (k, v) in parms {
-        let kencoded = encode(k).to_string();
-        let vencoded = encode(v).to_string();
-        s += format!("{}={}&", kencoded, vencoded).as_str()
-    }
-    s
-}
-
-impl<'a> EventLogsResponseFilters<'a> {
-    fn as_queryparams(&self) -> Vec<(&str, String)> {
-        let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
-        let shit = [
-            self.dag_id.as_ref().map(|v| ("dag_id", (*v).clone())),
-            self.task_id.as_ref().map(|v| ("task_id", (*v).clone())),
-            self.run_id.as_ref().map(|v| ("run_id", (*v).clone())),
-            self.map_index
-                .as_ref()
-                .map(|v| ("map_index", format!("{v}").to_owned())),
-            self.try_number
-                .as_ref()
-                .map(|v| ("try_number", format!("{v}").to_owned())),
-            self.event.as_ref().map(|v| ("event", (*v).clone())),
-            self.owner.as_ref().map(|v| ("owner", (*v).clone())),
-            self.before
-                .as_ref()
-                .map(|v| ("before", format!("{}", v.format(dfmt)).to_owned())),
-            self.after
-                .as_ref()
-                .map(|v| ("after", format!("{}", v.format(dfmt)).to_owned())),
-        ];
-        let res: Vec<_> = shit
-            .iter()
-            .flatten()
-            .map(|(k, v)| (*k, (*v).clone()))
-            .collect();
-        res
-    }
-}
-
-pageable_impl!(EventLogsResponse, event_logs);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 /// Problem communicating with Airflow.
@@ -846,13 +1418,6 @@ impl Display for AirflowClientCreationError {
     }
 }
 
-pub struct AirflowClient {
-    pub url: reqwest::Url,
-    username: String,
-    password: String,
-    client: Arc<reqwest::Client>,
-}
-
 fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowError> {
     Ok(match serde_json::from_slice(&bytes) {
         Ok(decoded) => decoded,
@@ -875,487 +1440,6 @@ fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowEr
     })
 }
 
-impl AirflowClient {
-    pub fn new(
-        airflow_url: reqwest::Url,
-        timeout: Duration,
-    ) -> Result<Self, AirflowClientCreationError> {
-        let jar = Jar::default();
-        let arcjar = Arc::new(jar);
-        let c = reqwest::Client::builder()
-            .brotli(true)
-            .zstd(true)
-            .gzip(true)
-            .deflate(true)
-            .timeout(timeout)
-            .cookie_provider(arcjar.clone())
-            .build()?;
-        let username = decode(airflow_url.username())?.into_owned();
-        let password = decode(airflow_url.password().unwrap_or(""))?.into_owned();
-        let mut censored_url = airflow_url.clone();
-        let _ = censored_url.set_username("");
-        let _ = censored_url.set_password(None);
-
-        Ok(Self {
-            client: Arc::new(c),
-            url: censored_url,
-            username,
-            password,
-        })
-    }
-
-    async fn _get_logged_in(&self, suburl: String) -> Result<serde_json::Value, AirflowError> {
-        let suburl = API_SUBURL.to_string() + &suburl;
-        self._get_or_login_and_get(suburl, true).await
-    }
-
-    async fn _post_logged_in<T>(
-        &self,
-        suburl: String,
-        content: &T,
-    ) -> Result<serde_json::Value, AirflowError>
-    where
-        T: Serialize + Sync + Send,
-    {
-        let suburl = API_SUBURL.to_string() + &suburl;
-        self._post_or_login_and_post(suburl, content, true).await
-    }
-
-    #[async_recursion]
-    async fn _get_or_login_and_get(
-        &self,
-        suburl: String,
-        attempt_login: bool,
-    ) -> Result<serde_json::Value, AirflowError> {
-        // Next one cannot fail because self.url has already succeeded.
-        let url = self.url.join(suburl.as_str()).unwrap();
-
-        let c = self.client.clone();
-
-        let start_time = Instant::now();
-        let res = match c
-            .get(url.clone())
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                match status {
-                    reqwest::StatusCode::OK => {
-                        let bytes = match resp.bytes().await {
-                            Ok(bytes) => bytes,
-                            Err(fetcherror) => {
-                                debug!(target: "airflow_client::http_client", "GET {url} interrupted during response after {:?}", Instant::now() - start_time);
-                                return Err(AirflowError::from(fetcherror));
-                            }
-                        };
-                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} retrieved {} bytes after {:?}", bytes.len(), Instant::now() - start_time);
-                        decode_json_from_bytes(bytes.to_vec())
-                    }
-                    reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
-                        if attempt_login {
-                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
-                            match self._login().await {
-                                Ok(..) => (),
-                                Err(err) => return Err(err),
-                            };
-                            self._get_or_login_and_get(suburl, false).await
-                        } else {
-                            Err(AirflowError::AuthenticationError(
-                                "Proxy could not log into Airflow with its credentials (forbidden)"
-                                    .into(),
-                            ))
-                        }
-                    }
-                    reqwest::StatusCode::NOT_FOUND => {
-                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
-                        Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
-                    }
-                    other => {
-                        error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
-                        Err(AirflowError::StatusCode(other))
-                    }
-                }
-            }
-            Err(err) => {
-                debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
-                Err(AirflowError::from(err))
-            }
-        };
-        trace!(target: "airflow_client::http_client", "Result: {res:#?}");
-        res
-    }
-
-    // FIXME: deduplicate with get_or_login_and_get
-    #[async_recursion]
-    async fn _post_or_login_and_post<T>(
-        &self,
-        suburl: String,
-        content: &T,
-        attempt_login: bool,
-    ) -> Result<serde_json::Value, AirflowError>
-    where
-        T: Serialize + Sync + Send,
-    {
-        // Next one cannot fail because self.url has already succeeded.
-        let url = self.url.join(suburl.as_str()).unwrap();
-
-        let c = self.client.clone();
-
-        let start_time = Instant::now();
-        let res = match c
-            .post(url.clone())
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .json(content)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                match status {
-                    reqwest::StatusCode::OK => {
-                        let bytes = match resp.bytes().await {
-                            Ok(bytes) => bytes,
-                            Err(fetcherror) => {
-                                return Err(AirflowError::from(fetcherror));
-                            }
-                        };
-                        debug!(target: "airflow_client::http_client", "POST {url} HTTP {status} after {:?}", Instant::now() - start_time);
-                        decode_json_from_bytes(bytes.to_vec())
-                    }
-                    reqwest::StatusCode::FORBIDDEN => {
-                        if attempt_login {
-                            debug!(target: "airflow_client::http_client", "Attempting to log in with supplied credentials after server returned status {status} after {:?}", Instant::now() - start_time);
-                            match self._login().await {
-                                Ok(..) => (),
-                                Err(err) => return Err(err),
-                            };
-                            self._post_or_login_and_post(suburl, content, false).await
-                        } else {
-                            Err(AirflowError::AuthenticationError(
-                                "Proxy could not log into Airflow with its credentials (forbidden)"
-                                    .into(),
-                            ))
-                        }
-                    }
-                    reqwest::StatusCode::NOT_FOUND => {
-                        debug!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
-                        Err(AirflowError::StatusCode(reqwest::StatusCode::NOT_FOUND))
-                    }
-                    other => {
-                        error!(target: "airflow_client::http_client", "GET {url} HTTP {status} after {:?}", Instant::now() - start_time);
-                        Err(AirflowError::StatusCode(other))
-                    }
-                }
-            }
-            Err(err) => {
-                debug!(target: "airflow_client::http_client", "GET {url} failed after {:?}", Instant::now() - start_time);
-                Err(AirflowError::from(err))
-            }
-        };
-        trace!(target: "airflow_client::http_client", "Result: {res:#?}");
-        res
-    }
-
-    async fn _login(&self) -> Result<(), AirflowError> {
-        let login_url = self.url.join("login/").unwrap();
-        let c = self.client.clone();
-
-        let page_text = match c.get(login_url.clone()).send().await {
-            Ok(resp) => match resp.status() {
-                reqwest::StatusCode::OK => match resp.text().await {
-                    Ok(text) => text,
-                    Err(err) => {
-                        return Err(AirflowError::AuthenticationError(format!(
-                            "Error retrieving text that contains CSRF token: {err}"
-                        )));
-                    }
-                },
-                _ => {
-                    return Err(AirflowError::AuthenticationError(format!(
-                        "Error retrieving page for CSRF token: {}",
-                        resp.status()
-                    )));
-                }
-            },
-            Err(err) => {
-                return Err(AirflowError::from(err));
-            }
-        };
-
-        let re = Regex::new(
-            "<input(?:\\s+(?:(?:type|name|id)\\s*=\\s*\"[^\"]*\"\\s*)+)?\\s+value=\"([^\"]+)\">",
-        )
-        .unwrap();
-
-        let mut csrf_tokens = vec![];
-        for (_, [res]) in re.captures_iter(page_text.as_str()).map(|c| c.extract()) {
-            csrf_tokens.push(res);
-        }
-        if csrf_tokens.is_empty() {
-            return Err(AirflowError::AuthenticationError(
-                "Could not find CSRF token in login page".into(),
-            ));
-        }
-
-        let rb = c
-            .post(login_url.clone())
-            .header(REFERER, login_url.to_string())
-            .form(&[
-                ("csrf_token", csrf_tokens[0]),
-                ("username", self.username.as_str()),
-                ("password", self.password.as_str()),
-            ]);
-        match rb.send().await {
-            Ok(resp) => match resp.status() {
-                reqwest::StatusCode::OK => match resp.text().await {
-                    Ok(text) => text,
-                    Err(err) => {
-                        return Err(AirflowError::AuthenticationError(format!(
-                            "Error retrieving logged-in cookie: {err}"
-                        )));
-                    }
-                },
-                _ => {
-                    let (status, text) = (resp.status(), resp.text().await);
-                    return Err(AirflowError::AuthenticationError(format!(
-                        "Server rejected login with status {status} and text {text:?}"
-                    )));
-                }
-            },
-            Err(err) => {
-                return Err(AirflowError::from(err));
-            }
-        };
-
-        Ok(())
-    }
-
-    /// Return DAG info, by default in alphabetical order.
-    #[allow(dead_code)]
-    pub async fn dags(
-        &self,
-        limit: usize,
-        offset: usize,
-        filter: &DagsQueryFilter<'_>,
-        order_by: Option<String>,
-    ) -> Result<DagsResponse, AirflowError> {
-        let qpairs = filter.as_queryparams();
-        let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let suburl = "dags".to_string()
-            + (if !qparams.is_empty() {
-                "?".to_string() + querify(qparams).as_str()
-            } else {
-                "".to_string()
-            })
-            .as_str();
-        _paged_get(
-            suburl,
-            match order_by {
-                Some(x) => Some(x),
-                None => Some("dag_id".into()),
-            },
-            Some(PagingParameters { limit, offset }),
-            MAX_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-    }
-
-    /// Return DAG runs from newest to oldest.
-    /// Optionally only return DAG runs updated between a certain time frame.
-    pub async fn dag_runs(
-        &self,
-        dag_id: &str,
-        limit: usize,
-        offset: usize,
-        updated_at_lte: Option<DateTime<Utc>>,
-        updated_at_gte: Option<DateTime<Utc>>,
-    ) -> Result<DagRunsResponse, AirflowError> {
-        let mut url = format!("dags/{dag_id}/dagRuns");
-        url = add_updated_parameters(url, updated_at_lte, updated_at_gte);
-        _paged_get(
-            url,
-            Some("-execution_date".into()),
-            Some(PagingParameters { limit, offset }),
-            MAX_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-    }
-
-    /// Return DAG runs from newest to oldest.
-    /// Optionally only return DAG runs updated between a certain time frame.
-    pub async fn dag_run(
-        &self,
-        dag_id: &str,
-        dag_run_id: &str,
-    ) -> Result<DagRunsResponseItem, AirflowError> {
-        let url = format!("dags/{dag_id}/dagRuns/{dag_run_id}");
-        let json_value = self._get_logged_in(url).await?;
-        match <DagRunsResponseItem>::deserialize(json_value.clone()) {
-            Ok(deserialized) => Ok(deserialized),
-            Err(e) => {
-                warn!(target: "airflow_client::dag_run" ,"Error deserializing ({e})\n{json_value:?}");
-                Err(AirflowError::DeserializeError {
-                    explanation: format!(
-                        "Could not deserialize {}: {}",
-                        std::any::type_name::<DagRunsResponseItem>(),
-                        e
-                    ),
-                    payload: json_value.to_string(),
-                })
-            }
-        }
-    }
-
-    /// Return TaskInstances for a DAG ID and run.
-    pub async fn task_instances(
-        &self,
-        dag_id: &str,
-        dag_run_id: &str,
-        limit: usize,
-        offset: usize,
-        filters: TaskInstanceRequestFilters,
-    ) -> Result<TaskInstancesResponse, AirflowError> {
-        let mut url = format!("dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances");
-        url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
-        url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
-        url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
-        _paged_get(
-            url,
-            None,
-            Some(PagingParameters { limit, offset }),
-            MAX_TASK_INSTANCE_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-    }
-
-    /// Return listed TaskInstances for a number of DAG IDs and DAG runs.
-    pub async fn task_instances_batch(
-        &self,
-        dag_ids: Option<Vec<String>>,
-        dag_run_ids: Option<Vec<String>>,
-        task_ids: Option<Vec<String>>,
-    ) -> Result<TaskInstancesResponse, AirflowError> {
-        if let Some(dag_ids) = &dag_ids {
-            if dag_ids.is_empty() {
-                return Ok(TaskInstancesResponse::default());
-            }
-        }
-        if let Some(dag_run_ids) = &dag_run_ids {
-            if dag_run_ids.is_empty() {
-                return Ok(TaskInstancesResponse::default());
-            }
-        }
-        if let Some(task_instances) = &task_ids {
-            if task_instances.is_empty() {
-                return Ok(TaskInstancesResponse::default());
-            }
-        }
-        let url = "dags/~/dagRuns/~/taskInstances/list";
-        #[derive(Serialize)]
-        struct TaskInstancesRequest {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            dag_ids: Option<Vec<String>>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            dag_run_ids: Option<Vec<String>>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            task_ids: Option<Vec<String>>,
-        }
-        let tr = TaskInstancesRequest {
-            dag_ids,
-            dag_run_ids,
-            task_ids,
-        };
-        _post(url.to_string(), &tr, |x, c| self._post_logged_in(x, c)).await
-    }
-
-    /// Return Tasks for a DAG run.
-    pub async fn tasks(&self, dag_id: &str) -> Result<TasksResponse, AirflowError> {
-        _paged_get(
-            format!("dags/{dag_id}/tasks"),
-            None,
-            None,
-            MAX_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-    }
-
-    /// Return XCom entry of a (possibly mapped) task instance in a DAG run.
-    pub async fn xcom_entry(
-        &self,
-        dag_id: &str,
-        dag_run_id: &str,
-        task_instance_id: &str,
-        map_index: Option<usize>,
-        xcom_key: &str,
-    ) -> Result<XComEntryResponse, AirflowError> {
-        let suburl = format!(
-            "dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_instance_id}/xcomEntries/{xcom_key}"
-        ) + match map_index {
-            Some(i) => format!("&map_index={i}"),
-            None => "".to_string(),
-        }
-        .as_str();
-        let json_value = match self._get_logged_in(suburl).await {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
-        match <XComEntryResponse>::deserialize(json_value.clone()) {
-            Ok(deserialized) => Ok(deserialized),
-            Err(e) => {
-                warn!(target: "airflow_client::xcom_entry", "Error deserializing {} ({})\n{:?}", std::any::type_name::<XComEntryResponse>(), e, json_value);
-                Err(AirflowError::DeserializeError {
-                    explanation: format!(
-                        "Could not deserialize {}: {}",
-                        std::any::type_name::<XComEntryResponse>(),
-                        e
-                    ),
-                    payload: json_value.to_string(),
-                })
-            }
-        }
-    }
-
-    /// Return event logs matching the filters specified.
-    /// Events are returned by default in ID order (smallest to largest)
-    /// which corresponds to chronological order.
-    pub async fn event_logs(
-        &self,
-        limit: usize,
-        offset: usize,
-        filters: &EventLogsResponseFilters<'_>,
-        order_by: Option<String>,
-    ) -> Result<EventLogsResponse, AirflowError> {
-        let qpairs = filters.as_queryparams();
-        let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let suburl = "eventLogs".to_string()
-            + (if !qparams.is_empty() {
-                "?".to_string() + querify(qparams).as_str()
-            } else {
-                "".to_string()
-            })
-            .as_str();
-        _paged_get(
-            suburl,
-            match order_by {
-                Some(x) => Some(x),
-                None => Some("event_log_id".into()),
-            },
-            Some(PagingParameters { limit, offset }),
-            MAX_BATCH_SIZE,
-            |x| self._get_logged_in(x),
-        )
-        .await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1364,7 +1448,7 @@ mod tests {
     use serde::Serialize;
     use serde_json::{from_str, json};
     use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Default, Deserialize, Serialize, Debug)]
     struct Response {
