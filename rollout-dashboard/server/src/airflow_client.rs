@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use urlencoding::{decode, encode};
 
 /// Default maximum batch size for paged requests in Airflow.
-const MAX_BATCH_SIZE: usize = 100;
+const MAX_BATCH_SIZE: usize = 200;
 /// Exists to mitigate <https://github.com/apache/airflow/issues/41283> .
 /// After upgrade to Airflow >= 2.10.5 in prod this code should be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
 const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
@@ -147,17 +147,18 @@ pub use v1::{
 };
 
 mod v1 {
-    use super::{
-        _paged_get, _post, AirflowClientCreationError, AirflowError, AirflowHTTPClient,
-        MAX_BATCH_SIZE, MAX_TASK_INSTANCE_BATCH_SIZE, PagingParameters, add_ended_parameters,
-        add_executed_parameters, add_updated_parameters, querify,
-    };
     use chrono::{DateTime, Utc};
     use log::warn;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
     use std::time::Duration;
     use std::vec::Vec;
+
+    use super::{
+        _paged_get, _post, AirflowClientCreationError, AirflowError, AirflowHTTPClient,
+        MAX_BATCH_SIZE, MAX_TASK_INSTANCE_BATCH_SIZE, PagingParameters, add_ended_parameters,
+        add_executed_parameters, add_updated_parameters, querify, typed_get,
+    };
 
     // API sub-URL for Airflow.
     const API_SUBURL: &str = "api/v1/";
@@ -510,10 +511,8 @@ mod v1 {
     /// Tasks of DAG query and response.
     pub(super) mod tasks {
         use super::super::airflow_timedelta;
-        use super::super::{Pageable, pageable_impl};
         use chrono::{DateTime, TimeDelta, Utc};
         use serde::Deserialize;
-        use std::collections::HashMap;
 
         #[derive(Debug, Deserialize, Clone)]
         #[serde(rename_all = "snake_case")]
@@ -570,23 +569,11 @@ mod v1 {
             pub downstream_task_ids: Vec<String>,
         }
 
-        impl ResponseItem {
-            fn unique_id(&self) -> String {
-                self.task_id.clone()
-            }
-        }
-
         #[derive(Debug, Deserialize, Default, Clone)]
 
         pub struct Response {
             pub tasks: Vec<ResponseItem>,
-            #[serde(skip_serializing, skip_deserializing)]
-            position_cache: HashMap<String, usize>,
-            total_entries: usize,
         }
-
-        // FIXME tasks are not pageable!  Replace with typed_get instead of paged_get in fn tasks getter.
-        pageable_impl!(Response, tasks);
     }
 
     /// XCom entry query and response.
@@ -811,14 +798,14 @@ mod v1 {
 
         /// Return Tasks for a DAG run.
         pub async fn tasks(&self, dag_id: &str) -> Result<tasks::Response, AirflowError> {
-            _paged_get(
-                format!("dags/{dag_id}/tasks"),
-                None,
-                None,
-                MAX_BATCH_SIZE,
-                |x| self.http.get_logged_in(x),
-            )
+            match typed_get(format!("dags/{dag_id}/tasks"), |x| {
+                self.http.get_logged_in(x)
+            })
             .await
+            {
+                Ok((res, _)) => Ok(res),
+                Err(e) => Err(e),
+            }
         }
 
         /// Return XCom entry of a (possibly mapped) task instance in a DAG run.
@@ -837,23 +824,9 @@ mod v1 {
                 None => "".to_string(),
             }
             .as_str();
-            let json_value = match self.http.get_logged_in(suburl).await {
-                Ok(v) => v,
-                Err(e) => return Err(e),
-            };
-            match <xcom_entries::Response>::deserialize(json_value.clone()) {
-                Ok(deserialized) => Ok(deserialized),
-                Err(e) => {
-                    warn!(target: "airflow_client::xcom_entry", "Error deserializing {} ({})\n{:?}", std::any::type_name::<xcom_entries::Response>(), e, json_value);
-                    Err(AirflowError::DeserializeError {
-                        explanation: format!(
-                            "Could not deserialize {}: {}",
-                            std::any::type_name::<xcom_entries::Response>(),
-                            e
-                        ),
-                        payload: json_value.to_string(),
-                    })
-                }
+            match typed_get(suburl, |x| self.http.get_logged_in(x)).await {
+                Err(e) => Err(e),
+                Ok((res, _)) => Ok(res),
             }
         }
     }
@@ -988,6 +961,33 @@ impl Display for AirflowError {
             }
             Self::AuthenticationError(s) => write!(f, "{s}"),
         }
+    }
+}
+
+async fn typed_get<'a, T: Deserialize<'a>, G, Fut>(
+    url: String,
+    mut getter: G,
+) -> Result<(T, G), AirflowError>
+where
+    G: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<serde_json::Value, AirflowError>>,
+{
+    match getter(url).await {
+        Ok(json_value) => match <T>::deserialize(json_value.clone()) {
+            Ok(deserialized) => Ok((deserialized, getter)),
+            Err(e) => {
+                warn!(target: "airflow_client::typed_get" ,"Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
+                Err(AirflowError::DeserializeError {
+                    explanation: format!(
+                        "Could not deserialize {}: {}",
+                        std::any::type_name::<T>(),
+                        e
+                    ),
+                    payload: json_value.to_string(),
+                })
+            }
+        },
+        Err(e) => Err(e),
     }
 }
 
