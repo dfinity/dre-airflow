@@ -19,64 +19,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::vec::Vec;
 use tokio::time::Instant;
-use urlencoding::{decode, encode};
+use urlencoding::decode;
 
 /// Default maximum batch size for paged requests in Airflow.
 const MAX_BATCH_SIZE: usize = 200;
-/// Exists to mitigate <https://github.com/apache/airflow/issues/41283> .
-/// After upgrade to Airflow >= 2.10.5 in prod this code should be deleted, and we can then stop relying on this.  Then we can use ordering (order_by) to deterministically return task instances by start_date (backwards) in batches, using the normal paged_get mechanism.  We also may want to consider raising MAX_BATCH_SIZE to 1000 if there are no negative effects.
-const MAX_TASK_INSTANCE_BATCH_SIZE: usize = 1000;
-// API sub-URL for Airflow.
-
-fn add_date_parm(url: String, parm_name: &str, date: Option<DateTime<Utc>>) -> String {
-    let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
-    if let Some(date) = date {
-        url.clone()
-            + match url.find('?') {
-                Some(_) => "&",
-                None => "?",
-            }
-            + &format!("{}={}", parm_name, date.format(dfmt))
-    } else {
-        url
-    }
-}
-
-fn add_updated_parameters(
-    url: String,
-    updated_at_lte: Option<DateTime<Utc>>,
-    updated_at_gte: Option<DateTime<Utc>>,
-) -> String {
-    add_date_parm(
-        add_date_parm(url, "updated_at_lte", updated_at_lte),
-        "updated_at_gte",
-        updated_at_gte,
-    )
-}
-
-fn add_executed_parameters(
-    url: String,
-    execution_date_lte: Option<DateTime<Utc>>,
-    execution_date_gte: Option<DateTime<Utc>>,
-) -> String {
-    add_date_parm(
-        add_date_parm(url, "execution_date_lte", execution_date_lte),
-        "execution_date_gte",
-        execution_date_gte,
-    )
-}
-
-fn add_ended_parameters(
-    url: String,
-    end_date_lte: Option<DateTime<Utc>>,
-    end_date_gte: Option<DateTime<Utc>>,
-) -> String {
-    add_date_parm(
-        add_date_parm(url, "end_date_lte", end_date_lte),
-        "end_date_gte",
-        end_date_gte,
-    )
-}
 
 pub(crate) trait Pageable {
     fn len(&self) -> usize;
@@ -129,17 +75,18 @@ pub(crate) use pageable_impl;
 pub use v1::{
     AirflowClient,
     dag_runs::{
+        QueryFilter as DagRunsQueryFilter, QueryOrder as DagRunsQueryOrder,
         Response as DagRunsResponse, ResponseItem as DagRunsResponseItem, State as DagRunState,
     },
     dags::{
         QueryFilter as DagsQueryFilter, Response as DagsResponse, ResponseItem as DagsResponseItem,
     },
     event_logs::{
-        QueryFilter as EventLogsResponseFilters, Response as EventLogsResponse,
-        ResponseItem as EventLogsResponseItem,
+        QueryFilter as EventLogsQueryFilter, QueryOrder as EventLogsQueryOrder,
+        Response as EventLogsResponse, ResponseItem as EventLogsResponseItem,
     },
     task_instances::{
-        QueryFilter as TaskInstanceRequestFilters, Response as TaskInstancesResponse,
+        QueryFilter as TaskInstancesQueryFilter, Response as TaskInstancesResponse,
         ResponseItem as TaskInstancesResponseItem, State as TaskInstanceState,
     },
     tasks::{Response as TasksResponse, ResponseItem as TasksResponseItem},
@@ -147,17 +94,14 @@ pub use v1::{
 };
 
 mod v1 {
-    use chrono::{DateTime, Utc};
-    use log::warn;
-    use serde::{Deserialize, Serialize};
+    use serde::Serialize;
     use std::sync::Arc;
     use std::time::Duration;
     use std::vec::Vec;
 
     use super::{
-        _paged_get, _post, AirflowClientCreationError, AirflowError, AirflowHTTPClient,
-        MAX_BATCH_SIZE, MAX_TASK_INSTANCE_BATCH_SIZE, PagingParameters, add_ended_parameters,
-        add_executed_parameters, add_updated_parameters, querify, typed_get,
+        AirflowClientCreationError, AirflowError, AirflowHTTPClient, PagingParameters, URLizable,
+        paged_get, typed_get, typed_post,
     };
 
     // API sub-URL for Airflow.
@@ -165,29 +109,34 @@ mod v1 {
 
     /// DAGs query and response.
     pub(super) mod dags {
-        use super::super::{Pageable, pageable_impl};
+        use super::super::{OrderBy, Pageable, pageable_impl};
         use chrono::{DateTime, Utc};
-        use serde::Deserialize;
+        use serde::{Deserialize, Serialize};
         use std::collections::HashMap;
 
-        #[allow(dead_code)]
-        #[derive(Default)]
-        pub struct QueryFilter<'a> {
-            pub dag_id_pattern: Option<&'a String>,
+        #[derive(Default, Serialize, Clone)]
+        pub struct QueryFilter {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            dag_id_pattern: Option<String>,
+            #[serde(skip_serializing_if = "OrderBy::is_unordered")]
+            order_by: OrderBy<QueryOrder>,
         }
 
-        impl<'a> QueryFilter<'a> {
-            pub(super) fn as_queryparams(&self) -> Vec<(&str, String)> {
-                let shit = [self
-                    .dag_id_pattern
-                    .as_ref()
-                    .map(|v| ("dag_id_pattern", (*v).clone()))];
-                let res: Vec<_> = shit
-                    .iter()
-                    .flatten()
-                    .map(|(k, v)| (*k, (*v).clone()))
-                    .collect();
-                res
+        #[derive(Clone, strum::Display, Serialize)]
+        #[strum(serialize_all = "snake_case")]
+        #[serde(rename_all = "snake_case")]
+        pub enum QueryOrder {
+            DagId,
+        }
+
+        impl QueryFilter {
+            pub fn dag_id_pattern(mut self, pattern: String) -> Self {
+                self.dag_id_pattern = Some(pattern);
+                self
+            }
+            pub fn order_by(mut self, order_by: OrderBy<QueryOrder>) -> Self {
+                self.order_by = order_by;
+                self
             }
         }
 
@@ -218,15 +167,82 @@ mod v1 {
         }
 
         pageable_impl!(Response, dags);
+
+        #[cfg(test)]
+        mod tests {
+            use super::super::super::{OrderBy, URLizable};
+            use super::{QueryFilter, QueryOrder};
+
+            #[tokio::test]
+            async fn test_serialize_dag_filters() {
+                let testcases = vec![
+                    (
+                        QueryFilter::default()
+                            .dag_id_pattern("abcdef".into())
+                            .order_by(OrderBy::Ascending(QueryOrder::DagId)),
+                        "/api/v2?dag_id_pattern=abcdef&order_by=dag_id",
+                    ),
+                    (
+                        QueryFilter::default()
+                            .dag_id_pattern("abcdef".into())
+                            .order_by(OrderBy::Descending(QueryOrder::DagId)),
+                        "/api/v2?dag_id_pattern=abcdef&order_by=-dag_id",
+                    ),
+                ];
+                for (q, exp) in testcases {
+                    let res = q.add_to_url("/api/v2".into());
+                    assert_eq!(res, exp);
+                }
+            }
+        }
     }
 
     /// DAG runs query and response.
     pub(super) mod dag_runs {
-        use super::super::{Pageable, pageable_impl};
+        use super::super::{OrderBy, Pageable, airflow_date, pageable_impl};
         use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
         use serde::{Deserialize, Serialize};
         use std::collections::HashMap;
+
+        #[derive(Default, Serialize)]
+        pub struct QueryFilter {
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            updated_at_lte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            updated_at_gte: Option<DateTime<Utc>>,
+            #[serde(skip_serializing_if = "OrderBy::is_unordered")]
+            order_by: OrderBy<QueryOrder>,
+        }
+
+        #[derive(Clone, strum::Display, Serialize)]
+        #[strum(serialize_all = "snake_case")]
+        #[serde(rename_all = "snake_case")]
+        pub enum QueryOrder {
+            DagRunId,
+            DagId,
+            StartDate,
+            EndDate,
+        }
+
+        impl QueryFilter {
+            /// Updated on or before.
+            pub fn updated_at_lte(mut self, date: DateTime<Utc>) -> Self {
+                self.updated_at_lte = Some(date);
+                self
+            }
+            /// Updated on or after.
+            pub fn updated_at_gte(mut self, date: DateTime<Utc>) -> Self {
+                self.updated_at_gte = Some(date);
+                self
+            }
+            pub fn order_by(mut self, order_by: OrderBy<QueryOrder>) -> Self {
+                self.order_by = order_by;
+                self
+            }
+        }
 
         #[derive(Debug, Serialize, Deserialize, Clone)]
         #[serde(rename_all = "snake_case")]
@@ -268,54 +284,126 @@ mod v1 {
         }
 
         pageable_impl!(Response, dag_runs);
+
+        #[cfg(test)]
+        mod tests {
+            use super::super::super::URLizable;
+            use super::QueryFilter;
+            use chrono::NaiveDateTime;
+
+            #[tokio::test]
+            async fn test_serialize_dag_run_filters() {
+                let res = QueryFilter::default()
+                    .updated_at_lte(
+                        NaiveDateTime::parse_from_str("2025-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+                            .unwrap()
+                            .and_utc(),
+                    )
+                    .add_to_url("/api/v2".into());
+                let exp = "/api/v2?updated_at_lte=2025-01-01T00%3A00%3A00Z";
+                assert_eq!(res, exp);
+            }
+        }
     }
 
     /// Task instances query and response.
     pub(super) mod task_instances {
-        use super::super::{Pageable, negative_and_null_are_none, pageable_impl};
+        use super::super::{Pageable, airflow_date, negative_and_null_are_none, pageable_impl};
         use chrono::{DateTime, Utc};
         use serde::{Deserialize, Serialize};
         use std::collections::HashMap;
         use strum::Display;
 
-        #[derive(Default)]
+        #[derive(Default, Serialize)]
         pub struct QueryFilter {
-            pub executed_at_lte: Option<DateTime<Utc>>,
-            pub executed_at_gte: Option<DateTime<Utc>>,
-            pub updated_at_lte: Option<DateTime<Utc>>,
-            pub updated_at_gte: Option<DateTime<Utc>>,
-            pub ended_at_lte: Option<DateTime<Utc>>,
-            pub ended_at_gte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            execution_date_lte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            execution_date_gte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            updated_at_lte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            updated_at_gte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            end_date_lte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            end_date_gte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            start_date_lte: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
+            start_date_gte: Option<DateTime<Utc>>,
+            // Airflow 3-only.
+            //#[serde(skip_serializing_if = "OrderBy::is_unordered")]
+            //order_by: OrderBy<TaskInstancesQueryOrder>,
         }
+
+        // Airflow 3-only
+        //#[derive(Clone, strum::Display, Serialize)]
+        //#[strum(serialize_all = "snake_case")]
+        //#[serde(rename_all = "snake_case")]
+        //pub enum TaskInstancesQueryOrder {
+        //    ExecutionDate,
+        //    StartDate,
+        //    EndDate,
+        //    TaskId,
+        //    MapIndex,
+        //}
 
         impl QueryFilter {
             #[allow(dead_code)]
-            pub fn executed_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.executed_at_lte = date;
+            /// Executed on or before.
+            pub fn execution_date_lte(mut self, date: DateTime<Utc>) -> Self {
+                self.execution_date_lte = Some(date);
                 self
             }
-            pub fn executed_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.executed_at_gte = date;
+            /// Executed on or after.
+            pub fn execution_date_gte(mut self, date: DateTime<Utc>) -> Self {
+                self.execution_date_gte = Some(date);
                 self
             }
-            #[allow(dead_code)]
-            pub fn updated_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.updated_at_lte = date;
+            /// Updated on or before.
+            pub fn updated_at_lte(mut self, date: DateTime<Utc>) -> Self {
+                self.updated_at_lte = Some(date);
                 self
             }
-            pub fn updated_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.updated_at_gte = date;
+            /// Updated on or after.
+            pub fn updated_at_gte(mut self, date: DateTime<Utc>) -> Self {
+                self.updated_at_gte = Some(date);
                 self
             }
-            #[allow(dead_code)]
-            pub fn ended_on_or_before(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.ended_at_lte = date;
+            /// Ended on or before.
+            pub fn end_date_lte(mut self, date: DateTime<Utc>) -> Self {
+                self.end_date_lte = Some(date);
                 self
             }
-            pub fn ended_on_or_after(mut self, date: Option<DateTime<Utc>>) -> Self {
-                self.ended_at_gte = date;
+            /// Ended on or after.
+            pub fn end_date_gte(mut self, date: DateTime<Utc>) -> Self {
+                self.end_date_gte = Some(date);
                 self
             }
+            /// Started on or before.
+            pub fn start_date_lte(mut self, date: DateTime<Utc>) -> Self {
+                self.start_date_lte = Some(date);
+                self
+            }
+            /// Started on or after.
+            pub fn start_date_gte(mut self, date: DateTime<Utc>) -> Self {
+                self.start_date_gte = Some(date);
+                self
+            }
+            // Airflow 3-only.
+            //pub fn order_by(mut self, order_by: OrderBy<TaskInstancesQueryOrder>) -> Self {
+            //    self.order_by = order_by;
+            //    self
+            //}
         }
 
         #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Display)]
@@ -395,6 +483,7 @@ mod v1 {
                 }
                 d
             }
+
             fn unique_id(&self) -> String {
                 self.dag_id.clone()
                     + self.dag_run_id.as_str()
@@ -404,7 +493,6 @@ mod v1 {
         }
 
         #[derive(Debug, Deserialize, Default)]
-
         pub struct Response {
             pub task_instances: Vec<ResponseItem>,
             #[serde(skip_serializing, skip_deserializing)]
@@ -417,54 +505,76 @@ mod v1 {
 
     /// Event logs query and response.
     pub(super) mod event_logs {
-        use super::super::negative_and_null_are_none;
-        use super::super::{Pageable, pageable_impl};
+        use super::super::{
+            OrderBy, Pageable, airflow_date, negative_and_null_are_none, pageable_impl,
+        };
         use chrono::{DateTime, Utc};
         use serde::{Deserialize, Serialize};
         use std::collections::HashMap;
 
-        #[allow(dead_code)]
-        #[derive(Default)]
-        pub struct QueryFilter<'a> {
-            pub dag_id: Option<&'a String>,
-            pub task_id: Option<&'a String>,
-            pub run_id: Option<&'a String>,
+        #[derive(Default, Serialize)]
+        pub struct QueryFilter {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub dag_id: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub task_id: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub run_id: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub map_index: Option<usize>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub try_number: Option<usize>,
-            pub event: Option<&'a String>,
-            pub owner: Option<&'a String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub event: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub owner: Option<String>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub before: Option<DateTime<Utc>>,
+            #[serde(serialize_with = "airflow_date")]
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub after: Option<DateTime<Utc>>,
+            #[serde(skip_serializing_if = "OrderBy::is_unordered")]
+            order_by: OrderBy<QueryOrder>,
         }
 
-        impl<'a> QueryFilter<'a> {
-            pub(super) fn as_queryparams(&self) -> Vec<(&str, String)> {
-                let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
-                let shit = [
-                    self.dag_id.as_ref().map(|v| ("dag_id", (*v).clone())),
-                    self.task_id.as_ref().map(|v| ("task_id", (*v).clone())),
-                    self.run_id.as_ref().map(|v| ("run_id", (*v).clone())),
-                    self.map_index
-                        .as_ref()
-                        .map(|v| ("map_index", format!("{v}").to_owned())),
-                    self.try_number
-                        .as_ref()
-                        .map(|v| ("try_number", format!("{v}").to_owned())),
-                    self.event.as_ref().map(|v| ("event", (*v).clone())),
-                    self.owner.as_ref().map(|v| ("owner", (*v).clone())),
-                    self.before
-                        .as_ref()
-                        .map(|v| ("before", format!("{}", v.format(dfmt)).to_owned())),
-                    self.after
-                        .as_ref()
-                        .map(|v| ("after", format!("{}", v.format(dfmt)).to_owned())),
-                ];
-                let res: Vec<_> = shit
-                    .iter()
-                    .flatten()
-                    .map(|(k, v)| (*k, (*v).clone()))
-                    .collect();
-                res
+        #[derive(Clone, strum::Display, Serialize)]
+        #[strum(serialize_all = "snake_case")]
+        #[serde(rename_all = "snake_case")]
+        pub enum QueryOrder {
+            EventLogId,
+            When,
+            DagId,
+            TaskId,
+            RunId,
+            MapIndex,
+            ExecutionDate,
+        }
+
+        impl QueryFilter {
+            pub fn dag_id(mut self, s: String) -> Self {
+                self.dag_id = Some(s);
+                self
+            }
+            pub fn task_id(mut self, s: String) -> Self {
+                self.task_id = Some(s);
+                self
+            }
+            pub fn run_id(mut self, s: String) -> Self {
+                self.run_id = Some(s);
+                self
+            }
+            pub fn before(mut self, s: DateTime<Utc>) -> Self {
+                self.before = Some(s);
+                self
+            }
+            pub fn after(mut self, s: DateTime<Utc>) -> Self {
+                self.after = Some(s);
+                self
+            }
+            pub fn order_by(mut self, order_by: OrderBy<QueryOrder>) -> Self {
+                self.order_by = order_by;
+                self
             }
         }
 
@@ -489,6 +599,7 @@ mod v1 {
             fn unique_id(&self) -> u64 {
                 self.event_log_id
             }
+
             pub fn extra_hash(&self) -> Option<HashMap<&str, &str>> {
                 match &self.extra {
                     Some(extra_str) => serde_json::from_str::<HashMap<&str, &str>>(extra_str).ok(),
@@ -570,7 +681,6 @@ mod v1 {
         }
 
         #[derive(Debug, Deserialize, Default, Clone)]
-
         pub struct Response {
             pub tasks: Vec<ResponseItem>,
         }
@@ -623,113 +733,58 @@ mod v1 {
                 )?),
             })
         }
-        /// Return DAG info, by default in alphabetical order.
-        #[allow(dead_code)]
+
+        /// Return DAG info.
         pub async fn dags(
             &self,
-            limit: usize,
-            offset: usize,
-            filter: &dags::QueryFilter<'_>,
-            order_by: Option<String>,
+            paging: PagingParameters,
+            filter: dags::QueryFilter,
         ) -> Result<dags::Response, AirflowError> {
-            let qpairs = filter.as_queryparams();
-            let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            let suburl = "dags".to_string()
-                + (if !qparams.is_empty() {
-                    "?".to_string() + querify(qparams).as_str()
-                } else {
-                    "".to_string()
-                })
-                .as_str();
-            _paged_get(
-                suburl,
-                match order_by {
-                    Some(x) => Some(x),
-                    None => Some("dag_id".into()),
-                },
-                Some(PagingParameters { limit, offset }),
-                MAX_BATCH_SIZE,
-                |x| self.http.get_logged_in(x),
-            )
+            paged_get(filter.add_to_url("dags".into()), paging, |x| {
+                self.http.get_logged_in(x)
+            })
             .await
         }
 
-        /// Return DAG runs from newest to oldest.
-        /// Optionally only return DAG runs updated between a certain time frame.
+        /// Return DAG runs.
         pub async fn dag_runs(
             &self,
             dag_id: &str,
-            limit: usize,
-            offset: usize,
-            updated_at_lte: Option<DateTime<Utc>>,
-            updated_at_gte: Option<DateTime<Utc>>,
+            paging: PagingParameters,
+            filter: dag_runs::QueryFilter,
         ) -> Result<dag_runs::Response, AirflowError> {
-            let mut url = format!("dags/{dag_id}/dagRuns");
-            url = add_updated_parameters(url, updated_at_lte, updated_at_gte);
-            _paged_get(
-                url,
-                Some("-execution_date".into()),
-                Some(PagingParameters { limit, offset }),
-                MAX_BATCH_SIZE,
+            paged_get(
+                filter.add_to_url(format!("dags/{dag_id}/dagRuns")),
+                paging,
                 |x| self.http.get_logged_in(x),
             )
             .await
         }
 
-        /// Return DAG runs from newest to oldest.
-        /// Optionally only return DAG runs updated between a certain time frame.
+        /// Return a DAG run.
         pub async fn dag_run(
             &self,
             dag_id: &str,
             dag_run_id: &str,
         ) -> Result<dag_runs::ResponseItem, AirflowError> {
             let url = format!("dags/{dag_id}/dagRuns/{dag_run_id}");
-            let json_value = self.http.get_logged_in(url).await?;
-            match <dag_runs::ResponseItem>::deserialize(json_value.clone()) {
-                Ok(deserialized) => Ok(deserialized),
-                Err(e) => {
-                    warn!(target: "airflow_client::dag_run" ,"Error deserializing ({e})\n{json_value:?}");
-                    Err(AirflowError::DeserializeError {
-                        explanation: format!(
-                            "Could not deserialize {}: {}",
-                            std::any::type_name::<dag_runs::ResponseItem>(),
-                            e
-                        ),
-                        payload: json_value.to_string(),
-                    })
-                }
+            match typed_get(url, |x| self.http.get_logged_in(x)).await {
+                Err(e) => Err(e),
+                Ok((res, _)) => Ok(res),
             }
         }
 
         /// Return event logs matching the filters specified.
-        /// Events are returned by default in ID order (smallest to largest)
-        /// which corresponds to chronological order.
+        /// While you should not rely on this observation, Airflow returns by default
+        /// events in chronological order (old to new).
         pub async fn event_logs(
             &self,
-            limit: usize,
-            offset: usize,
-            filters: &event_logs::QueryFilter<'_>,
-            order_by: Option<String>,
+            paging: PagingParameters,
+            filter: event_logs::QueryFilter,
         ) -> Result<event_logs::Response, AirflowError> {
-            let qpairs = filters.as_queryparams();
-            let qparams: Vec<_> = qpairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            let suburl = "eventLogs".to_string()
-                + (if !qparams.is_empty() {
-                    "?".to_string() + querify(qparams).as_str()
-                } else {
-                    "".to_string()
-                })
-                .as_str();
-            _paged_get(
-                suburl,
-                match order_by {
-                    Some(x) => Some(x),
-                    None => Some("event_log_id".into()),
-                },
-                Some(PagingParameters { limit, offset }),
-                MAX_BATCH_SIZE,
-                |x| self.http.get_logged_in(x),
-            )
+            paged_get(filter.add_to_url("eventLogs".to_string()), paging, |x| {
+                self.http.get_logged_in(x)
+            })
             .await
         }
 
@@ -738,19 +793,12 @@ mod v1 {
             &self,
             dag_id: &str,
             dag_run_id: &str,
-            limit: usize,
-            offset: usize,
-            filters: task_instances::QueryFilter,
+            paging: PagingParameters,
+            filter: task_instances::QueryFilter,
         ) -> Result<task_instances::Response, AirflowError> {
-            let mut url = format!("dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances");
-            url = add_executed_parameters(url, filters.executed_at_lte, filters.executed_at_gte);
-            url = add_updated_parameters(url, filters.updated_at_lte, filters.updated_at_gte);
-            url = add_ended_parameters(url, filters.ended_at_lte, filters.ended_at_gte);
-            _paged_get(
-                url,
-                None,
-                Some(PagingParameters { limit, offset }),
-                MAX_TASK_INSTANCE_BATCH_SIZE,
+            paged_get(
+                filter.add_to_url(format!("dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances")),
+                paging,
                 |x| self.http.get_logged_in(x),
             )
             .await
@@ -793,7 +841,7 @@ mod v1 {
                 dag_run_ids,
                 task_ids,
             };
-            _post(url.to_string(), &tr, |x, c| self.http.post_logged_in(x, c)).await
+            typed_post(url.to_string(), &tr, |x, c| self.http.post_logged_in(x, c)).await
         }
 
         /// Return Tasks for a DAG run.
@@ -832,16 +880,6 @@ mod v1 {
     }
 }
 
-fn querify(parms: Vec<(&str, &str)>) -> String {
-    let mut s = "".to_string();
-    for (k, v) in parms {
-        let kencoded = encode(k).to_string();
-        let vencoded = encode(v).to_string();
-        s += format!("{}={}&", kencoded, vencoded).as_str()
-    }
-    s
-}
-
 fn negative_and_null_are_none<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
 where
     D: Deserializer<'de>,
@@ -878,6 +916,52 @@ where
         None => None,
         Some(d) => TimeDelta::new(d.days * 86400 + d.seconds, d.microseconds * 1000),
     })
+}
+
+fn airflow_date<S>(date: &Option<DateTime<Utc>>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let dfmt = "%Y-%m-%dT%H:%M:%S%.fZ";
+    let string = if let Some(date) = date {
+        date.format(dfmt).to_string()
+    } else {
+        "".to_string()
+    };
+    s.serialize_str(string.as_str())
+}
+
+#[derive(Default, Clone, Serialize)]
+#[serde(into = "String")]
+pub enum OrderBy<T: Clone + Display> {
+    #[default]
+    Unordered,
+    Ascending(T),
+    Descending(T),
+}
+
+impl<T> From<OrderBy<T>> for String
+where
+    T: Display,
+    T: Clone,
+{
+    fn from(value: OrderBy<T>) -> Self {
+        match value {
+            OrderBy::Unordered => "".to_string(),
+            OrderBy::Ascending(x) => x.to_string(),
+            OrderBy::Descending(x) => format!("-{}", x),
+        }
+    }
+}
+
+impl<T> OrderBy<T>
+where
+    T: Clone,
+    T: Display,
+{
+    fn is_unordered(&self) -> bool {
+        matches!(self, Self::Unordered)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -964,6 +1048,44 @@ impl Display for AirflowError {
     }
 }
 
+trait URLizable {
+    fn add_to_url(&self, url: String) -> String;
+}
+
+impl<T: Serialize> URLizable for T {
+    fn add_to_url(&self, url: String) -> String {
+        let parms = serde_url_params::to_string(&self).expect("Serialized correctly to URL params");
+        match parms.as_str() {
+            "" => url,
+            _ => match url.find('?') {
+                Some(_) => url + "&" + &parms,
+                None => url + "?" + &parms,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct PagingParameters {
+    limit: usize,
+    offset: usize,
+}
+
+impl Default for PagingParameters {
+    fn default() -> Self {
+        Self {
+            limit: 10000,
+            offset: 0,
+        }
+    }
+}
+
+impl PagingParameters {
+    pub fn new(limit: usize, offset: usize) -> Self {
+        Self { limit, offset }
+    }
+}
+
 async fn typed_get<'a, T: Deserialize<'a>, G, Fut>(
     url: String,
     mut getter: G,
@@ -991,114 +1113,7 @@ where
     }
 }
 
-struct PagingParameters {
-    limit: usize,
-    offset: usize,
-}
-
-async fn _paged_get<'a, T: Deserialize<'a> + Pageable + Default, G, Fut>(
-    url: String,
-    order_by: Option<String>,
-    paging_parameters: Option<PagingParameters>,
-    max_batch_size: usize,
-    mut getter: G,
-) -> Result<T, AirflowError>
-where
-    G: FnMut(String) -> Fut,
-    Fut: Future<Output = Result<serde_json::Value, AirflowError>>,
-{
-    let mut results = T::default();
-    let mut current_offset: usize = match &paging_parameters {
-        Some(p) => p.offset,
-        None => 0,
-    };
-    loop {
-        let batch_limit = match &paging_parameters {
-            Some(p) => min(p.limit, max_batch_size),
-            None => 0,
-        };
-        // Let's handle our parameters.
-        let mut suburl = url.clone();
-        // First the paging.
-        if paging_parameters.is_some() {
-            for (k, v) in [("limit", batch_limit), ("offset", current_offset)].iter() {
-                suburl = suburl.clone()
-                    + match suburl.find('?') {
-                        Some(_) => "&",
-                        None => "?",
-                    }
-                    + format!("{k}={v}").as_str();
-            }
-        };
-        // Then the order by.
-        match &order_by {
-            None => (),
-            Some(order_by) => {
-                suburl = suburl.clone()
-                    + match suburl.find('?') {
-                        Some(_) => "&",
-                        None => "?",
-                    }
-                    + format!("{}={}", "order_by", order_by.as_str()).as_str();
-            }
-        }
-
-        trace!(target: "airflow_client::paged_get",
-            "retrieving {} instances of {} at offset {}, with {} already retrieved",
-            batch_limit,
-            suburl,
-            current_offset,
-            results.len(),
-        );
-
-        let batch = match getter(suburl).await {
-            Ok(json_value) => match <T>::deserialize(json_value.clone()) {
-                Ok(deserialized) => deserialized,
-                Err(e) => {
-                    warn!(target: "airflow_client::paged_get" ,"Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
-                    return Err(AirflowError::DeserializeError {
-                        explanation: format!(
-                            "Could not deserialize {}: {}",
-                            std::any::type_name::<T>(),
-                            e
-                        ),
-                        payload: json_value.to_string(),
-                    });
-                }
-            },
-            Err(e) => return Err(e),
-        };
-        let batch_len = batch.len();
-        trace!(target: "airflow_client::paged_get", "Got {batch_len} before discarding");
-        results.merge(batch);
-        trace!(target: "airflow_client::paged_get",
-            "Now we have {} objects after retrieving with offset {:?}",
-            results.len(),
-            current_offset
-        );
-
-        // If this is not a paged request, or we have consumed enough, break now.
-        let batch_limit = min(batch_len, batch_limit);
-        match &paging_parameters {
-            None => break,
-            Some(p) => {
-                if results.len() >= p.limit {
-                    // We have more results than we need.
-                    results.truncate(p.limit);
-                    break;
-                }
-                if batch_limit == 0 {
-                    // Server returned no results.
-                    break;
-                }
-            }
-        }
-        current_offset += batch_limit;
-    }
-    Ok(results)
-}
-
-async fn _post<'a, T: Deserialize<'a> + Pageable + Default, W, G, Fut>(
+async fn typed_post<'a, T: Deserialize<'a>, W, G, Fut>(
     url: String,
     content: W,
     mut poster: G,
@@ -1108,36 +1123,133 @@ where
     W: serde::Serialize + Sync + Send,
     Fut: Future<Output = Result<serde_json::Value, AirflowError>>,
 {
-    let mut results = T::default();
-    trace!(target: "airflow_client::paged_post",
+    trace!(target: "airflow_client::typed_post",
         "posting to and retrieving {url}",
     );
 
-    let batch = match poster(url, content).await {
+    match poster(url, content).await {
         Ok(json_value) => match <T>::deserialize(json_value.clone()) {
-            Ok(deserialized) => deserialized,
+            Ok(deserialized) => Ok(deserialized),
             Err(e) => {
-                warn!(target: "airflow_client::paged_post", "Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
-                return Err(AirflowError::DeserializeError {
+                warn!(target: "airflow_client::typed_post", "Error deserializing {} ({})\n{:?}", std::any::type_name::<T>(), e, json_value);
+                Err(AirflowError::DeserializeError {
                     explanation: format!(
                         "Could not deserialize {}: {}",
                         std::any::type_name::<T>(),
                         e
                     ),
                     payload: json_value.to_string(),
+                })
+            }
+        },
+        Err(e) => Err(e),
+    }
+}
+
+async fn paged_get<'a, T: Deserialize<'a> + Pageable + Default, G, Fut>(
+    url: String,
+    paging: PagingParameters,
+    mut getter: G,
+) -> Result<T, AirflowError>
+where
+    G: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<serde_json::Value, AirflowError>>,
+{
+    let mut results = T::default();
+    let mut current_offset = paging.offset;
+    let target = "airflow_client::paged_get::".to_owned() + url.as_str();
+
+    trace!(
+        target: &target,
+        "request to get {} instances at offset {}", paging.limit, paging.offset,
+    );
+
+    loop {
+        // Let's handle our parameters.
+        let mut batch_limit = min(paging.limit, MAX_BATCH_SIZE);
+        batch_limit = min(
+            batch_limit,
+            match results.total_entries() {
+                0 => batch_limit,
+                _ => (results.total_entries()).saturating_sub(current_offset),
+            },
+        );
+
+        trace!(target: &target,
+            "current offset {} and may use limit {}",
+            current_offset,
+            batch_limit,
+        );
+
+        if batch_limit == 0 {
+            break;
+        }
+
+        let suburl = PagingParameters {
+            limit: batch_limit,
+            offset: current_offset,
+        }
+        .add_to_url(url.clone());
+
+        let batch: T;
+        (batch, getter) = typed_get::<T, G, Fut>(suburl, getter).await?;
+        let batch_len = batch.len();
+        let total_entries = batch.total_entries();
+
+        trace!(target: &target,
+            "Requested {} instances at offset {}, with {} already retrieved, and obtained {} with {} in the view according to Airflow",
+            batch_limit,
+            current_offset,
+            results.len(),
+            batch_len,
+            total_entries,
+        );
+
+        results.merge(batch);
+
+        if results.len() >= paging.limit {
+            trace!(target: &target, "Now we have {} out of {}, will break", results.len(), paging.limit);
+            // We have equal or more entries.  We're done querying.
+            results.truncate(paging.limit);
+            break;
+        }
+        trace!(target: &target,
+            "Now we have {} objects after retrieving with offset {:?}",
+            results.len(),
+            current_offset
+        );
+
+        if batch_len < batch_limit {
+            trace!(target: &target, "Received {} after requesting {}, breaking", batch_len, batch_limit);
+            // We got to the end of the results this time.  No more, no matter what we try.
+            break;
+        }
+
+        current_offset += batch_limit;
+    }
+    Ok(results)
+}
+
+fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowError> {
+    Ok(match serde_json::from_slice(&bytes) {
+        Ok(decoded) => decoded,
+        Err(deser_error) => match String::from_utf8(bytes.to_vec()) {
+            Ok(text) => {
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to JSON ({deser_error})\n{text}");
+                return Err(AirflowError::JSONDecodeError {
+                    explanation: format!("{deser_error}"),
+                    payload: text,
+                });
+            }
+            Err(decode_error) => {
+                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to UTF-8 ({decode_error})");
+                return Err(AirflowError::JSONDecodeError {
+                    explanation: format!("{deser_error}: {decode_error}"),
+                    payload: "".to_string(),
                 });
             }
         },
-        Err(e) => return Err(e),
-    };
-    let batch_len = batch.len();
-    trace!(target: "airflow_client::paged_post", "Got {batch_len}");
-    results.merge(batch);
-    trace!(target: "airflow_client::paged_post",
-        "Now we have {} objects after retrieving",
-        results.len(),
-    );
-    Ok(results)
+    })
 }
 
 #[derive(Debug)]
@@ -1445,28 +1557,6 @@ impl AirflowHTTPClient {
     }
 }
 
-fn decode_json_from_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, AirflowError> {
-    Ok(match serde_json::from_slice(&bytes) {
-        Ok(decoded) => decoded,
-        Err(deser_error) => match String::from_utf8(bytes.to_vec()) {
-            Ok(text) => {
-                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to JSON ({deser_error})\n{text}");
-                return Err(AirflowError::JSONDecodeError {
-                    explanation: format!("{deser_error}"),
-                    payload: text,
-                });
-            }
-            Err(decode_error) => {
-                warn!(target: "airflow_client::decode_json_from_bytes" ,"Error decoding response to UTF-8 ({decode_error})");
-                return Err(AirflowError::JSONDecodeError {
-                    explanation: format!("{deser_error}: {decode_error}"),
-                    payload: "".to_string(),
-                });
-            }
-        },
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,7 +1565,25 @@ mod tests {
     use serde::Serialize;
     use serde_json::{from_str, json};
     use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[tokio::test]
+    async fn test_serialize_paging() {
+        let p = PagingParameters {
+            limit: 150,
+            offset: 20,
+        };
+        let res: String = p.add_to_url("/api/v2".into());
+        assert_eq!(res, "/api/v2?limit=150&offset=20");
+    }
+
+    #[tokio::test]
+    async fn test_serialize_no_paging() {
+        let p: Option<PagingParameters> = None;
+        let pp = serde_url_params::to_string(&p).unwrap();
+        assert_eq!(pp, "");
+    }
 
     #[derive(Default, Deserialize, Serialize, Debug)]
     struct Response {
@@ -1517,75 +1625,81 @@ mod tests {
         VecDeque::from_iter(slc.iter().map(|v| v.to_string()))
     }
 
-    async fn getter(suburl: String) -> Result<serde_json::Value, AirflowError> {
+    async fn thousand_elements(
+        suburl: String,
+        maxcount: usize,
+        reverse: bool,
+    ) -> Result<serde_json::Value, AirflowError> {
+        trace!(target:"thousand_elements", "{maxcount} {reverse} {suburl}");
         let concat = "http://localhost/".to_string() + &suburl;
         let url = Url::parse(concat.as_str()).unwrap();
         let mut offset: usize = 0;
-        let mut _limit: usize = 100;
+        let mut limit: usize = maxcount;
         for (k, v) in url.query_pairs() {
             if k == "limit" {
-                _limit = from_str::<usize>(&v).unwrap();
+                limit = from_str::<usize>(&v).unwrap();
             } else if k == "offset" {
                 offset = from_str::<usize>(&v).unwrap();
             }
         }
-        let unserded = Response {
-            max_elements: 1000,
-            elements: (offset..1000)
+        let mut unserded = Response {
+            max_elements: maxcount,
+            elements: (0..maxcount)
                 .map(|v| v.to_string())
                 .collect::<VecDeque<_>>(),
         };
+        if reverse {
+            unserded.elements = unserded.elements.into_iter().rev().collect();
+        }
+        let slc: Vec<_> = unserded.elements.into_iter().collect();
+        let slc2 = &slc[offset..min(maxcount, offset + limit)];
+        unserded.elements = slc2.iter().cloned().collect();
         let serded = serde_json::value::to_value(unserded).unwrap();
         Ok(serded)
     }
 
-    /// Every time this function is called with the same adjustment,
-    /// the real offset is slid by one, such that we simulate the
-    /// parallel addition of new elements while a paged query is
-    /// taking place.  This covers us in the eventuality that e.g.
-    /// a rollout is added while we were querying for rollouts in a
-    /// paged manner.
-    async fn sliding_getter(
-        suburl: String,
-        adjustment: Arc<Mutex<VecDeque<usize>>>,
-    ) -> Result<serde_json::Value, AirflowError> {
-        let mut adjustment = adjustment.lock().unwrap();
-        let concat = "http://localhost/".to_string() + &suburl;
-        let url = Url::parse(concat.as_str()).unwrap();
-        let mut offset: usize = 0;
-        let mut limit: usize = 10;
-        for (k, v) in url.query_pairs() {
-            if k == "limit" {
-                limit = min(from_str::<usize>(&v).unwrap(), limit);
-            } else if k == "offset" {
-                offset = from_str::<usize>(&v).unwrap();
-            }
-        }
-        //println!("Request: Offset {}  Limit {}", offset, limit);
-        if adjustment.is_empty() {
-            adjustment.push_front(1);
-        } else {
-            let val = adjustment.pop_front().unwrap();
-            offset -= val;
-            adjustment.push_front(val + 1);
-        };
-        //println!(
-        //    "  Current adjustment is {}, adjusted offset is {}, limit is {}",
-        //    current, offset, limit
-        //);
+    struct MakeSlidingResponse {
+        added: usize,
+    }
+    unsafe impl Send for MakeSlidingResponse {}
 
-        let unserded = Response {
-            max_elements: 1000,
-            elements: (offset..offset + limit)
-                .map(|v| v.to_string())
-                .collect::<VecDeque<_>>(),
-        };
-        //println!(
-        //    "Real offset {}  Real limit {}  Returning {:?}",
-        //    offset, limit, unserded
-        //);
-        let serded = serde_json::value::to_value(unserded).unwrap();
-        Ok(serded)
+    impl MakeSlidingResponse {
+        fn new() -> Self {
+            Self { added: 0 }
+        }
+
+        async fn produce_response(
+            &mut self,
+            suburl: String,
+        ) -> Result<serde_json::Value, AirflowError> {
+            let res = thousand_elements(suburl, 1000 + self.added, true).await;
+            if self.added < 5 {
+                trace!(target:"MakeSlidingResponse", "maliciously adding one more element at the head");
+                self.added += 1;
+            }
+            res
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sliding_responder() {
+        let mut m = MakeSlidingResponse::new();
+        let rs = <Response>::deserialize(
+            m.produce_response("?limit=1&offset=0".into())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(rs.max_elements, 1000);
+        assert_eq!(rs.elements, lst(&["999"]));
+        let rs = <Response>::deserialize(
+            m.produce_response("?limit=1&offset=0".into())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(rs.max_elements, 1001);
+        assert_eq!(rs.elements, lst(&["1000"]));
     }
 
     #[tokio::test]
@@ -1598,14 +1712,12 @@ mod tests {
             Ok(serded)
         }
 
-        let response: Response = _paged_get(
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 1,
                 offset: 0,
-            }),
-            MAX_BATCH_SIZE,
+            },
             getter,
         )
         .await
@@ -1616,72 +1728,74 @@ mod tests {
 
     #[tokio::test]
     async fn test_paged_onepage() {
-        let response: Response = _paged_get(
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 1,
                 offset: 0,
-            }),
-            MAX_BATCH_SIZE,
-            getter,
+            },
+            |suburl| thousand_elements(suburl, 1000, false),
         )
         .await
         .unwrap();
         assert_eq!(response.max_elements, 1000);
         assert_eq!(response.elements, lst(&["0"]));
+    }
 
-        let response: Response = _paged_get(
+    #[tokio::test]
+    async fn test_paged_onepage_2_elements() {
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 2,
                 offset: 0,
-            }),
-            MAX_BATCH_SIZE,
-            getter,
+            },
+            |suburl| thousand_elements(suburl, 1000, false),
         )
         .await
         .unwrap();
         assert_eq!(response.elements, lst(&["0", "1"]));
+    }
 
-        let response: Response = _paged_get(
+    #[tokio::test]
+    async fn test_paged_onepage_2_elements_offset_3() {
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 2,
                 offset: 3,
-            }),
-            MAX_BATCH_SIZE,
-            getter,
+            },
+            |suburl| thousand_elements(suburl, 1000, false),
         )
         .await
         .unwrap();
         assert_eq!(response.elements, lst(&["3", "4"]));
+    }
 
-        let response: Response = _paged_get(
+    #[tokio::test]
+    async fn test_paged_onepage_2_elements_offset_998() {
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 2,
                 offset: 998,
-            }),
-            MAX_BATCH_SIZE,
-            getter,
+            },
+            |suburl| thousand_elements(suburl, 1000, false),
         )
         .await
         .unwrap();
         assert_eq!(response.elements, lst(&["998", "999"]));
+    }
 
-        let response: Response = _paged_get(
+    #[tokio::test]
+    async fn test_paged_onepage_12_elements_offset_998() {
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 12,
                 offset: 998,
-            }),
-            MAX_BATCH_SIZE,
-            getter,
+            },
+            |x| thousand_elements(x, 1000, false),
         )
         .await
         .unwrap();
@@ -1690,95 +1804,45 @@ mod tests {
 
     #[tokio::test]
     async fn test_paged_slides() {
-        let adjustments: Arc<Mutex<VecDeque<usize>>> = Arc::new(Mutex::new(vec![].into()));
         let c = move |m| {
-            let adj = adjustments.clone();
-            async move { sliding_getter(m, adj).await }.boxed()
+            let r = Arc::new(Mutex::new(MakeSlidingResponse::new()));
+            async move { r.lock().await.produce_response(m).await }.boxed()
         };
-        let response: Response = _paged_get(
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 1,
                 offset: 0,
-            }),
-            MAX_BATCH_SIZE,
+            },
             c,
         )
         .await
         .unwrap();
         //println!("{:?}", response);
         assert_eq!(response.max_elements, 1000);
-        assert_eq!(response.elements, lst(&["0"]));
-
-        let adjustments: Arc<Mutex<VecDeque<usize>>> = Arc::new(Mutex::new(vec![].into()));
-        let c = move |m| {
-            let adj = adjustments.clone();
-            async move { sliding_getter(m, adj).await }.boxed()
-        };
-        let response: Response = _paged_get(
-            "".to_string(),
-            None,
-            Some(PagingParameters {
-                limit: 4,
-                offset: 0,
-            }),
-            MAX_BATCH_SIZE,
-            c,
-        )
-        .await
-        .unwrap();
-        assert_eq!(response.elements, lst(&["0", "1", "2", "3"]));
-
-        let adjustments: Arc<Mutex<VecDeque<usize>>> = Arc::new(Mutex::new(vec![].into()));
-        let c = move |m| {
-            let adj = adjustments.clone();
-            async move { sliding_getter(m, adj).await }.boxed()
-        };
-        let response: Response = _paged_get(
-            "".to_string(),
-            None,
-            Some(PagingParameters {
-                limit: 20,
-                offset: 0,
-            }),
-            MAX_BATCH_SIZE,
-            c,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            response.elements,
-            lst(&[
-                "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
-                "15", "16", "17", "18", "19"
-            ])
-        );
+        assert_eq!(response.elements, lst(&["999"]));
     }
 
     #[tokio::test]
-    async fn test_max_paged_slides() {
-        let adjustments: Arc<Mutex<VecDeque<usize>>> = Arc::new(Mutex::new(vec![].into()));
+    async fn test_paged_slides2() {
+        let responder = Arc::new(Mutex::new(MakeSlidingResponse::new()));
         let c = move |m| {
-            let adj = adjustments.clone();
-            async move { sliding_getter(m, adj).await }.boxed()
+            let r = responder.clone();
+            async move { r.lock().await.produce_response(m).await }.boxed()
         };
-        let response: Response = _paged_get(
+        let response: Response = paged_get(
             "".to_string(),
-            None,
-            Some(PagingParameters {
+            PagingParameters {
                 limit: 1000,
                 offset: 0,
-            }),
-            MAX_BATCH_SIZE,
+            },
             c,
         )
         .await
         .unwrap();
-        assert_eq!(response.elements.len(), 1000);
-        assert_eq!(response.elements[0], "0");
-        assert_eq!(response.elements[10], "10");
-        assert_eq!(response.elements[50], "50");
-        assert_eq!(response.elements[999], "999");
+        assert_eq!(response.max_elements, 1005);
+        assert_eq!(response.len(), 1000);
+        assert_eq!(response.elements[0], "999");
+        assert_eq!(response.elements[999], "0");
     }
 }
