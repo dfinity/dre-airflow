@@ -91,6 +91,42 @@ trait Pageable {
     /// Remove all elements from the end beyond usize - 1.
     /// The modified structure has maximum max_entries elements.
     fn truncate(&mut self, max_entries: usize);
+    fn total_entries(&self) -> usize;
+}
+
+macro_rules! pageable_impl {
+    ($structname:ident, $containermember:ident) => {
+        impl Pageable for $structname {
+            fn len(&self) -> usize {
+                self.$containermember.len()
+            }
+            fn merge(&mut self, other: Self) {
+                for v in other.$containermember.clone().into_iter() {
+                    let id = v.unique_id();
+                    match self.position_cache.get(&id) {
+                        Some(pos) => {
+                            //debug!(target: "processing", "Replacing {} at position {}", id, pos);
+                            self.$containermember[*pos] = v;
+                        }
+                        None => {
+                            //debug!(target: "processing", "Consuming {}", id);
+                            self.position_cache.insert(id, self.$containermember.len());
+                            self.$containermember.push(v);
+                        }
+                    }
+                }
+                self.total_entries = other.total_entries;
+            }
+            fn truncate(&mut self, max_entries: usize) {
+                if self.$containermember.len() > max_entries {
+                    self.$containermember.truncate(max_entries)
+                }
+            }
+            fn total_entries(&self) -> usize {
+                self.total_entries
+            }
+        }
+    };
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -105,6 +141,12 @@ pub struct DagsResponseItem {
     pub last_parsed_time: Option<DateTime<Utc>>,
 }
 
+impl DagsResponseItem {
+    fn unique_id(&self) -> String {
+        self.dag_id.clone()
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct DagsResponse {
     pub dags: Vec<DagsResponseItem>,
@@ -113,33 +155,7 @@ pub struct DagsResponse {
     total_entries: usize,
 }
 
-impl Pageable for DagsResponse {
-    fn len(&self) -> usize {
-        self.dags.len()
-    }
-    fn merge(&mut self, other: Self) {
-        for v in other.dags.clone().into_iter() {
-            let id = v.dag_id.clone();
-            match self.position_cache.get(&id) {
-                Some(pos) => {
-                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
-                    self.dags[*pos] = v;
-                }
-                None => {
-                    //debug!(target: "processing", "Consuming {}", id);
-                    self.position_cache.insert(id, self.dags.len());
-                    self.dags.push(v);
-                }
-            }
-        }
-        self.total_entries = other.total_entries;
-    }
-    fn truncate(&mut self, max_entries: usize) {
-        if self.dags.len() > max_entries {
-            self.dags.truncate(max_entries)
-        }
-    }
-}
+pageable_impl!(DagsResponse, dags);
 
 #[allow(dead_code)]
 #[derive(Default)]
@@ -187,6 +203,12 @@ pub struct DagRunsResponseItem {
     pub note: Option<String>,
 }
 
+impl DagRunsResponseItem {
+    fn unique_id(&self) -> String {
+        self.dag_id.clone() + self.dag_run_id.as_str()
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct DagRunsResponse {
     pub dag_runs: Vec<DagRunsResponseItem>,
@@ -195,33 +217,7 @@ pub struct DagRunsResponse {
     total_entries: usize,
 }
 
-impl Pageable for DagRunsResponse {
-    fn len(&self) -> usize {
-        self.dag_runs.len()
-    }
-    fn merge(&mut self, other: Self) {
-        for v in other.dag_runs.clone().into_iter() {
-            let id = v.dag_id.clone() + v.dag_run_id.as_str();
-            match self.position_cache.get(&id) {
-                Some(pos) => {
-                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
-                    self.dag_runs[*pos] = v;
-                }
-                None => {
-                    //debug!(target: "processing", "Consuming {}", id);
-                    self.position_cache.insert(id, self.dag_runs.len());
-                    self.dag_runs.push(v);
-                }
-            }
-        }
-        self.total_entries = other.total_entries;
-    }
-    fn truncate(&mut self, max_entries: usize) {
-        if self.dag_runs.len() > max_entries {
-            self.dag_runs.truncate(max_entries)
-        }
-    }
-}
+pageable_impl!(DagRunsResponse, dag_runs);
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct XComEntryResponse {
@@ -356,6 +352,12 @@ impl TaskInstancesResponseItem {
         }
         d
     }
+    fn unique_id(&self) -> String {
+        self.dag_id.clone()
+            + self.dag_run_id.as_str()
+            + self.task_id.as_str()
+            + format!("{:?}", self.map_index).as_str()
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -367,36 +369,7 @@ pub struct TaskInstancesResponse {
     total_entries: usize,
 }
 
-impl Pageable for TaskInstancesResponse {
-    fn len(&self) -> usize {
-        self.task_instances.len()
-    }
-    fn merge(&mut self, other: Self) {
-        for v in other.task_instances.clone().into_iter() {
-            let id = v.dag_id.clone()
-                + v.dag_run_id.as_str()
-                + v.task_id.as_str()
-                + format!("{:?}", v.map_index).as_str();
-            match self.position_cache.get(&id) {
-                Some(pos) => {
-                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
-                    self.task_instances[*pos] = v;
-                }
-                None => {
-                    //debug!(target: "processing", "Consuming {}", id);
-                    self.position_cache.insert(id, self.task_instances.len());
-                    self.task_instances.push(v);
-                }
-            }
-        }
-        self.total_entries = other.total_entries;
-    }
-    fn truncate(&mut self, max_entries: usize) {
-        if self.task_instances.len() > max_entries {
-            self.task_instances.truncate(max_entries)
-        }
-    }
-}
+pageable_impl!(TaskInstancesResponse, task_instances);
 
 #[derive(Default)]
 pub struct TaskInstanceRequestFilters {
@@ -493,6 +466,12 @@ pub struct TasksResponseItem {
     pub downstream_task_ids: Vec<String>,
 }
 
+impl TasksResponseItem {
+    fn unique_id(&self) -> String {
+        self.task_id.clone()
+    }
+}
+
 #[derive(Debug, Deserialize, Default, Clone)]
 
 pub struct TasksResponse {
@@ -502,33 +481,8 @@ pub struct TasksResponse {
     total_entries: usize,
 }
 
-impl Pageable for TasksResponse {
-    fn len(&self) -> usize {
-        self.tasks.len()
-    }
-    fn merge(&mut self, other: Self) {
-        for v in other.tasks.clone().into_iter() {
-            let id = v.task_id.clone();
-            match self.position_cache.get(&id) {
-                Some(pos) => {
-                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
-                    self.tasks[*pos] = v;
-                }
-                None => {
-                    //debug!(target: "processing", "Consuming {}", id);
-                    self.position_cache.insert(id, self.tasks.len());
-                    self.tasks.push(v);
-                }
-            }
-        }
-        self.total_entries = other.total_entries;
-    }
-    fn truncate(&mut self, max_entries: usize) {
-        if self.tasks.len() > max_entries {
-            self.tasks.truncate(max_entries)
-        }
-    }
-}
+// FIXME tasks are not pageable!  Replace with typed_get instead of paged_get in fn tasks getter.
+pageable_impl!(TasksResponse, tasks);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EventLogsResponseItem {
@@ -548,6 +502,9 @@ pub struct EventLogsResponseItem {
 }
 
 impl EventLogsResponseItem {
+    fn unique_id(&self) -> u64 {
+        self.event_log_id
+    }
     pub fn extra_hash(&self) -> Option<HashMap<&str, &str>> {
         match &self.extra {
             Some(extra_str) => serde_json::from_str::<HashMap<&str, &str>>(extra_str).ok(),
@@ -619,33 +576,7 @@ impl<'a> EventLogsResponseFilters<'a> {
     }
 }
 
-impl Pageable for EventLogsResponse {
-    fn len(&self) -> usize {
-        self.event_logs.len()
-    }
-    fn merge(&mut self, other: Self) {
-        for v in other.event_logs.clone().into_iter() {
-            let id = v.event_log_id;
-            match self.position_cache.get(&id) {
-                Some(pos) => {
-                    //debug!(target: "processing", "Replacing {} at position {}", id, pos);
-                    self.event_logs[*pos] = v;
-                }
-                None => {
-                    //debug!(target: "processing", "Consuming {}", id);
-                    self.position_cache.insert(id, self.event_logs.len());
-                    self.event_logs.push(v);
-                }
-            }
-        }
-        self.total_entries = other.total_entries;
-    }
-    fn truncate(&mut self, max_entries: usize) {
-        if self.event_logs.len() > max_entries {
-            self.event_logs.truncate(max_entries)
-        }
-    }
-}
+pageable_impl!(EventLogsResponse, event_logs);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 /// Problem communicating with Airflow.
@@ -1465,6 +1396,9 @@ mod tests {
             if self.elements.len() > max_entries {
                 self.elements.truncate(max_entries)
             }
+        }
+        fn total_entries(&self) -> usize {
+            self.max_elements
         }
     }
 
