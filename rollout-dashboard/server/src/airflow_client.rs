@@ -118,6 +118,8 @@ mod v1 {
         #[derive(Default, Serialize, Clone)]
         pub struct QueryFilter {
             #[serde(skip_serializing_if = "Option::is_none")]
+            /// Limit response to DAGs whose ID match this pattern.
+            /// The pattern must be a SQL-LIKE expressions as in %_customer%.
             dag_id_pattern: Option<String>,
             #[serde(skip_serializing_if = "OrderBy::is_unordered")]
             order_by: OrderBy<QueryOrder>,
