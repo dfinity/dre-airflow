@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import datetime
 from dataclasses import dataclass
 from enum import Enum
@@ -97,7 +98,8 @@ class ProposalStatus(Enum):
 class ProposalTopic(Enum):
     ## The `Unspecified` topic is used as a fallback when
     ## following. That is, if no followees are specified for a given
-    ## topic, the followees for this topic are used instead.
+    ## topic (other than the "Governance" and "SNS & Neurons' Fund" topics),
+    ## the followees for this topic are used instead.
     TOPIC_UNSPECIFIED = 0
     ## A special topic by means of which a neuron can be managed by the
     ## followees for this topic (in this case, there is no fallback to
@@ -140,37 +142,53 @@ class ProposalTopic(Enum):
     ## creating new subnets, adding and removing subnet nodes, and
     ## splitting subnets.
     TOPIC_SUBNET_MANAGEMENT = 7
-    ## Installing and upgrading “system” canisters that belong to the network.
-    ## For example, upgrading the NNS.
-    TOPIC_NETWORK_CANISTER_MANAGEMENT = 8
+    ## All proposals to manage NNS-controlled canisters not covered by other topics (Protocol Canister
+    ## Management or Service Nervous System Management).
+    TOPIC_APPLICATION_CANISTER_MANAGEMENT = 8
     ## Proposals that update KYC information for regulatory purposes,
     ## for example during the initial Genesis distribution of ICP in the
     ## form of neurons.
     TOPIC_KYC = 9
     ## Topic for proposals to reward node providers.
     TOPIC_NODE_PROVIDER_REWARDS = 10
-    ## Superseded by SNS_COMMUNITY_FUND.
+
+    ## IC OS upgrade proposals
+    ## -----------------------
+    ## ICP runs on a distributed network of nodes grouped into subnets. Each node runs a stack of
+    ## operating systems, including HostOS (runs on bare metal) and GuestOS (runs inside HostOS;
+    ## contains, e.g., the ICP replica process). HostOS and GuestOS are distributed via separate disk
+    ## images. The umbrella term IC OS refers to the whole stack.
     ##
-    ## TODO(NNS1-1787): Delete this. In addition to clients wiping this from their
-    ## memory, I think we'll need Candid support in order to safely delete
-    ## this. There is no rush to delete this though.
-    TOPIC_SNS_DECENTRALIZATION_SALE = 11
-    ## Proposals handling updates of a subnet's replica version.
-    ## The only proposal in this topic is UpdateSubnetReplicaVersion.
+    ## The IC OS upgrade process involves two phases, where the first phase is the election of a new
+    ## IC OS version and the second phase is the deployment of a previously elected IC OS version on
+    ## all nodes of a subnet or on some number of nodes (including nodes comprising subnets and
+    ## unassigned nodes).
+    ##
+    ## A special case is for API boundary nodes, special nodes that route API requests to a replica
+    ## of the right subnet. API boundary nodes run a different process than the replica, but their
+    ## executable is distributed via the same disk image as GuestOS. Therefore, electing a new GuestOS
+    ## version also results in a new version of boundary node software being elected.
+    ##
+    ## Proposals handling the deployment of IC OS to some nodes. It is possible to deploy only
+    ## the versions of IC OS that are in the set of elected IC OS versions.
     TOPIC_IC_OS_VERSION_DEPLOYMENT = 12
-    ## All proposals dealing with blessing and retirement of replica versions.
+    ## Proposals for changing the set of elected IC OS versions.
     TOPIC_IC_OS_VERSION_ELECTION = 13
+
     ## Proposals related to SNS and Community Fund.
     TOPIC_SNS_AND_COMMUNITY_FUND = 14
-    ## Proposals related to the management of API Boundary nodes.
+    ## Proposals related to the management of API Boundary Nodes
     TOPIC_API_BOUNDARY_NODE_MANAGEMENT = 15
-    ## Proposals related to rental of subnets (Utopia).
-    ## TODO: verify the int corresponds to the proto.
+
+    ## Proposals related to subnet rental.
     TOPIC_SUBNET_RENTAL = 16
-    # All proposals to manage protocol canisters, which are considered part of the
-    # ICP protocol and are essential for its proper functioning.
+
+    ## All proposals to manage protocol canisters, which are considered part of the ICP protocol and
+    ## are essential for its proper functioning.
     TOPIC_PROTOCOL_CANISTER_MANAGEMENT = 17
-    ## SNS management.
+
+    ## All proposals to manage the canisters of service nervous systems (SNS), including upgrading
+    ## relevant canisters and managing SNS framework canister WASMs through SNS-W.
     TOPIC_SERVICE_NERVOUS_SYSTEM_MANAGEMENT = 18
 
 
