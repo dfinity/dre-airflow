@@ -2,6 +2,7 @@
 </script>
 
 <script lang="ts">
+  import './navigation-polyfill';
   import "./app.css";
   import {
     FooterCopyright,
