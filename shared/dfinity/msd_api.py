@@ -74,11 +74,10 @@ class MsdApi:
             print(
                 "Node",
                 node_id,
-                "Doesn't have a domain specified. Will use ipv6, which may not yield"
-                " all of the errors",
+                "doesn't have a domain specified. All api boundary nodes"
+                " should have domains specified.",
             )
-            url = node["targets"][0].split(":")[0]
-            domain = f"{url}:443"
+            return False
 
         full_domain = f"https://{domain}/health"
         print("Will use the following domain:", full_domain)
