@@ -74,7 +74,8 @@ class MsdApi:
             print(
                 "Node",
                 node_id,
-                "Doesn't have a domain specified. Will use ipv6, which may not yield all of the errors",
+                "Doesn't have a domain specified. Will use ipv6, which may not yield"
+                " all of the errors",
             )
             url = node["targets"][0].split(":")[0]
             domain = f"{url}:443"

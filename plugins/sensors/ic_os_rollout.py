@@ -866,7 +866,8 @@ def have_api_boundary_nodes_stopped_alerting(
         return False
 
     print(
-        "Fetching the domains for the api boundary nodes from the multiservice discovery: ",
+        "Fetching the domains for the api boundary nodes from the"
+        " multiservice discovery: ",
         msd_url,
     )
 
@@ -878,7 +879,8 @@ def have_api_boundary_nodes_stopped_alerting(
 
     if not all(outcomes):
         print(
-            "Some api boundary nodes were not healthy, check logs above to see which one"
+            "Some api boundary nodes were not healthy, check logs above"
+            " to see which one"
         )
         return False
 
