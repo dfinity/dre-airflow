@@ -48,6 +48,7 @@ class DagParams(typing.TypedDict):
     git_revision: str
     plan: str
     simulate: bool
+    msd: str
 
 
 BatchSpec = tuple[datetime.datetime, list[str]]
