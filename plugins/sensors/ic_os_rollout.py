@@ -27,6 +27,7 @@ from dfinity.ic_os_rollout import (
     SLACK_CONNECTION_ID,
     subnet_id_and_git_revision_from_args,
 )
+from dfinity.msd_api import MsdApi
 from operators.ic_os_rollout import NotifyAboutStalledSubnet, RolloutParams
 
 SUBNET_UPDATE_STALL_TIMEOUT_SECONDS = 3600  # One hour between messages.
@@ -833,6 +834,7 @@ def have_api_boundary_nodes_adopted_revision(
 def have_api_boundary_nodes_stopped_alerting(
     api_boundary_node_ids: list[str],
     network: ic_types.ICNetwork,
+    msd_url: str,
 ) -> bool:
     """
     Check for 15 minutes of no alerts (pending or firing) on any of the BNs.
@@ -856,12 +858,32 @@ def have_api_boundary_nodes_stopped_alerting(
     print("::group::Querying Prometheus servers")
     print(query)
     print("::endgroup::")
-    res = prom.query_prometheus_servers(network.prometheus_urls, query)
-    if len(res) > 0:
+    metrics_response = prom.query_prometheus_servers(network.prometheus_urls, query)
+    if len(metrics_response) > 0:
         print("There are still Prometheus alerts on the subnet:")
-        for r in res:
+        for r in metrics_response:
             print(r)
         return False
+
+    print(
+        "Fetching the domains for the api boundary nodes from the"
+        " multiservice discovery: ",
+        msd_url,
+    )
+
+    print("::group::Fetching node status from msd")
+    msd_api = MsdApi(msd_url)
+    print("::endgroup::")
+
+    outcomes = [msd_api.check_api_bn_health(node) for node in api_boundary_node_ids]
+
+    if not all(outcomes):
+        print(
+            "Some api boundary nodes were not healthy, check logs above"
+            " to see which one"
+        )
+        return False
+
     print("There are no more alerts on boundary nodes.")
     return True
 
