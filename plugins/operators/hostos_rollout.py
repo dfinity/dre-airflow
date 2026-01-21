@@ -99,10 +99,15 @@ def apply_selectors(
     selector: NodeSelector,
     dcs_owned_by_dfinity: set[DCId],
     apibns: set[NodeId],
+    all_registry_nodes: list[dre.RegistryNode],
 ) -> tuple[list[NodeInfo], list[dre.RegistryNode]]:
     """
     Take as many nodes from the pool as selectors prescribe, then return info
-    on those nodes and a new, reduced pool without those nodes
+    on those nodes and a new, reduced pool without those nodes.
+
+    The all_registry_nodes parameter is used to compute subnet health for the
+    subnet_healthy_threshold selector (the full registry is needed for accurate
+    health statistics, not just the filtered pool).
     """
     final_poses: dict[NodeId, int] = {x["node_id"]: n for n, x in enumerate(pool)}
 
@@ -111,7 +116,7 @@ def apply_selectors(
         final_node_ids: dict[NodeId, None] = {}
         for selector in selector["join"]:
             selected, avail = apply_selectors(
-                avail, selector, dcs_owned_by_dfinity, apibns
+                avail, selector, dcs_owned_by_dfinity, apibns, all_registry_nodes
             )
             for s in selected:
                 final_node_ids[s["node_id"]] = None
@@ -123,7 +128,9 @@ def apply_selectors(
     elif "intersect" in selector:
         selected_node_ids = set(final_poses.keys())
         for selector in selector["intersect"]:
-            selected, _ = apply_selectors(pool, selector, dcs_owned_by_dfinity, apibns)
+            selected, _ = apply_selectors(
+                pool, selector, dcs_owned_by_dfinity, apibns, all_registry_nodes
+            )
             selected_node_ids.intersection_update(n["node_id"] for n in selected)
         return [
             registry_node_to_node_info(pool[pos], apibns)
@@ -133,7 +140,7 @@ def apply_selectors(
 
     elif "not" in selector:
         not_selected, not_avail = apply_selectors(
-            pool, selector["not"], dcs_owned_by_dfinity, apibns
+            pool, selector["not"], dcs_owned_by_dfinity, apibns, all_registry_nodes
         )
         selected = [registry_node_to_node_info(n, apibns) for n in not_avail]
         avail = [pool[final_poses[n["node_id"]]] for n in not_selected]
@@ -163,6 +170,35 @@ def apply_selectors(
         pool = [n for n in pool if status == n["status"]]
     if datacenter := selector.get("datacenter"):
         pool = [n for n in pool if datacenter == n["dc_id"]]
+
+    # Filter nodes by subnet health threshold if specified.
+    # This filters out nodes whose subnet doesn't meet the health threshold.
+    if subnet_healthy_threshold := selector.get("subnet_healthy_threshold"):
+        # Compute subnet health from all registry nodes
+        subnet_health: dict[str | None, int] = collections.defaultdict(int)
+        subnet_size: dict[str | None, int] = collections.defaultdict(int)
+        for node in all_registry_nodes:
+            if node["subnet_id"] is not None:
+                subnet_size[node["subnet_id"]] += 1
+                if node["status"] == "Healthy":
+                    subnet_health[node["subnet_id"]] += 1
+
+        # Determine which subnets meet the threshold
+        def subnet_meets_threshold(subnet_id: str | None) -> bool:
+            if subnet_id is None:
+                return False
+            if subnet_size[subnet_id] == 0:
+                return False
+            if isinstance(subnet_healthy_threshold, float):
+                # Percentage threshold
+                health_ratio = subnet_health[subnet_id] / subnet_size[subnet_id]
+                return health_ratio > subnet_healthy_threshold
+            else:
+                # Absolute threshold
+                return subnet_health[subnet_id] > subnet_healthy_threshold
+
+        pool = [n for n in pool if subnet_meets_threshold(n["subnet_id"])]
+
     groups: dict[str | None, list[dre.RegistryNode]] = collections.defaultdict(list)
     if group_by := selector.get("group_by"):
         for node in pool:
@@ -172,6 +208,7 @@ def apply_selectors(
                 groups[node["subnet_id"]].append(node)
     else:
         groups[None] = pool
+
     if nodes_per_group := selector.get("nodes_per_group"):
         if isinstance(nodes_per_group, int):
             for k, v in groups.items():
@@ -217,7 +254,11 @@ def compute_actual_plan_for_batch(
     )
     apibns = set(d["principal"] for d in registry["api_bns"])
     node_ids, _ = apply_selectors(
-        remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
+        remaining_nodes,
+        selectors,
+        dcs_owned_by_dfinity,
+        apibns,
+        all_registry_nodes=registry["nodes"],
     )
     return node_ids
 
@@ -273,6 +314,7 @@ def compute_provisional_node_batches(
         "unassigned": [],
         "stragglers": [],
     }
+    all_registry_nodes = registry["nodes"]
     stage = stages.get("canary", [])
     for batch_spec in stage:
         node_ids, remaining_nodes = apply_selectors(
@@ -280,6 +322,7 @@ def compute_provisional_node_batches(
             batch_spec["selectors"],
             dcs_owned_by_dfinity,
             apibns,
+            all_registry_nodes=all_registry_nodes,
         )
         x: ProvisionallyComputedBatch = {
             "selectors": batch_spec["selectors"],
@@ -295,7 +338,11 @@ def compute_provisional_node_batches(
             selectors = stage["selectors"]
             while True:
                 node_ids, remaining_nodes = apply_selectors(
-                    remaining_nodes, selectors, dcs_owned_by_dfinity, apibns
+                    remaining_nodes,
+                    selectors,
+                    dcs_owned_by_dfinity,
+                    apibns,
+                    all_registry_nodes=all_registry_nodes,
                 )
                 if not node_ids:
                     break

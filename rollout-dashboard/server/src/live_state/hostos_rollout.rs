@@ -826,6 +826,7 @@ mod tests {
                 group_by: None,
                 status: Some(NodeStatus::Healthy),
                 datacenter: None,
+                subnet_healthy_threshold: None,
             })],
         };
         assert_eq!(expected, *actual);

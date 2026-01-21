@@ -247,3 +247,126 @@ def test_exclude_hk_nodes(mocker: Any, registry: dre.RegistrySnapshot) -> None:
     assert not any(
         n["dc_id"] == "hk4" for n in sched_with_exclusion["canary"][0]["nodes"]
     )
+
+
+def test_subnet_healthy_threshold_filters_unhealthy_subnets(
+    mocker: Any, registry: dre.RegistrySnapshot
+) -> None:
+    """Tests that subnet_healthy_threshold filters out subnets with insufficient healthy nodes."""
+    # Without threshold: should get nodes from all subnets
+    spec_without_threshold = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With high threshold (100): should only get nodes from subnets with > 100 healthy nodes
+    # Since typical subnets have 13 nodes, this should result in 0 nodes
+    spec_with_high_threshold = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 100
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With low threshold (5): should get nodes from subnets with > 5 healthy nodes
+    spec_with_low_threshold = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 5
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+
+    sched_without = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_without_threshold, "git_revision": "0"},
+    )
+    sched_high = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_with_high_threshold, "git_revision": "0"},
+    )
+    sched_low = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_with_low_threshold, "git_revision": "0"},
+    )
+
+    # Without threshold, we should get nodes from subnets
+    assert len(sched_without["main"]) > 0
+    assert len(sched_without["main"][0]["nodes"]) > 0
+
+    # With a very high threshold (100), no subnet should qualify
+    assert len(sched_high["main"]) == 0
+
+    # With low threshold (5), we should get some nodes (subnets with > 5 healthy nodes)
+    assert len(sched_low["main"]) > 0
+    assert len(sched_low["main"][0]["nodes"]) > 0
+
+
+def test_subnet_healthy_threshold_percentage(
+    mocker: Any, registry: dre.RegistrySnapshot
+) -> None:
+    """Tests that subnet_healthy_threshold works with percentage values."""
+    # With 99% threshold: only subnets with > 99% healthy nodes qualify
+    spec_high_percentage = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 99%
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With 50% threshold: subnets with > 50% healthy nodes qualify
+    spec_low_percentage = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 50%
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+
+    sched_high = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_high_percentage, "git_revision": "0"},
+    )
+    sched_low = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_low_percentage, "git_revision": "0"},
+    )
+
+    # With 50% threshold, we should get nodes from most subnets
+    assert len(sched_low["main"]) > 0
+
+    # High percentage threshold should result in fewer or equal batches than low
+    assert len(sched_high["main"]) <= len(sched_low["main"])

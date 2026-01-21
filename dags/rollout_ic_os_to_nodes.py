@@ -14,6 +14,7 @@ import airflow.operators.python as python_operator
 import airflow.sensors.python as python_sensor
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
+from airflow import __version__
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -23,8 +24,6 @@ from dfinity.rollout_types import HostOSStage
 from operators import hostos_rollout as hostos_operators
 from operators.ic_os_rollout import RequestProposalVote
 from sensors import hostos_rollout as hostos_sensors
-
-from airflow import __version__
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))
@@ -83,6 +82,11 @@ A selector is either:
   After the (optional) grouping, a number of nodes from each group is selected
   (up to an absolute number if the key `nodes_per_group` is an integer, or a
   0-100 percentage if the key is a number postfixed by %).
+
+  If `subnet_healthy_threshold` is specified (requires `assignment: assigned`),
+  only nodes from subnets with enough healthy nodes are included.  The threshold
+  can be an integer (e.g. `7` means subnets with more than 7 healthy nodes) or a
+  percentage (e.g. `80%` means subnets with more than 80% healthy nodes).
 
   Finally, the groups (or single group if no `group_by` was specified) are
   collated into a single list of resulting nodes.

@@ -239,6 +239,71 @@ class TestHostOSRolloutPlanSpec(unittest.TestCase):
         )
         assert stages["main"]["selectors"]["intersect"][1]["not"]["datacenter"] == "hk4"
 
+    def test_subnet_healthy_threshold_absolute(self) -> None:
+        """Tests that subnet_healthy_threshold with absolute value works."""
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors:
+                - assignment: assigned
+                  group_by: subnet
+                  nodes_per_group: 1
+                  status: Healthy
+                  subnet_healthy_threshold: 7
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
+        stages = p["stages"]
+        assert (
+            stages["main"]["selectors"]["intersect"][0]["subnet_healthy_threshold"] == 7
+        )
+
+    def test_subnet_healthy_threshold_percentage(self) -> None:
+        """Tests that subnet_healthy_threshold with percentage value works."""
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors:
+                - assignment: assigned
+                  group_by: subnet
+                  nodes_per_group: 1
+                  status: Healthy
+                  subnet_healthy_threshold: 80%
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        p = rollout_types.yaml_to_HostOSRolloutPlanSpec(inp)
+        stages = p["stages"]
+        assert (
+            stages["main"]["selectors"]["intersect"][0]["subnet_healthy_threshold"]
+            == 0.8
+        )
+
+    def test_subnet_healthy_threshold_requires_assignment_assigned(self) -> None:
+        """Tests that subnet_healthy_threshold fails without assignment: assigned."""
+        inp = textwrap.dedent("""\
+        stages:
+            main:
+                selectors:
+                - assignment: unassigned
+                  nodes_per_group: 1
+                  status: Healthy
+                  subnet_healthy_threshold: 7
+        allowed_days: [Wednesday]
+        resume_at: 9:00
+        suspend_at: 18:59
+        minimum_minutes_per_batch: 60
+        """)
+        self.assertRaises(
+            ValueError,
+            lambda: rollout_types.yaml_to_HostOSRolloutPlanSpec(inp),
+        )
+
 
 class TestIntOrFloatBounded(unittest.TestCase):
     def test_int(self) -> None:

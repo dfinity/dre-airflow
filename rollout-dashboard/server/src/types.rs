@@ -645,6 +645,8 @@ pub mod v2 {
             pub group_by: Option<GroupBy>,
             pub status: Option<NodeStatus>,
             pub datacenter: Option<String>,
+            /// Filter nodes to only those in subnets with healthy node count exceeding
+            pub subnet_healthy_threshold: Option<NodesPerGroup>,
         }
 
         #[cfg(test)]
@@ -1064,7 +1066,7 @@ pub mod v2 {
                 };
                 assert_eq!(res, exp);
                 let resstr = serde_json::to_string(&exp).unwrap();
-                let expstr = "{\"not\":{\"assignment\":\"unassigned\",\"owner\":null,\"nodes_per_group\":1,\"group_by\":null,\"status\":\"Healthy\",\"datacenter\":\"hk4\"}}";
+                let expstr = "{\"not\":{\"assignment\":\"unassigned\",\"owner\":null,\"nodes_per_group\":1,\"group_by\":null,\"status\":\"Healthy\",\"datacenter\":\"hk4\",\"subnet_healthy_threshold\":null}}";
                 assert_eq!(expstr, &resstr)
             }
 
