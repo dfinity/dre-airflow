@@ -337,7 +337,7 @@ def test_subnet_healthy_threshold_filters_unhealthy_subnets(
     )
 
     # Helper to count total nodes across all batches
-    def count_nodes(batches: list) -> int:
+    def count_nodes(batches: list[Any]) -> int:
         return sum(len(batch["nodes"]) for batch in batches)
 
     # Without threshold: all 42 subnets qualify -> 635 healthy nodes scheduled
@@ -424,7 +424,7 @@ def test_subnet_healthy_threshold_percentage(
     )
 
     # Helper to count total nodes across all batches
-    def count_nodes(batches: list) -> int:
+    def count_nodes(batches: list[Any]) -> int:
         return sum(len(batch["nodes"]) for batch in batches)
 
     # With 99% threshold: 41 subnets qualify (mkbc3's 12 nodes excluded) -> 623 nodes
