@@ -19,6 +19,7 @@ from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
+
 from dfinity.ic_types import IC_NETWORKS
 from dfinity.rollout_types import HostOSStage
 from operators import hostos_rollout as hostos_operators
