@@ -252,8 +252,15 @@ def test_exclude_hk_nodes(mocker: Any, registry: dre.RegistrySnapshot) -> None:
 def test_subnet_healthy_threshold_filters_unhealthy_subnets(
     mocker: Any, registry: dre.RegistrySnapshot
 ) -> None:
-    """Tests that subnet_healthy_threshold filters out subnets with insufficient healthy nodes."""
-    # Without threshold: should get nodes from all subnets
+    """Tests that subnet_healthy_threshold filters out subnets with insufficient healthy nodes.
+
+    The mock registry contains 42 subnets with 635 total healthy assigned nodes:
+    - 41 subnets with 100% healthy nodes (13 nodes each, or 34-40 for larger ones)
+    - 1 subnet (mkbc3-...) with 12/13 healthy nodes (92.31%)
+
+    When a subnet doesn't qualify due to threshold, all its healthy nodes are excluded.
+    """
+    # Without threshold: should get all 635 healthy nodes from all 42 subnets
     spec_without_threshold = textwrap.dedent("""\
         stages:
           main:
@@ -267,7 +274,7 @@ def test_subnet_healthy_threshold_filters_unhealthy_subnets(
         minimum_minutes_per_batch: 30
         """)
     # With high threshold (100): should only get nodes from subnets with > 100 healthy nodes
-    # Since typical subnets have 13 nodes, this should result in 0 nodes
+    # No subnet has more than 40 nodes, so this should result in 0 nodes
     spec_with_high_threshold = textwrap.dedent("""\
         stages:
           main:
@@ -281,8 +288,8 @@ def test_subnet_healthy_threshold_filters_unhealthy_subnets(
         suspend_at: 15:00
         minimum_minutes_per_batch: 30
         """)
-    # With low threshold (5): should get nodes from subnets with > 5 healthy nodes
-    spec_with_low_threshold = textwrap.dedent("""\
+    # With threshold 5: all 42 subnets have > 5 healthy nodes -> all 635 nodes
+    spec_with_threshold_5 = textwrap.dedent("""\
         stages:
           main:
             selectors:
@@ -291,6 +298,21 @@ def test_subnet_healthy_threshold_filters_unhealthy_subnets(
               nodes_per_group: 1
               status: Healthy
               subnet_healthy_threshold: 5
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With threshold 12: mkbc3 has exactly 12 healthy (not > 12), so excluded
+    # 635 - 12 = 623 nodes scheduled
+    spec_with_threshold_12 = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 12
         resume_at: 7:00
         suspend_at: 15:00
         minimum_minutes_per_batch: 30
@@ -305,29 +327,46 @@ def test_subnet_healthy_threshold_filters_unhealthy_subnets(
         IC_NETWORKS["mainnet"],
         {"simulate": True, "plan": spec_with_high_threshold, "git_revision": "0"},
     )
-    sched_low = schedule(
+    sched_5 = schedule(
         IC_NETWORKS["mainnet"],
-        {"simulate": True, "plan": spec_with_low_threshold, "git_revision": "0"},
+        {"simulate": True, "plan": spec_with_threshold_5, "git_revision": "0"},
+    )
+    sched_12 = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_with_threshold_12, "git_revision": "0"},
     )
 
-    # Without threshold, we should get nodes from subnets
-    assert len(sched_without["main"]) > 0
-    assert len(sched_without["main"][0]["nodes"]) > 0
+    # Helper to count total nodes across all batches
+    def count_nodes(batches: list) -> int:
+        return sum(len(batch["nodes"]) for batch in batches)
 
-    # With a very high threshold (100), no subnet should qualify
+    # Without threshold: all 42 subnets qualify -> 635 healthy nodes scheduled
+    assert count_nodes(sched_without["main"]) == 635
+
+    # With threshold 100: no subnet qualifies -> 0 nodes scheduled
     assert len(sched_high["main"]) == 0
 
-    # With low threshold (5), we should get some nodes (subnets with > 5 healthy nodes)
-    assert len(sched_low["main"]) > 0
-    assert len(sched_low["main"][0]["nodes"]) > 0
+    # With threshold 5: all 42 subnets qualify -> 635 nodes scheduled
+    assert count_nodes(sched_5["main"]) == 635
+
+    # With threshold 12: 41 subnets qualify (mkbc3's 12 nodes excluded) -> 623 nodes
+    assert count_nodes(sched_12["main"]) == 623
 
 
 def test_subnet_healthy_threshold_percentage(
     mocker: Any, registry: dre.RegistrySnapshot
 ) -> None:
-    """Tests that subnet_healthy_threshold works with percentage values."""
+    """Tests that subnet_healthy_threshold works with percentage values.
+
+    The mock registry contains 42 subnets with 635 total healthy assigned nodes:
+    - 41 subnets with 100% healthy nodes
+    - 1 subnet (mkbc3-...) with 12/13 healthy nodes (92.31%)
+
+    When a subnet doesn't qualify due to threshold, all its healthy nodes are excluded.
+    """
     # With 99% threshold: only subnets with > 99% healthy nodes qualify
-    spec_high_percentage = textwrap.dedent("""\
+    # 41 subnets are 100% healthy, mkbc3 is 92.31% -> 623 nodes (635 - 12)
+    spec_99_percent = textwrap.dedent("""\
         stages:
           main:
             selectors:
@@ -340,8 +379,23 @@ def test_subnet_healthy_threshold_percentage(
         suspend_at: 15:00
         minimum_minutes_per_batch: 30
         """)
-    # With 50% threshold: subnets with > 50% healthy nodes qualify
-    spec_low_percentage = textwrap.dedent("""\
+    # With 92% threshold: subnets with > 92% healthy qualify
+    # mkbc3 is 92.31% which is > 92%, so all 42 subnets qualify -> 635 nodes
+    spec_92_percent = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 92%
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With 50% threshold: all subnets have > 50% healthy -> all 635 nodes
+    spec_50_percent = textwrap.dedent("""\
         stages:
           main:
             selectors:
@@ -356,17 +410,28 @@ def test_subnet_healthy_threshold_percentage(
         """)
     mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
 
-    sched_high = schedule(
+    sched_99 = schedule(
         IC_NETWORKS["mainnet"],
-        {"simulate": True, "plan": spec_high_percentage, "git_revision": "0"},
+        {"simulate": True, "plan": spec_99_percent, "git_revision": "0"},
     )
-    sched_low = schedule(
+    sched_92 = schedule(
         IC_NETWORKS["mainnet"],
-        {"simulate": True, "plan": spec_low_percentage, "git_revision": "0"},
+        {"simulate": True, "plan": spec_92_percent, "git_revision": "0"},
+    )
+    sched_50 = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_50_percent, "git_revision": "0"},
     )
 
-    # With 50% threshold, we should get nodes from most subnets
-    assert len(sched_low["main"]) > 0
+    # Helper to count total nodes across all batches
+    def count_nodes(batches: list) -> int:
+        return sum(len(batch["nodes"]) for batch in batches)
 
-    # High percentage threshold should result in fewer or equal batches than low
-    assert len(sched_high["main"]) <= len(sched_low["main"])
+    # With 99% threshold: 41 subnets qualify (mkbc3's 12 nodes excluded) -> 623 nodes
+    assert count_nodes(sched_99["main"]) == 623
+
+    # With 92% threshold: all 42 subnets qualify (mkbc3 at 92.31% > 92%) -> 635 nodes
+    assert count_nodes(sched_92["main"]) == 635
+
+    # With 50% threshold: all 42 subnets qualify -> 635 nodes
+    assert count_nodes(sched_50["main"]) == 635

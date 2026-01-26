@@ -1,4 +1,3 @@
-# mypy: disable-error-code=unused-ignore
 """
 Schedule-only DAG for IC OS HostOS rollout.
 
