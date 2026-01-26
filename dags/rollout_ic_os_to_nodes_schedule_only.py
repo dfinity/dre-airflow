@@ -11,12 +11,12 @@ import os
 import sys
 
 import pendulum
-from airflow import __version__
 from airflow.decorators import dag, task
 from airflow.models.param import Param
-
 from dfinity.ic_types import IC_NETWORKS
 from operators import hostos_rollout as hostos_operators
+
+from airflow import __version__
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))
