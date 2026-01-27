@@ -258,6 +258,7 @@ export type HostOsNodeSpecifier = {
     datacenter: string | null
     group_by: "datacenter" | "subnet" | null
     status: "Healthy" | "Degraded" | "Dead" | null
+    subnet_healthy_threshold: number | string | null
 }
 
 export type HostOsNodeAggregator = {
@@ -321,6 +322,10 @@ export function formatSpecifier(selector: HostOsNodeSpecifier): string {
         s = `${s} not assigned to any subnet`;
     } else if (selector.assignment === "API boundary") {
         s = `${s} assigned to API boundary duty`;
+    }
+
+    if (selector.subnet_healthy_threshold !== null) {
+        s = `${s} (subnet health > ${selector.subnet_healthy_threshold})`;
     }
 
     return s.trim();

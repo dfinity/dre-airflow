@@ -195,6 +195,8 @@ NodeSelector = TypedDict(
         "status": NodeStatus,
         # Either a literal number of nodes or a float 0-1 for a percentage of nodes.
         "nodes_per_group": int | float,
+        # Filter nodes to only those in subnets with healthy node count exceeding
+        "subnet_healthy_threshold": int | float,
         "join": list["NodeSelector"],
         "intersect": list["NodeSelector"],
         "not": "NodeSelector",
@@ -230,11 +232,31 @@ def to_specifier(specifier: dict[str, Any] | NodeSelector) -> NodeSelector:
         except ValueError as e:
             assert 0, f"nodes_per_group is not float, integer or percentage: {e}"
         specifier["nodes_per_group"] = nodes_per_group
+    if "subnet_healthy_threshold" in specifier:
+        subnet_healthy_threshold = specifier["subnet_healthy_threshold"]
+        try:
+            subnet_healthy_threshold = intorfloatbounded(subnet_healthy_threshold)
+        except ValueError as e:
+            assert 0, (
+                f"subnet_healthy_threshold is not float, integer or percentage: {e}"
+            )
+        specifier["subnet_healthy_threshold"] = subnet_healthy_threshold
+        assert specifier.get("assignment") == "assigned", (
+            "subnet_healthy_threshold requires assignment: assigned"
+        )
     assert specifier.get("status") in ["Healthy", "Degraded", "Down", None], (
         "the status key is not either one of Healthy, Degraded or Down"
     )
     remaining_keys = set(specifier.keys()) - set(
-        ["assignment", "owner", "group_by", "status", "nodes_per_group", "datacenter"]
+        [
+            "assignment",
+            "owner",
+            "group_by",
+            "status",
+            "nodes_per_group",
+            "datacenter",
+            "subnet_healthy_threshold",
+        ]
     )
     assert not remaining_keys, f"extraneous keys found in selector: {remaining_keys}"
     assert (

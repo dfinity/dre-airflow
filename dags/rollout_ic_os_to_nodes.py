@@ -84,6 +84,11 @@ A selector is either:
   (up to an absolute number if the key `nodes_per_group` is an integer, or a
   0-100 percentage if the key is a number postfixed by %).
 
+  If `subnet_healthy_threshold` is specified (requires `assignment: assigned`),
+  only nodes from subnets with enough healthy nodes are included.  The threshold
+  can be an integer (e.g. `7` means subnets with more than 7 healthy nodes) or a
+  percentage (e.g. `80%` means subnets with more than 80% healthy nodes).
+
   Finally, the groups (or single group if no `group_by` was specified) are
   collated into a single list of resulting nodes.
 * A dictionary that specifies an `intersect` key with a list of selectors.
