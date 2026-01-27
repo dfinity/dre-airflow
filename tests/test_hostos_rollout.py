@@ -435,3 +435,87 @@ def test_subnet_healthy_threshold_percentage(
 
     # With 50% threshold: all 42 subnets qualify -> 635 nodes
     assert count_nodes(sched_50["main"]) == 635
+
+
+def test_subnet_healthy_threshold_float(
+    mocker: Any, registry: dre.RegistrySnapshot
+) -> None:
+    """Tests that subnet_healthy_threshold works with float values between 0 and 1.
+
+    The mock registry contains 42 subnets with 635 total healthy assigned nodes:
+    - 41 subnets with 100% healthy nodes
+    - 1 subnet (mkbc3-...) with 12/13 healthy nodes (92.31%)
+
+    When a subnet doesn't qualify due to threshold, all its healthy nodes are excluded.
+    """
+    # With 0.99 threshold: only subnets with > 99% healthy nodes qualify
+    # 41 subnets are 100% healthy, mkbc3 is 92.31% -> 623 nodes (635 - 12)
+    spec_99_float = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 0.99
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With 0.92 threshold: subnets with > 92% healthy qualify
+    # mkbc3 is 92.31% which is > 92%, so all 42 subnets qualify -> 635 nodes
+    spec_92_float = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 0.92
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    # With 0.5 threshold: all subnets have > 50% healthy -> all 635 nodes
+    spec_50_float = textwrap.dedent("""\
+        stages:
+          main:
+            selectors:
+              assignment: assigned
+              group_by: subnet
+              nodes_per_group: 1
+              status: Healthy
+              subnet_healthy_threshold: 0.5
+        resume_at: 7:00
+        suspend_at: 15:00
+        minimum_minutes_per_batch: 30
+        """)
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+
+    sched_99 = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_99_float, "git_revision": "0"},
+    )
+    sched_92 = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_92_float, "git_revision": "0"},
+    )
+    sched_50 = schedule(
+        IC_NETWORKS["mainnet"],
+        {"simulate": True, "plan": spec_50_float, "git_revision": "0"},
+    )
+
+    # Helper to count total nodes across all batches
+    def count_nodes(batches: list[Any]) -> int:
+        return sum(len(batch["nodes"]) for batch in batches)
+
+    # With 0.99 threshold: 41 subnets qualify (mkbc3's 12 nodes excluded) -> 623 nodes
+    assert count_nodes(sched_99["main"]) == 623
+
+    # With 0.92 threshold: all 42 subnets qualify (mkbc3 at 92.31% > 92%) -> 635 nodes
+    assert count_nodes(sched_92["main"]) == 635
+
+    # With 0.5 threshold: all 42 subnets qualify -> 635 nodes
+    assert count_nodes(sched_50["main"]) == 635
