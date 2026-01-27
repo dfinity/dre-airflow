@@ -175,13 +175,11 @@ def apply_selectors(
     # This filters out nodes whose subnet doesn't meet the health threshold.
     if subnet_healthy_threshold := selector.get("subnet_healthy_threshold"):
         # Compute subnet health from all registry nodes
-        subnet_health: dict[str | None, int] = collections.defaultdict(int)
-        subnet_size: dict[str | None, int] = collections.defaultdict(int)
-        for node in all_registry_nodes:
-            if node["subnet_id"] is not None:
-                subnet_size[node["subnet_id"]] += 1
-                if node["status"] == "Healthy":
-                    subnet_health[node["subnet_id"]] += 1
+        assigned_nodes = [n for n in all_registry_nodes if n["subnet_id"] is not None]
+        subnet_size = collections.Counter(n["subnet_id"] for n in assigned_nodes)
+        subnet_health = collections.Counter(
+            n["subnet_id"] for n in assigned_nodes if n["status"] == "Healthy"
+        )
 
         # Determine which subnets meet the threshold
         def subnet_meets_threshold(subnet_id: str | None) -> bool:
