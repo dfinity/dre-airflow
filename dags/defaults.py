@@ -33,7 +33,7 @@ Thursday:
   9:00:      [yinp6, bkfrj, jtdsg]
   11:00:     [mpubz, x33ed, gmq5v]
   13:00:     [3hhby, nl6hn, pzp6e]
-  15:00:     [rtvil, xlkub]
+  15:00:     [rtvil, xlkub, 3zsyy]
 Monday next week:
   7:00:
     subnets: [tdb26]

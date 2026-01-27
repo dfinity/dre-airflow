@@ -48,6 +48,7 @@ class DagParams(typing.TypedDict):
     git_revision: str
     plan: str
     simulate: bool
+    msd: str
 
 
 BatchSpec = tuple[datetime.datetime, list[str]]
@@ -115,6 +116,13 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 title="Simulate",
                 description="If enabled (the default), the update proposal will be"
                 " simulated but not created, and its acceptance will be simulated too.",
+            ),
+            "msd": Param(
+                "https://service-discovery.ch1-obs1.dfinity.network/targets",
+                type="string",
+                title="Multiservice discovery endpoint to fetch targets",
+                description="Needed for running GET requests to ensure that the"
+                " boundary nodes are healthy.",
             ),
         },
     )
@@ -207,7 +215,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
         ) -> PokeReturnValue:
             return PokeReturnValue(
                 is_done=ic_os_sensor.have_api_boundary_nodes_stopped_alerting(
-                    nodes, network
+                    nodes, network, params["msd"]
                 )
             )
 
