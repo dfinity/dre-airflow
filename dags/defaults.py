@@ -21,7 +21,8 @@ Tuesday:
   7:00:      [pjljw, qdvhd, 2fq7c]
   9:00:      [snjp4, w4asl, qxesv]
   11:00:     [4zbus, ejbmu, uzr34]
-  13:00:     [c4isl, mkbc3, vcpt7]
+  13:00:     [re2t4, c4isl]
+  15:00:     [mkbc3, vcpt7]
 Wednesday:
   7:00:      [pae4o, 5kdm2, csyj4]
   9:00:      [eq6en, lhg73, brlsh]
