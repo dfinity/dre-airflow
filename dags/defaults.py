@@ -48,6 +48,7 @@ nodes:
   - 4fssn-4vi43-2qufr-hlrfz-hfohd-jgrwc-7l7ok-uatwb-ukau7-lwmoz-tae
   - 4p3lu-7sy3a-ph47t-wlvb6-naehi-oki2f-pkokv-hovam-s5iul-sxvwk-3ae
   - 5dpkp-lfhr2-j7mfz-gavpn-puej5-wdfzg-fw42o-zupnu-izvk3-ubzzi-6ae
+  - 74dcj-ui3qb-pzfzv-yxfik-hgh5v-42d2t-rwxpu-yiia3-yr3vn-24kya-tae
   - atrq6-prjsa-w2b32-gyukj-ivjd6-kc4gq-ufi6v-yier6-puxtx-n2ipp-fqe
   - bcbz4-w2ogq-jt7xk-xd7b2-ylhei-ygp3n-pjpdy-253tu-fpn3s-f5asy-fqe
   - bfj6y-cmhcf-6fxs7-ku2u4-tucww-b2eej-2dmap-snurk-3yaks-ss7xe-rae
@@ -55,7 +56,6 @@ nodes:
   - dl74z-6vpps-k6bpu-5hjsj-fb6lb-34tsv-ue5gt-bdkjn-35pt5-fdu2a-rae
   - ec62l-q44va-5lyw2-gbl4w-xcx55-c3qv4-q67vc-fu6s7-xpm2r-7tjrw-tae
   - ek6px-kxr47-noli7-nyjql-au5uc-tmj3k-777mf-lfla5-k4xx4-msu3j-dae
-  - gvqb5-b2623-3twpd-mruy4-3grts-agp2t-wgmt4-hspvj-5oyl6-kje32-aqe
   - jlifv-mddo3-zfwdc-x2wmu-xklbj-dai3i-3pvjy-j4hqm-sarqr-fhkq6-zae
   - lwxeh-xayoz-wu5eb-hwraj-a3pew-yeioj-cnwat-5uow4-ugxkc-kx44o-4ae
   - mbsyf-dtlsd-ccjq4-63rmh-u2lv7-dwxuq-ym6bk-63i2l-5uyki-zccek-mqe
