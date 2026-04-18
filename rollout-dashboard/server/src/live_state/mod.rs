@@ -1,8 +1,10 @@
-use crate::airflow_client::TasksResponse;
+use crate::airflow_client::{
+    DagRunsQueryFilter, DagRunsQueryOrder, OrderBy, PagingParameters, TasksResponse,
+};
 use crate::live_state::log_inspector::{AirflowIncrementalLogInspector, DagRunUpdatesRequired};
 
 use super::airflow_client::{
-    AirflowClient, AirflowError, DagRunsResponseItem, DagsQueryFilter, TaskInstanceRequestFilters,
+    AirflowClient, AirflowError, DagRunsResponseItem, TaskInstancesQueryFilter,
     TaskInstancesResponseItem,
 };
 use super::types::v2::{Rollout, RolloutEngineState, RolloutKind};
@@ -39,8 +41,6 @@ mod plan;
 mod python;
 mod task_sorter;
 
-// Lotsa tasks in the HostOS rollout.
-const TASK_INSTANCE_LIST_LIMIT: usize = 750;
 const LOG_TARGET: &str = "live_state";
 
 /// Compares two Option(DateTimes) and returns the latest one if
@@ -569,7 +569,7 @@ impl AirflowStateSyncer<Live> {
         // Retrieve the state of each DAG.
         let mut dags_response = self
             .airflow_api
-            .dags(1000, 0, &DagsQueryFilter::default(), None)
+            .dags(Default::default(), Default::default())
             .await?;
         dags_response.dags.retain(|dag| {
             Parser::valid_dag_ids()
@@ -656,7 +656,7 @@ impl AirflowStateSyncer<Live> {
                         let (runs_result, audit_result) = join!(
                             // Retrieve the latest X DAG runs for the DAG we're operating with.
                             self.airflow_api
-                                .dag_runs(&dis, max_rollouts, 0, None, None),
+                                .dag_runs(&dis, PagingParameters::new(max_rollouts, 0), DagRunsQueryFilter::default().order_by(OrderBy::Descending(DagRunsQueryOrder::StartDate))),
                                 // Call the log inspectors to determine which tasks need to be updated.
                                 // Each log inspector knows about all updated tasks of all DAG runs for a DAG.
                                 // Then insert any newly needed inspector into the in-flight inspectors map.
@@ -730,7 +730,7 @@ impl AirflowStateSyncer<Live> {
             async move || {
                 let tgt = &format!("{}::{}", LOG_TARGET, rollout_state.dag_id);
                 let retrieved_task_instances: Vec<TaskInstancesResponseItem> = match (dag_run_update_type, rollout_state.last_update_time)     {
-                    (log_inspector::DagRunUpdateType::AllTaskInstances, _) | (_, None)=> {
+                     (log_inspector::DagRunUpdateType::AllTaskInstances, _) | (_, None)=> {
                         // We are retrieving all the tasks once again.
                         // Evacuate the existing task list.
                         rollout_state.task_instances = IndexMap::new();
@@ -739,25 +739,15 @@ impl AirflowStateSyncer<Live> {
                             .task_instances(
                                 &rollout_state.dag_id.to_string(),
                                 &rollout_state.dag_run_id.to_string(),
-                                TASK_INSTANCE_LIST_LIMIT,
-                                0,
-                                TaskInstanceRequestFilters::default(),
+                                Default::default(),
+                                TaskInstancesQueryFilter::default()/* Airflow 3-only.order_by(OrderBy::Ascending(TaskInstancesQueryOrder::StartDate)) */,
                             )
                             .await?.task_instances
                     }
                     (log_inspector::DagRunUpdateType::SomeTaskInstances(updated_task_instances), Some(lut)) => {
                         let updated_task_instances =
                             updated_task_instances.iter().cloned().collect::<Vec<_>>();
-                        debug!(
-                            target: tgt,
-                            "{}: collecting data about task instances updated since {}{}.",
-                            rollout_state.dag_run_id,
-                            lut,
-                            match updated_task_instances.is_empty() {
-                                true => "".to_string(),
-                                false => format!(" and a specific set of tasks too: {:?}", updated_task_instances),
-                            }
-                        );
+                        debug!(target: tgt, "{}: collecting data about task instances updated since {} and a specific set of tasks too: {:?}.", rollout_state.dag_run_id, lut, updated_task_instances);
                         [
                             self.airflow_api
                                 .task_instances_batch(
@@ -770,30 +760,27 @@ impl AirflowStateSyncer<Live> {
                                 .task_instances(
                                     &rollout_state.dag_id.to_string(),
                                     &rollout_state.dag_run_id.to_string(),
-                                    TASK_INSTANCE_LIST_LIMIT,
-                                    0,
-                                    TaskInstanceRequestFilters::default()
-                                        .executed_on_or_after(Some(lut)),
+                                    Default::default(),
+                                    TaskInstancesQueryFilter::default()
+                                        .execution_date_gte(lut),
                                 )
                                 .await?.task_instances,
                             self.airflow_api
                                 .task_instances(
                                     &rollout_state.dag_id.to_string(),
                                     &rollout_state.dag_run_id.to_string(),
-                                            TASK_INSTANCE_LIST_LIMIT,
-                                    0,
-                                    TaskInstanceRequestFilters::default()
-                                        .updated_on_or_after(Some(lut)),
+                                            Default::default(),
+                                    TaskInstancesQueryFilter::default()
+                                        .updated_at_gte(lut),
                                 )
                                 .await?.task_instances,
                             self.airflow_api
                                 .task_instances(
                                     &rollout_state.dag_id.to_string(),
                                     &rollout_state.dag_run_id.to_string(),
-                                            TASK_INSTANCE_LIST_LIMIT,
-                                    0,
-                                    TaskInstanceRequestFilters::default()
-                                        .ended_on_or_after(Some(lut)),
+                                            Default::default(),
+                                    TaskInstancesQueryFilter::default()
+                                        .end_date_gte(lut),
                                 )
                                 .await?.task_instances,
                         ].concat()
