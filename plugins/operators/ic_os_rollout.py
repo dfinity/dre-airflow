@@ -25,6 +25,7 @@ from dfinity.ic_os_rollout import (
     SubnetRolloutPlanWithRevision,
     assign_default_revision,
     check_plan,
+    hotfix_planner,
     rollout_planner,
     subnet_id_and_git_revision_from_args,
 )
@@ -274,6 +275,31 @@ class NotifyAboutStalledSubnet(slack.SlackAPIPostOperator):
         )
 
 
+class NotifyManualApprovalNeeded(slack.SlackAPIPostOperator):
+    template_fields = ("text",)
+
+    def __init__(
+        self,
+        batch_name: str,
+        _ignored: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        dr_dre_slack_id = DR_DRE_SLACK_ID
+        text = (
+            f"""Hotfix rollout batch {batch_name} needs"""
+            f""" manual approval. <!subteam^{dr_dre_slack_id}>"""
+            """ please approve in the Airflow UI to proceed."""
+        )
+        slack.SlackAPIPostOperator.__init__(
+            self,
+            channel=SLACK_CHANNEL,
+            username="Airflow",
+            text=text,
+            slack_conn_id=SLACK_CONNECTION_ID,
+            **kwargs,
+        )
+
+
 class UpgradeUnassignedNodes(BaseOperator):
     template_fields = ("simulate",)
     network: ic_types.ICNetwork
@@ -346,6 +372,48 @@ def schedule(
     except Exception as e:
         print("Cannot proceed with rollout plan as planned: %s" % e)
         raise AirflowException("Unsafe rollout plan")
+
+    return plan
+
+
+@task
+def hotfix_schedule(
+    network: ic_types.ICNetwork,
+    canary_abbreviations: list[str],
+    batch_abbreviations: list[str],
+    **context: dict[str, Any],
+) -> SubnetRolloutPlanWithRevision:
+    git_revision = "{:040}".format(
+        context["task"].render_template(  # type: ignore
+            "{{ params.git_revision }}",
+            context,
+        )
+    )
+    subnet_list_source = dre.DRE(
+        network=network,
+        subprocess_hook=SubprocessHook(),
+    ).get_subnet_list
+
+    plan = hotfix_planner(
+        canary_abbreviations,
+        batch_abbreviations,
+        subnet_list_source,
+        git_revision,
+    )
+
+    canary_count = len(canary_abbreviations)
+    for nstr, (_, members) in plan.items():
+        batch_idx = int(nstr)
+        if batch_idx < canary_count:
+            label = f"Canary {batch_idx + 1}"
+        else:
+            label = f"Batch {batch_idx - canary_count + 1}"
+        print(f"{label}:")
+        for item in members:
+            print(
+                f"    Subnet {item.subnet_id} ({item.subnet_num}) will be"
+                f" rolled out to git revision {item.git_revision}."
+            )
 
     return plan
 

@@ -4,7 +4,7 @@ Rollout IC os to subnets.
 
 import datetime
 import re
-from typing import Callable, NotRequired, TypeAlias, TypedDict, cast
+from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, cast
 
 from dfinity.ic_types import (
     SubnetRolloutInstance,
@@ -26,6 +26,8 @@ SLACK_CHANNEL = "#eng-release-bots"
 SLACK_CONNECTION_ID = "slack.ic_os_rollout"
 DR_DRE_SLACK_ID = "S05GPUNS7EX"
 MAX_BATCHES: int = 30
+HOTFIX_MAX_BATCHES: int = 30
+NNS_SUBNET_PREFIX = "tdb26"
 
 # To be deleted when we upgrade to Airflow 2.11.
 PLAN_FORM = """
@@ -349,6 +351,134 @@ def check_plan(plan: SubnetRolloutPlanWithRevision) -> None:
                 )
                 % (pzp6e_start_time, uzr34_start_time, delta)
             )
+
+
+def extract_subnets_from_plan(
+    plan_yaml: str,
+) -> tuple[list[str], list[str]]:
+    """Extract canary and batch subnets from a rollout plan.
+
+    Parses the weekly rollout plan YAML and returns Monday subnets
+    (canary) and all remaining subnets separately.
+
+    Returns:
+        (canary_subnets, batch_subnets) where canary_subnets are the
+        Monday subnets and batch_subnets are all others.
+    """
+    import yaml
+
+    def _extract(spec: "list[Any] | dict[str, Any]") -> list[str]:
+        result: list[str] = []
+        if isinstance(spec, list):
+            result.extend(str(s) for s in spec)
+        elif isinstance(spec, dict):
+            for s in spec.get("subnets", []):
+                result.append(str(s["subnet"]) if isinstance(s, dict) else str(s))
+        return result
+
+    plan = yaml.safe_load(plan_yaml)
+    canary_subnets: list[str] = []
+    batch_subnets: list[str] = []
+
+    for day, hours in plan.items():
+        for _time, spec in hours.items():
+            if day == "Monday":
+                canary_subnets.extend(_extract(spec))
+            else:
+                batch_subnets.extend(_extract(spec))
+
+    return canary_subnets, batch_subnets
+
+
+def hotfix_planner(
+    canary_abbreviations: list[str],
+    batch_abbreviations: list[str],
+    subnet_list_source: Callable[[], list[str]],
+    git_revision: str,
+    subnets_per_batch: int = 3,
+) -> SubnetRolloutPlanWithRevision:
+    """Plan a hotfix rollout: canary subnets then batches of N, NNS last.
+
+    Canary subnets each get their own batch (for manual approval).
+    The remaining non-NNS subnets are grouped into batches of
+    `subnets_per_batch`.  The NNS subnet (tdb26) is always in the
+    final batch alone.
+
+    Args:
+        canary_abbreviations: Subnet ID prefixes for canary (one per batch).
+        batch_abbreviations: Subnet ID prefixes for remaining subnets.
+        subnet_list_source: Callable returning full subnet principal IDs.
+        git_revision: The git revision to deploy to all subnets.
+        subnets_per_batch: Subnets per batch after the canary.
+
+    Raises:
+        ValueError: If the resulting batch count exceeds HOTFIX_MAX_BATCHES.
+    """
+    subnet_list = subnet_list_source()
+
+    def resolve(abbreviations: list[str]) -> list[tuple[int, str]]:
+        resolved: list[tuple[int, str]] = []
+        for abbrev in abbreviations:
+            matches = [
+                (i, s) for i, s in enumerate(subnet_list) if s.startswith(abbrev)
+            ]
+            if not matches:
+                raise ValueError(
+                    f"subnet abbreviation {abbrev!r} not found in subnet list"
+                )
+            if len(matches) > 1:
+                raise ValueError(
+                    f"subnet abbreviation {abbrev!r} is ambiguous"
+                )
+            resolved.append(matches[0])
+        return resolved
+
+    canary_resolved = resolve(canary_abbreviations)
+    batch_resolved = resolve(batch_abbreviations)
+
+    # Separate NNS subnet from batch subnets.
+    nns = [(n, s) for n, s in batch_resolved if s.startswith(NNS_SUBNET_PREFIX)]
+    non_nns = [(n, s) for n, s in batch_resolved if not s.startswith(NNS_SUBNET_PREFIX)]
+
+    # Build batches: canary (one per batch), then groups, then NNS.
+    batches: list[list[tuple[int, str]]] = []
+
+    for subnet in canary_resolved:
+        batches.append([subnet])
+
+    for i in range(0, len(non_nns), subnets_per_batch):
+        batches.append(non_nns[i : i + subnets_per_batch])
+
+    # NNS last.
+    if nns:
+        batches.append(nns)
+
+    if len(batches) > HOTFIX_MAX_BATCHES:
+        raise ValueError(
+            f"Too many batches ({len(batches)}) for hotfix rollout."
+            f" Maximum supported is {HOTFIX_MAX_BATCHES}."
+        )
+
+    dummy_time = datetime.datetime(
+        2000, 1, 1, tzinfo=datetime.timezone.utc
+    )
+
+    plan: SubnetRolloutPlanWithRevision = {}
+    for batch_index, members in enumerate(batches):
+        plan[str(batch_index)] = (
+            dummy_time,
+            [
+                SubnetRolloutInstanceWithRevision(
+                    start_at=dummy_time,
+                    subnet_num=subnet_num,
+                    subnet_id=subnet_id,
+                    git_revision=git_revision,
+                )
+                for subnet_num, subnet_id in members
+            ],
+        )
+
+    return plan
 
 
 class TimetableSpec(TypedDict):
