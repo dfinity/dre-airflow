@@ -29,7 +29,7 @@ finally:
 
 
 DEFAULT_ROLLOUT_PLAN_SHEETS = {
-    "mainnet": "1ZcYB0gWjbgg7tFgy2Fhd3llzYlefJIb0Mik75UUrSXM",
+    "mainnet": "1c9GUWBGVGeg3-EmheQbvw9vPPXxQ7GqsNDjheI7UoCg",
 }
 
 if "2.9" in __version__:
