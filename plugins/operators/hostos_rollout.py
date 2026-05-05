@@ -44,7 +44,16 @@ DFINITY: NodeProviderId = (
     "bvcsg-3od6r-jnydw-eysln-aql7w-td5zn-ay5m6-sibd2-jzojt-anwag-mqe"
 )
 
+# Node reward types whose nodes must never be part of a HostOS rollout.
+# Currently used to exclude type4 nodes.
+EXCLUDED_NODE_REWARD_TYPE_PREFIXES: tuple[str, ...] = ("type4",)
+
 LOGGER = logging.getLogger(__name__)
+
+
+def _is_excluded_node_type(n: dre.RegistryNode) -> bool:
+    """Return True if the node should be globally excluded from HostOS rollouts."""
+    return n["node_reward_type"].startswith(EXCLUDED_NODE_REWARD_TYPE_PREFIXES)
 
 
 class DagParams(typing.TypedDict):
@@ -241,9 +250,13 @@ def compute_actual_plan_for_batch(
     possibility that nodes may have changed assignment in the meantime, or
     may have changed health status.
     """
-    # Exclude all upgraded nodes already.
+    # Exclude all upgraded nodes already, plus any nodes whose reward type
+    # is globally opted out of HostOS rollouts (see
+    # EXCLUDED_NODE_REWARD_TYPE_PREFIXES).
     remaining_nodes = [
-        n for n in registry["nodes"] if n["hostos_version_id"] != git_revision
+        n
+        for n in registry["nodes"]
+        if n["hostos_version_id"] != git_revision and not _is_excluded_node_type(n)
     ]
     dcs_owned_by_dfinity = set(
         d["dc_id"]
@@ -296,9 +309,13 @@ def compute_provisional_node_batches(
     expects the specific selectors for the single batch that will do the work,
     and does not iteratively reduce the number of nodes available.
     """
-    # Exclude all upgraded nodes already.
+    # Exclude all upgraded nodes already, plus any nodes whose reward type
+    # is globally opted out of HostOS rollouts (see
+    # EXCLUDED_NODE_REWARD_TYPE_PREFIXES).
     remaining_nodes = [
-        n for n in registry["nodes"] if n["hostos_version_id"] != git_revision
+        n
+        for n in registry["nodes"]
+        if n["hostos_version_id"] != git_revision and not _is_excluded_node_type(n)
     ]
     dcs_owned_by_dfinity = set(
         d["dc_id"]

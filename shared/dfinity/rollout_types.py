@@ -12,6 +12,7 @@ type NodeProviderId = str
 type DCId = str
 type NodeStatus = Literal["Healthy"] | Literal["Degraded"] | Literal["Down"]
 type HostOsVersion = str
+type NodeRewardType = str
 
 type DaysOfWeek = (
     Literal["Monday"]
