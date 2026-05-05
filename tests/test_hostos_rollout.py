@@ -249,6 +249,73 @@ def test_exclude_hk_nodes(mocker: Any, registry: dre.RegistrySnapshot) -> None:
     )
 
 
+def test_type4_nodes_are_globally_excluded(
+    mocker: Any, registry: dre.RegistrySnapshot
+) -> None:
+    """type4* nodes are globally opted out of HostOS rollouts.
+
+    Regardless of which selectors a rollout plan uses, a node whose
+    node_reward_type starts with "type4" must never appear in any batch.
+    """
+    # Relabel a handful of healthy nodes (a mix of assigned, unassigned and
+    # API boundary) as type4* to verify they all get filtered out.
+    apibn_ids = set(s["principal"] for s in registry["api_bns"])
+    relabelled_assigned = 0
+    relabelled_unassigned = 0
+    relabelled_apibn = 0
+    type4_node_ids: set[str] = set()
+    for n in registry["nodes"]:
+        if n["status"] != "Healthy":
+            continue
+        if n["node_id"] in apibn_ids and relabelled_apibn < 2:
+            n["node_reward_type"] = "type4"
+            type4_node_ids.add(n["node_id"])
+            relabelled_apibn += 1
+        elif n["subnet_id"] is not None and relabelled_assigned < 5:
+            n["node_reward_type"] = "type4.1"
+            type4_node_ids.add(n["node_id"])
+            relabelled_assigned += 1
+        elif (
+            n["subnet_id"] is None
+            and n["node_id"] not in apibn_ids
+            and relabelled_unassigned < 5
+        ):
+            n["node_reward_type"] = "type4.2"
+            type4_node_ids.add(n["node_id"])
+            relabelled_unassigned += 1
+    assert relabelled_assigned and relabelled_unassigned and relabelled_apibn, (
+        "expected to relabel some healthy nodes of each kind as type4*"
+    )
+
+    sys.path.append(os.path.dirname(os.path.dirname("{__file__}")))
+    try:
+        from dags.defaults import DEFAULT_HOSTOS_ROLLOUT_PLANS
+    finally:
+        sys.path.pop()
+
+    params: DagParams = {
+        "simulate": True,
+        "plan": DEFAULT_HOSTOS_ROLLOUT_PLANS["mainnet"],
+        "git_revision": "0",
+    }
+    mocker.patch("dfinity.dre.DRE.get_registry", return_value=registry)
+    sched = schedule(IC_NETWORKS["mainnet"], params)
+
+    scheduled_node_ids: set[str] = set()
+    for batches in (
+        sched["canary"],
+        sched["main"],
+        sched["unassigned"],
+        sched["stragglers"],
+    ):
+        for batch in batches:
+            for node in batch["nodes"]:
+                scheduled_node_ids.add(node["node_id"])
+
+    leaked = scheduled_node_ids & type4_node_ids
+    assert not leaked, f"type4* nodes leaked into the rollout schedule: {leaked}"
+
+
 def test_subnet_healthy_threshold_filters_unhealthy_subnets(
     mocker: Any, registry: dre.RegistrySnapshot
 ) -> None:

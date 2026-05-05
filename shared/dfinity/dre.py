@@ -65,7 +65,7 @@ class RegistryNode(TypedDict):
     dc_id: rollout_types.DCId
     node_provider_id: rollout_types.NodeProviderId
     status: rollout_types.NodeStatus
-    #  "node_type": "type1.1"
+    node_reward_type: rollout_types.NodeRewardType
 
 
 class RegistrySubnet(TypedDict):
