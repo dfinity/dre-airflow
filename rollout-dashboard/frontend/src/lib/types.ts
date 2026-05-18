@@ -70,6 +70,10 @@ const GuestOsState = {
         icon: "⏩",
         name: "upgrading unassigned nodes",
     },
+    upgrading_cloud_engines: {
+        icon: "⏩",
+        name: "upgrading cloud engines",
+    },
     waiting: { icon: "⌛", name: "waiting" },
     problem: { icon: "⚠️", name: "problem" },
 };

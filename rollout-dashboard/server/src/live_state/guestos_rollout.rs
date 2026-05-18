@@ -472,6 +472,25 @@ impl Parser {
                     }
                     None => {}
                 }
+            } else if task_instance.task_id == "upgrade_cloud_engines" {
+                match task_instance.state {
+                    Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
+                    Some(TaskInstanceState::UpForRetry) | Some(TaskInstanceState::Restarting) => {
+                        rollout.state = State::Problem
+                    }
+                    Some(TaskInstanceState::Failed) | Some(TaskInstanceState::UpstreamFailed) => {
+                        rollout.state = State::Failed
+                    }
+                    Some(TaskInstanceState::UpForReschedule)
+                    | Some(TaskInstanceState::Running)
+                    | Some(TaskInstanceState::Deferred)
+                    | Some(TaskInstanceState::Queued)
+                    | Some(TaskInstanceState::Scheduled)
+                    | Some(TaskInstanceState::Success) => {
+                        update_state_unless_problem!(State::UpgradingCloudEngines)
+                    }
+                    None => {}
+                }
             } else {
                 warn!(target: tgt, "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)
             }

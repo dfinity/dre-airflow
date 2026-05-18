@@ -72,6 +72,8 @@ class RegistrySubnet(TypedDict):
     subnet_id: PossibleSubnetId
     membership: list[rollout_types.NodeId]
     nodes: dict[rollout_types.NodeId, RegistryNode]
+    # One of "application", "verified_application", "system", "cloud_engine".
+    subnet_type: str
     #  "max_ingress_bytes_per_message": 2097152,
     #  "max_ingress_messages_per_block": 1000,
     #  "max_block_payload_size": 4194304,
@@ -81,7 +83,6 @@ class RegistrySubnet(TypedDict):
     #  "dkg_interval_length": 499,
     #  "dkg_dealings_per_block": 1,
     #  "start_as_nns": false,
-    #  "subnet_type": "application",
     #  "features": {
     #    "canister_sandboxing": false,
     #    "http_requests": true,
@@ -422,6 +423,17 @@ class DRE:
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
         return cast(list[str], json.loads(r.output))
+
+    def get_cloud_engine_subnet_ids(self) -> list[rollout_types.SubnetId]:
+        """
+        Return the subnet IDs of all subnets registered with type `cloud_engine`.
+        """
+        snapshot = self.get_registry()
+        return [
+            cast(rollout_types.SubnetId, s["subnet_id"])
+            for s in snapshot["subnets"]
+            if s.get("subnet_type") == "cloud_engine" and s.get("subnet_id")
+        ]
 
     def get_blessed_replica_versions(self) -> list[str]:
         r = self.run("get", "blessed-replica-versions", "--json", full_stdout=True)
