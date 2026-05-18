@@ -303,6 +303,102 @@ class UpgradeUnassignedNodes(BaseOperator):
             raise AirflowException("dre exited with status code %d", p.exit_code)
 
 
+class UpgradeCloudEngines(BaseOperator):
+    """
+    Submit a `deploy-guestos-to-all-subnet-nodes` proposal for every subnet
+    registered with type `cloud_engine`, targeting the rollout's git revision.
+
+    Idempotent: a subnet is skipped if its most recent IC OS deployment
+    proposal already targets the requested revision and is open / adopted /
+    executed.  Succeeds as a no-op if no CloudEngine subnets exist.  Like
+    `UpgradeUnassignedNodes`, this does NOT wait for proposal voting,
+    proposal acceptance, replica revision rollout, or alert quiescence.
+    """
+
+    template_fields = ("simulate", "git_revision")
+    network: ic_types.ICNetwork
+    simulate: bool
+    git_revision: str
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        network: ic_types.ICNetwork,
+        git_revision: str,
+        simulate: bool,
+        **kwargs: Any,
+    ):
+        self.simulate = simulate
+        self.git_revision = git_revision
+        self.network = network
+        BaseOperator.__init__(self, task_id=task_id, **kwargs)
+
+    def execute(self, context: Context) -> None:
+        if self.simulate:
+            self.log.info(f"simulate={self.simulate}")
+        runner = dre.DRE(network=self.network, subprocess_hook=SubprocessHook())
+        cloud_engine_subnet_ids = runner.get_cloud_engine_subnet_ids()
+        if not cloud_engine_subnet_ids:
+            self.log.info(
+                "No subnets with type cloud_engine are registered.  Nothing to do."
+            )
+            return
+
+        self.log.info(
+            "Found %d CloudEngine subnet(s); upgrading to revision %s: %s",
+            len(cloud_engine_subnet_ids),
+            self.git_revision,
+            cloud_engine_subnet_ids,
+        )
+
+        authenticated_runner = runner.authenticated()
+        for subnet_id in cloud_engine_subnet_ids:
+            props = sorted(
+                runner.get_ic_os_version_deployment_proposals_for_subnet(
+                    subnet_id=subnet_id,
+                ),
+                key=lambda prop: -prop["proposal_id"],
+            )
+            props_for_git_revision = [
+                p
+                for p in props
+                if p["payload"]["replica_version_id"] == self.git_revision
+            ]
+            if (
+                props_for_git_revision
+                and props_for_git_revision[0]["proposal_id"] == props[0]["proposal_id"]
+                and props_for_git_revision[0]["status"]
+                in (
+                    ic_types.ProposalStatus.PROPOSAL_STATUS_OPEN,
+                    ic_types.ProposalStatus.PROPOSAL_STATUS_ADOPTED,
+                    ic_types.ProposalStatus.PROPOSAL_STATUS_EXECUTED,
+                )
+            ):
+                self.log.info(
+                    "Subnet %s already has proposal %s for revision %s in state %s;"
+                    " skipping.",
+                    subnet_id,
+                    props_for_git_revision[0]["proposal_id"],
+                    self.git_revision,
+                    props_for_git_revision[0]["status"].name,
+                )
+                continue
+
+            self.log.info(
+                "Creating proposal for CloudEngine subnet %s to adopt revision %s"
+                " (simulate=%s).",
+                subnet_id,
+                self.git_revision,
+                self.simulate,
+            )
+            authenticated_runner.propose_to_update_subnet_replica_version(
+                subnet_id=subnet_id,
+                git_revision=self.git_revision,
+                dry_run=self.simulate,
+            )
+
+
 @task
 def schedule(
     network: ic_types.ICNetwork, **context: dict[str, Any]

@@ -80,6 +80,8 @@ pub mod v1 {
         UpgradingSubnets,
         /// The rollout is upgrading unassigned nodes.
         UpgradingUnassignedNodes,
+        /// The rollout is upgrading CloudEngine subnets.
+        UpgradingCloudEngines,
         /// The rollout has finished successfully or was marked as such by the operator.
         Complete,
     }
