@@ -436,10 +436,17 @@ class DRE:
         ]
 
     def get_blessed_replica_versions(self) -> list[str]:
-        r = self.run("get", "blessed-replica-versions", "--json", full_stdout=True)
+        # ic-admin's get-blessed-replica-versions (alias of
+        # get-elected-guestos-versions) ignores --json and prints one Git
+        # revision per line, just like get-elected-hostos-versions.
+        r = self.run("get", "blessed-replica-versions", full_stdout=True)
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
-        return cast(list[str], json.loads(r.output)["value"]["blessed_version_ids"])
+        decoded = [x.strip() for x in r.output.splitlines() if x.strip()]
+        assert all(re.match("^[0-9a-f]{40}$", x) for x in decoded), (
+            "One of the returned values in %s is not a valid Git revision" % decoded
+        )
+        return cast(list[str], decoded)
 
     def get_elected_hostos_versions(self) -> list[str]:
         r = self.run("get", "elected-hostos-versions", full_stdout=True)
