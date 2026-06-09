@@ -55,6 +55,8 @@ nodes:
   - dl74z-6vpps-k6bpu-5hjsj-fb6lb-34tsv-ue5gt-bdkjn-35pt5-fdu2a-rae
   - ec62l-q44va-5lyw2-gbl4w-xcx55-c3qv4-q67vc-fu6s7-xpm2r-7tjrw-tae
   - ek6px-kxr47-noli7-nyjql-au5uc-tmj3k-777mf-lfla5-k4xx4-msu3j-dae
+  - hqakm-buvkm-5onrb-4ja5j-pne2h-mnlgv-ei4sf-nqn7l-3ir4g-z6xq5-zqe
+  - i55je-j5vzn-z4odr-yhmrb-nlf46-gbgfg-6uk5e-gssxu-b7hmf-ntlay-pqe
   - jlifv-mddo3-zfwdc-x2wmu-xklbj-dai3i-3pvjy-j4hqm-sarqr-fhkq6-zae
   - lwxeh-xayoz-wu5eb-hwraj-a3pew-yeioj-cnwat-5uow4-ugxkc-kx44o-4ae
   - mbsyf-dtlsd-ccjq4-63rmh-u2lv7-dwxuq-ym6bk-63i2l-5uyki-zccek-mqe
