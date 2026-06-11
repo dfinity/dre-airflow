@@ -435,14 +435,14 @@ class DRE:
             if s.get("subnet_type") == "cloud_engine" and s.get("subnet_id")
         ]
 
-    def get_blessed_replica_versions(self) -> list[str]:
+    def get_elected_replica_versions(self) -> list[str]:
         """Query the elected GuestOS versions."""
         # `dre get` forwards its arguments verbatim to `ic-admin`, so the
         # output format is dictated by the ic-admin build that matches the
         # currently deployed registry canister (downloaded at runtime), not
         # by this code. With the migration away from blessed versions, ic-admin
         # has had a few formats. Support all of them here.
-        r = self.run("get", "blessed-replica-versions", "--json", full_stdout=True)
+        r = self.run("get", "elected-replica-versions", "--json", full_stdout=True)
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
         output = r.output.strip()
@@ -471,12 +471,12 @@ class DRE:
         )
         return cast(list[str], decoded)
 
-    def is_replica_version_blessed(self, git_revision: str) -> bool:
+    def is_replica_version_elected(self, git_revision: str) -> bool:
         return git_revision.lower() in [
-            x.lower() for x in self.get_blessed_replica_versions()
+            x.lower() for x in self.get_elected_replica_versions()
         ]
 
-    def is_hostos_version_blessed(self, git_revision: str) -> bool:
+    def is_hostos_version_elected(self, git_revision: str) -> bool:
         return git_revision.lower() in [
             x.lower() for x in self.get_elected_hostos_versions()
         ]
@@ -516,7 +516,7 @@ class AuthenticatedDRE(DRE):
         dry_run: bool = False,
     ) -> int:
         """
-        Create proposal to update subnet to a blessed version.
+        Create proposal to update subnet to an elected version.
 
         Args:
         * dry_run: if true, tell ic-admin to only simulate the proposal.
