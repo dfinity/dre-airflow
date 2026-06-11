@@ -436,10 +436,30 @@ class DRE:
         ]
 
     def get_blessed_replica_versions(self) -> list[str]:
+        """Query the elected GuestOS versions."""
+        # `dre get` forwards its arguments verbatim to `ic-admin`, so the
+        # output format is dictated by the ic-admin build that matches the
+        # currently deployed registry canister (downloaded at runtime), not
+        # by this code. With the migration away from blessed versions, ic-admin
+        # has had a few formats. Support all of them here.
         r = self.run("get", "blessed-replica-versions", "--json", full_stdout=True)
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
-        return cast(list[str], json.loads(r.output)["value"]["blessed_version_ids"])
+        output = r.output.strip()
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            parsed = None
+
+        # Old format
+        if isinstance(parsed, dict):
+            return cast(list[str], parsed["value"]["blessed_version_ids"])
+        # New format, with --json support
+        elif isinstance(parsed, list):
+            return parsed
+        # New format, without --json support
+        else:
+            return [line.strip() for line in output.splitlines() if line.strip()]
 
     def get_elected_hostos_versions(self) -> list[str]:
         r = self.run("get", "elected-hostos-versions", full_stdout=True)
