@@ -18,7 +18,7 @@ def has_network_adopted_hostos_revision(
         print(f"Pretending that {git_revision} is elected (simulation on)")
         return True
 
-    if dre.DRE(network, SubprocessHook()).is_hostos_version_blessed(git_revision):
+    if dre.DRE(network, SubprocessHook()).is_hostos_version_elected(git_revision):
         print("Revision is elected.  We can proceed.")
         return True
 

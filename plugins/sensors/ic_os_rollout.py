@@ -136,10 +136,10 @@ class WaitForRevisionToBeElected(ICRolloutSensorBaseOperator):
             return
 
         self.log.info(f"Waiting for revision {git_revision} to be elected.")
-        blessed = dre.DRE(self.network, SubprocessHook()).is_replica_version_blessed(
+        elected = dre.DRE(self.network, SubprocessHook()).is_replica_version_elected(
             git_revision,
         )
-        if not blessed:
+        if not elected:
             self.log.info("Revision is not yet elected.  Waiting.")
             self.defer(
                 trigger=TimeDeltaTrigger(datetime.timedelta(minutes=15)),
