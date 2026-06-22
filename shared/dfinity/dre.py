@@ -442,7 +442,7 @@ class DRE:
         # currently deployed registry canister (downloaded at runtime), not
         # by this code. With the migration away from blessed versions, ic-admin
         # has had a few formats. Support all of them here.
-        r = self.run("get", "elected-replica-versions", "--json", full_stdout=True)
+        r = self.run("get", "elected-guestos-versions", "--json", full_stdout=True)
         if r.exit_code != 0:
             raise AirflowException("dre exited with status code %d", r.exit_code)
         output = r.output.strip()
