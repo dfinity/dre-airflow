@@ -17,7 +17,7 @@ DEFAULT_GUESTOS_ROLLOUT_PLANS: dict[str, str] = {
 Monday:
   9:00:      [io67a, xok3w, vcpt7]
   11:00:     [shefu, fuqsr, 4utr6]
-  13:00:     [eibym, g556q, 56zwx]
+  13:00:     [g556q, 56zwx]
 Tuesday:
   7:00:      [pjljw, qdvhd, 2fq7c]
   9:00:      [snjp4, w4asl, qxesv]
