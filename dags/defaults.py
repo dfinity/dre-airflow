@@ -29,7 +29,7 @@ Wednesday:
   8:00:      [hbcn5, aguy2, kindg]
   9:00:      [eq6en, lhg73, brlsh]
   11:00:     [k44fs, cv73p, 4ecnw]
-  13:00:     [opn46, lspz2, o3ow2]
+  13:00:     [opn46, lspz2, o3ow2, x4jtx]
   15:00:     [2zs4v, 6excn, kp5jj]
 Thursday:
   7:00:      [w4rem, 6pbhf, e66qm]
