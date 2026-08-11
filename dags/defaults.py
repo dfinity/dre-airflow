@@ -22,10 +22,8 @@ Tuesday:
   9:00:      [snjp4, w4asl, qxesv]
   11:00:     [4zbus, ejbmu, uzr34]
   13:00:     [re2t4, c4isl, mkbc3]
-  15:00:     [eajxw, nx5oj, cynor]
 Wednesday:
   7:00:      [pae4o, 5kdm2, csyj4]
-  8:00:      [hbcn5, aguy2, kindg]
   9:00:      [eq6en, lhg73, brlsh]
   11:00:     [k44fs, cv73p, 4ecnw]
   13:00:     [opn46, lspz2, o3ow2, x4jtx]
