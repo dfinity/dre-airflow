@@ -239,14 +239,6 @@ for network_name, network in IC_NETWORKS.items():
             retries=retries,
         )
 
-        upgrade_cloud_engines = ic_os_rollout.UpgradeCloudEngines(
-            task_id="upgrade_cloud_engines",
-            git_revision="{{ params.git_revision }}",
-            simulate=cast(bool, "{{ params.simulate }}"),
-            network=network,
-            retries=retries,
-        )
-
         task_groups = []
         for batch in range(MAX_BATCHES):
             batch_name = str(batch + 1)
@@ -260,7 +252,6 @@ for network_name, network in IC_NETWORKS.items():
             ),
             *task_groups,
             upgrade_unassigned_nodes,
-            upgrade_cloud_engines,
         )
 
 
