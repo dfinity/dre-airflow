@@ -15,25 +15,24 @@ that might have side effects.  This is only for defaults.
 DEFAULT_GUESTOS_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
 Monday:
-  9:00:      [io67a, xok3w, vcpt7]
-  11:00:     [shefu, fuqsr, 4utr6]
+  9:00:      [io67a, 4utr6]
+  11:00:     [shefu, fuqsr]
 Tuesday:
   7:00:      [pjljw, qdvhd, 2fq7c]
   9:00:      [snjp4, w4asl, qxesv]
   11:00:     [4zbus, ejbmu, uzr34]
-  13:00:     [re2t4, c4isl, mkbc3]
+  13:00:     [re2t4, c4isl]
 Wednesday:
   7:00:      [pae4o, 5kdm2, csyj4]
   9:00:      [eq6en, lhg73, brlsh]
   11:00:     [k44fs, cv73p, 4ecnw]
-  13:00:     [opn46, lspz2, o3ow2, x4jtx]
-  15:00:     [2zs4v, 6excn, kp5jj]
+  13:00:     [opn46, lspz2, o3ow2]
 Thursday:
   7:00:      [w4rem, 6pbhf, e66qm]
   9:00:      [yinp6, bkfrj, jtdsg]
   11:00:     [mpubz, x33ed, gmq5v]
   13:00:     [3hhby, nl6hn, pzp6e]
-  14:00:     [rtvil, xlkub, 3zsyy]
+  14:00:     [x4jtx, 3zsyy]
 Monday next week:
   7:00:
     subnets: [tdb26]
