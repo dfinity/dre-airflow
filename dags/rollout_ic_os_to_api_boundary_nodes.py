@@ -118,7 +118,7 @@ for network_name, network in ic_types.IC_NETWORKS.items():
                 " simulated but not created, and its acceptance will be simulated too.",
             ),
             "msd": Param(
-                "https://service-discovery.ch1-obs1.dfinity.network/targets",
+                "https://service-discovery.dm1-obs1.dfinity.network/targets",
                 type="string",
                 title="Multiservice discovery endpoint to fetch targets",
                 description="Needed for running GET requests to ensure that the"
