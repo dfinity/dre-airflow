@@ -23,6 +23,7 @@ from airflow.utils import timezone
 from airflow.utils.context import Context
 from airflow.utils.state import DagRunState
 from dfinity.ic_os_rollout import (
+    DR_DRE_SLACK_ID,
     SLACK_CHANNEL,
     SLACK_CONNECTION_ID,
     subnet_id_and_git_revision_from_args,
@@ -545,6 +546,91 @@ class WaitUntilNoAlertsOnAnySubnet(ICRolloutSensorBaseOperator):
         self.log.info("There are no alerts on any subnet.  Safe to proceed.")
         if messaged():
             post(f"Alerts have subsided.  Rollout of {subnet_id} can proceed.")
+
+
+class WaitForManualApproval(BaseSensorOperator):
+    """Conditionally waits for manual approval in the Airflow UI.
+
+    If the batch requires approval (first N batches or last batch),
+    sends a Slack notification and defers until manually marked as Success.
+    Otherwise, passes through immediately.
+    """
+
+    template_fields: Sequence[str] = ("total_batches",)
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        batch_index: int,
+        slow_start_batches: int,
+        total_batches: str | int,
+        _ignored: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        BaseSensorOperator.__init__(self, task_id=task_id, **kwargs)
+        self.batch_index = batch_index
+        self.slow_start_batches = slow_start_batches
+        self.total_batches = total_batches
+
+    def _needs_approval(self) -> bool:
+        total = int(self.total_batches)
+        return (
+            self.batch_index < self.slow_start_batches
+            or self.batch_index == total - 1
+        )
+
+    def execute(self, context: Context, event: Any = None) -> None:
+        if not self._needs_approval():
+            self.log.info(
+                "Batch %d is not a canary batch. No manual approval needed.",
+                self.batch_index + 1,
+            )
+            return
+
+        if event is None:
+            # First execution — send Slack notification.
+            self.log.info(
+                "Sending Slack notification for batch %d.",
+                self.batch_index + 1,
+            )
+            try:
+                from airflow.configuration import conf
+
+                base_url = conf.get("webserver", "base_url")
+                dag_id = context["dag_run"].dag_id
+                run_id = context["dag_run"].run_id
+                dag_url = f"{base_url}/dags/{dag_id}/grid?dag_run_id={run_id}"
+                slack.SlackAPIPostOperator(
+                    task_id="notify_manual_approval_needed",
+                    channel=SLACK_CHANNEL,
+                    username="Airflow",
+                    text=(
+                        f"Hotfix rollout batch {self.batch_index + 1} needs"
+                        f" manual approval. <!subteam^{DR_DRE_SLACK_ID}>"
+                        f" please <{dag_url}|approve in the Airflow UI>"
+                        " to proceed."
+                    ),
+                    slack_conn_id=SLACK_CONNECTION_ID,
+                ).execute(context=context)
+            except Exception:
+                self.log.warning(
+                    "Failed to send Slack notification."
+                    " Continuing without notification.",
+                    exc_info=True,
+                )
+
+        self.log.info(
+            "MANUAL APPROVAL REQUIRED for batch %d.",
+            self.batch_index + 1,
+        )
+        self.log.info(
+            "Mark this task as Success in the Airflow UI to proceed."
+        )
+        self.defer(
+            trigger=TimeDeltaTrigger(datetime.timedelta(minutes=5)),
+            method_name="execute",
+        )
 
 
 class WaitForOtherDAGs(BaseSensorOperator):
