@@ -22,7 +22,7 @@ import dfinity.ic_types as ic_types
 import dfinity.rollout_types as rollout_types
 
 DRE_URL = (
-    "https://github.com/dfinity/dre/releases/latest/download/dre-x86_64-unknown-linux"
+    "https://github.com/dfinity/dre/releases/download/v0.7.8/dre-x86_64-unknown-linux"
 )
 FAKE_PROPOSAL_NUMBER = -123456
 
