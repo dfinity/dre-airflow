@@ -12,7 +12,6 @@ import dfinity.ic_types as ic_types
 import operators.ic_os_rollout as ic_os_rollout
 import pendulum
 import sensors.ic_os_rollout as ic_os_sensor
-from airflow import __version__
 from airflow.decorators import dag, task, task_group
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
@@ -24,6 +23,8 @@ from dfinity.ic_os_rollout import (
     api_boundary_node_batch_timetable,
 )
 from dfinity.rollout_types import ProposalInfo, yaml_to_ApiBoundaryNodeRolloutPlanSpec
+
+from airflow import __version__
 
 # Temporarily add the DAGs folder to import defaults.py.
 sys.path.append(os.path.dirname(__file__))
