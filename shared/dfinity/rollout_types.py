@@ -92,6 +92,24 @@ SubnetRolloutPlanSpec = dict[
 ]
 
 
+"""
+Represents the plan for incrementing the standard engine replica version.
+
+Maps a day of the week to a mapping of time-of-day to the target
+`deployment_progress` (a fraction in the closed interval [0.0, 1.0]) that the
+StandardEngineReplicaVersionRecord should reach at that time.
+
+See rollout_ic_os_to_subnets.py for help.
+"""
+StandardEngineRolloutPlanSpec = dict[
+    str,
+    dict[
+        str | int,
+        float | int,
+    ],
+]
+
+
 class ApiBoundaryNodeRolloutPlanSpec(TypedDict):
     """
     Represents the shape of the rollout plan for boundary nodes input into Airflow

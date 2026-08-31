@@ -15,6 +15,7 @@ from dfinity.rollout_types import (
     DaysOfWeek,
     HostOSRolloutPlanSpec,
     ProvisionalHostOSPlan,
+    StandardEngineRolloutPlanSpec,
     SubnetNameOrNumber,
     SubnetNameOrNumberWithRevision,
     SubnetNumberWithRevision,
@@ -349,6 +350,86 @@ def check_plan(plan: SubnetRolloutPlanWithRevision) -> None:
                 )
                 % (pzp6e_start_time, uzr34_start_time, delta)
             )
+
+
+class StandardEngineRolloutStep(TypedDict):
+    """A single step in the standard engine deployment_progress schedule."""
+
+    start_at: datetime.datetime
+    deployment_progress: float
+
+
+"""
+An ordered (by time) list of standard engine deployment_progress steps.
+
+Each step tells the rollout to submit a proposal, at start_at, that raises the
+StandardEngineReplicaVersionRecord.deployment_progress to the given value.
+"""
+StandardEngineRolloutPlan: TypeAlias = list[StandardEngineRolloutStep]
+
+
+def standard_engine_planner(
+    plan: StandardEngineRolloutPlanSpec,
+    now: datetime.datetime | None = None,
+) -> StandardEngineRolloutPlan:
+    """
+    Convert a StandardEngineRolloutPlanSpec (day -> time -> progress) into an
+    ordered list of steps with resolved absolute start times.
+
+    Validates that:
+    * every day is a valid (possibly "next week") day of the week,
+    * every time is a valid hh:mm,
+    * every deployment_progress is in the closed interval [0.0, 1.0],
+    * deployment_progress is strictly increasing over time (a rollout only ever
+      moves engines forward onto the new version),
+    * the final deployment_progress reaches 1.0 (the rollout finishes the
+      deployment of the new standard engine version).
+    """
+    week_plan = week_planner(now)
+    steps: StandardEngineRolloutPlan = []
+
+    for dayname, hours in plan.items():
+        try:
+            date = week_plan[dayname]
+        except KeyError:
+            raise ValueError(f"{dayname} is not a valid day")
+        for time_s, progress in hours.items():
+            try:
+                time = convert_timespec_or_minutes_to_datetime(time_s)
+            except ValueError as e:
+                raise ValueError(str(e) + f" on {dayname}") from e
+            progress_f = float(progress)
+            if not 0.0 <= progress_f <= 1.0:
+                raise ValueError(
+                    f"deployment_progress {progress} requested by {dayname} {time_s}"
+                    " is not in the closed interval [0.0, 1.0]"
+                )
+            steps.append(
+                StandardEngineRolloutStep(
+                    start_at=date.replace(hour=time.hour, minute=time.minute),
+                    deployment_progress=progress_f,
+                )
+            )
+
+    steps.sort(key=lambda s: s["start_at"])
+
+    previous_progress = -1.0
+    for step in steps:
+        if step["deployment_progress"] <= previous_progress:
+            raise ValueError(
+                "deployment_progress must strictly increase over time; step at"
+                f" {step['start_at']} has progress {step['deployment_progress']}"
+                f" which does not exceed the previous {previous_progress}"
+            )
+        previous_progress = step["deployment_progress"]
+
+    if steps and steps[-1]["deployment_progress"] != 1.0:
+        raise ValueError(
+            "the last standard engine step must reach deployment_progress 1.0,"
+            f" but it reaches {steps[-1]['deployment_progress']}"
+        )
+
+    return steps
 
 
 class TimetableSpec(TypedDict):

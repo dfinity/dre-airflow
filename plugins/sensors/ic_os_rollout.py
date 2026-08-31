@@ -425,6 +425,7 @@ class WaitUntilNoAlertsOnSubnet(ICRolloutSensorBaseOperator):
                     ic_subnet="%(subnet_id)s",
                     alertname!="PrometheusTargetMissing",
                     alertname!="IC_Subnet_HttpRequest_ResponseTooSlow",
+                    alertname!="ICCloudEngineSubnetInhibitor",
                     severity="page"
                 }[15m]
             )""" % (

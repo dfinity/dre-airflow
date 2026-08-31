@@ -7,6 +7,7 @@ from dfinity.ic_os_rollout import (
     api_boundary_node_batch_timetable,
     exponential_increase,
     next_day_of_the_week,
+    standard_engine_planner,
 )
 from dfinity.rollout_types import ApiBoundaryNodeRolloutPlanSpec, DaysOfWeek
 
@@ -349,3 +350,69 @@ class TestApiBoundaryNodeBatchCreate(unittest.TestCase):
             list("abcdefghijklmnopqrstuvwxyz"),
             20,
         )
+
+
+class TestStandardEnginePlanner(unittest.TestCase):
+    # A Monday, so the week planner keeps everything in the current week.
+    MONDAY = datetime.datetime(2024, 1, 1, 8, 0)
+
+    def test_basic_weeklong_plan(self) -> None:
+        plan = {
+            "Monday": {"15:00": 0.1},
+            "Tuesday": {"15:00": 0.5},
+            "Wednesday": {"15:00": 0.8},
+            "Thursday": {"15:00": 1.0},
+        }
+        out = standard_engine_planner(plan, now=self.MONDAY)
+        self.assertEqual([s["deployment_progress"] for s in out], [0.1, 0.5, 0.8, 1.0])
+        # Steps are ordered by time.
+        self.assertEqual(
+            [s["start_at"] for s in out],
+            sorted(s["start_at"] for s in out),
+        )
+        self.assertEqual(out[0]["start_at"].hour, 15)
+
+    def test_empty_plan(self) -> None:
+        self.assertEqual(standard_engine_planner({}, now=self.MONDAY), [])
+
+    def test_orders_out_of_order_input(self) -> None:
+        plan = {
+            "Wednesday": {"15:00": 0.8},
+            "Monday": {"15:00": 0.1},
+            "Thursday": {"15:00": 1.0},
+            "Tuesday": {"15:00": 0.5},
+        }
+        out = standard_engine_planner(plan, now=self.MONDAY)
+        self.assertEqual([s["deployment_progress"] for s in out], [0.1, 0.5, 0.8, 1.0])
+
+    def test_int_progress_accepted(self) -> None:
+        out = standard_engine_planner({"Monday": {"15:00": 1}}, now=self.MONDAY)
+        self.assertEqual(out[0]["deployment_progress"], 1.0)
+
+    def test_rejects_non_increasing(self) -> None:
+        plan = {"Monday": {"15:00": 0.5}, "Tuesday": {"15:00": 0.5}}
+        with self.assertRaises(ValueError):
+            standard_engine_planner(plan, now=self.MONDAY)
+
+    def test_rejects_decreasing(self) -> None:
+        plan = {"Monday": {"15:00": 0.5}, "Tuesday": {"15:00": 0.2}}
+        with self.assertRaises(ValueError):
+            standard_engine_planner(plan, now=self.MONDAY)
+
+    def test_rejects_last_step_not_complete(self) -> None:
+        with self.assertRaises(ValueError):
+            standard_engine_planner({"Monday": {"15:00": 0.5}}, now=self.MONDAY)
+
+    def test_rejects_out_of_range(self) -> None:
+        with self.assertRaises(ValueError):
+            standard_engine_planner({"Monday": {"15:00": 1.5}}, now=self.MONDAY)
+        with self.assertRaises(ValueError):
+            standard_engine_planner({"Monday": {"15:00": -0.1}}, now=self.MONDAY)
+
+    def test_rejects_bad_day(self) -> None:
+        with self.assertRaises(ValueError):
+            standard_engine_planner({"Notaday": {"15:00": 1.0}}, now=self.MONDAY)
+
+    def test_rejects_bad_time(self) -> None:
+        with self.assertRaises(ValueError):
+            standard_engine_planner({"Monday": {"25:00": 1.0}}, now=self.MONDAY)

@@ -2,7 +2,10 @@ use super::super::airflow_client::{
     AirflowClient, DagRunState, DagRunsResponseItem, TaskInstanceState, TaskInstancesResponseItem,
 };
 use super::super::types::v2::RolloutKind;
-use super::super::types::v2::guestos::{Batch, Rollout, State, Subnet, SubnetState};
+use super::super::types::v2::guestos::{
+    Batch, Rollout, StandardEngine, StandardEngineStep, StandardEngineStepState, State, Subnet,
+    SubnetState,
+};
 use super::plan::{PlanQueryResult, fetch_xcom};
 use super::{RolloutDataGatherError, plan::PlanCache, python};
 use chrono::{DateTime, Utc};
@@ -10,7 +13,7 @@ use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use log::{trace, warn};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::cmp::min;
 use std::fmt::{self, Display};
@@ -25,6 +28,8 @@ lazy_static! {
     // unwrap() is legitimate here because we know these cannot fail to compile.
     static ref SubnetGitRevisionRe: Regex = Regex::new("dfinity.ic_types.SubnetRolloutInstance.*@version=0[(]start_at=.*,subnet_id=([0-9-a-z-]+),git_revision=([0-9a-f]+)[)]").unwrap();
     static ref BatchIdentificationRe: Regex = Regex::new("batch_([0-9]+)[.](.+)").unwrap();
+    // Matches standard engine step tasks like "standard_engine.step_0.wait_until_start_time".
+    static ref StandardEngineStepRe: Regex = Regex::new("standard_engine[.]step_([0-9]+)[.](.+)").unwrap();
 }
 
 type PythonFormattedPlan = IndexMap<String, (String, Vec<String>)>;
@@ -116,6 +121,35 @@ impl FromStr for Plan {
     }
 }
 
+/// A single standard engine step as produced by the `standard_engine_schedule`
+/// task (see plugins/operators/ic_os_rollout.py).  `start_at` is an ISO 8601
+/// string and `deployment_progress` is a fraction in [0.0, 1.0].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct StandardEngineStepPlan {
+    start_at: String,
+    deployment_progress: f64,
+}
+
+/// The full standard engine schedule: an ordered list of steps.
+type StandardEnginePlan = Vec<StandardEngineStepPlan>;
+
+/// Newtype so we can parse the whole plan out of the XCom string via `FromStr`
+/// (the XCom is a Python-serialized list of dicts).
+#[derive(Debug, Clone, Serialize)]
+struct StandardEnginePlanWrapper {
+    steps: StandardEnginePlan,
+}
+
+impl FromStr for StandardEnginePlanWrapper {
+    type Err = PlanParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let steps: StandardEnginePlan =
+            python::from_str(value).map_err(PlanParseError::UndecipherablePython)?;
+        Ok(StandardEnginePlanWrapper { steps })
+    }
+}
+
 fn format_some<N>(opt: Option<N>, prefix: &str, fallback: &str) -> String
 where
     N: Display,
@@ -178,9 +212,57 @@ fn annotate_subnet_state(
     state
 }
 
+/// Update the state (and comment / link) of a single standard engine step.
+///
+/// When `only_decrease` is true, the state is only lowered (used for retryable
+/// error / running states so a more advanced observed state is not clobbered by
+/// an earlier task reprocessed out of order).
+fn annotate_standard_engine_step_state(
+    step: &mut StandardEngineStep,
+    state: StandardEngineStepState,
+    task_instance: &TaskInstancesResponseItem,
+    base_url: &reqwest::Url,
+    only_decrease: bool,
+) {
+    let tgt = &(LOG_TARGET.to_owned() + "::annotate_standard_engine_step_state");
+    if (only_decrease && state < step.state) || (!only_decrease && state != step.state) {
+        trace!(target: tgt, "{}: {} transition {} => {}", task_instance.dag_run_id, task_instance.task_id, step.state, state);
+        step.state = state.clone();
+    }
+    if state == step.state {
+        step.comment = format!(
+            "Task {} {}",
+            task_instance.task_id,
+            format_some(
+                task_instance.state.clone(),
+                "in state ",
+                "has no known state"
+            ),
+        );
+        step.display_url = {
+            let mut url = base_url
+                .join(format!("/dags/{}/grid", task_instance.dag_id).as_str())
+                .unwrap();
+            url.query_pairs_mut()
+                .append_pair("dag_run_id", &task_instance.dag_run_id);
+            url.query_pairs_mut()
+                .append_pair("task_id", &task_instance.task_id);
+            url.query_pairs_mut().append_pair("tab", "logs");
+            url.to_string()
+        };
+    }
+    if let Some(end_date) = task_instance.end_date {
+        step.end_time = Some(match step.end_time {
+            None => end_date,
+            Some(existing) => max(existing, end_date),
+        });
+    }
+}
+
 #[derive(Clone, Default, Serialize)]
 pub(crate) struct Parser {
     schedule: PlanCache<Plan>,
+    standard_engine_schedule: PlanCache<StandardEnginePlanWrapper>,
 }
 
 impl Parser {
@@ -197,6 +279,7 @@ impl Parser {
         let mut rollout = Rollout {
             state: State::Preparing,
             batches: IndexMap::new(),
+            standard_engine: None,
             conf: dag_run.conf.clone(),
         };
 
@@ -490,6 +573,185 @@ impl Parser {
                         update_state_unless_problem!(State::UpgradingCloudEngines)
                     }
                     None => {}
+                }
+            } else if task_instance.task_id == "standard_engine_schedule" {
+                // This task produces the ordered list of deployment_progress
+                // increments for the standard engine (Cloud Engines).  Once it
+                // succeeds, its XCom holds the plan, which we materialize into
+                // rollout.standard_engine.
+                match task_instance.state {
+                    Some(TaskInstanceState::Skipped) | Some(TaskInstanceState::Removed) => (),
+                    Some(TaskInstanceState::UpForRetry) | Some(TaskInstanceState::Restarting) => {
+                        rollout.state = State::Problem;
+                    }
+                    Some(TaskInstanceState::Failed) | Some(TaskInstanceState::UpstreamFailed) => {
+                        rollout.state = State::Failed;
+                    }
+                    Some(TaskInstanceState::Success) => {
+                        let plan = match self
+                            .standard_engine_schedule
+                            .get_from_str(
+                                &task_instance,
+                                fetch_xcom(
+                                    airflow_api.clone(),
+                                    dag_run.dag_id.as_str(),
+                                    dag_run.dag_run_id.as_str(),
+                                    task_instance.task_id.as_str(),
+                                    task_instance.map_index,
+                                    "return_value",
+                                ),
+                            )
+                            .await
+                        {
+                            PlanQueryResult::Found(plan) => plan.steps,
+                            PlanQueryResult::Invalid => continue,
+                            PlanQueryResult::NotFound => continue,
+                            PlanQueryResult::Error(e) => {
+                                return Err(RolloutDataGatherError::AirflowError(e));
+                            }
+                        };
+                        // Only bother reflecting the standard engine schedule if
+                        // it is non-empty (an empty plan means the rollout does
+                        // not manage the standard engine version this time).
+                        if !plan.is_empty() {
+                            let new_replica_version_id = rollout
+                                .conf
+                                .get("git_revision")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let steps = plan
+                                .into_iter()
+                                .map(|step| StandardEngineStep {
+                                    planned_start_time: DateTime::parse_from_rfc3339(
+                                        &step.start_at,
+                                    )
+                                    .map(|d| d.with_timezone(&Utc))
+                                    .unwrap_or_default(),
+                                    actual_start_time: None,
+                                    end_time: None,
+                                    deployment_progress: step.deployment_progress,
+                                    state: StandardEngineStepState::Pending,
+                                    comment: "".to_string(),
+                                    display_url: "".to_string(),
+                                })
+                                .collect();
+                            rollout.standard_engine = Some(StandardEngine {
+                                new_replica_version_id,
+                                steps,
+                            });
+                        }
+                    }
+                    Some(TaskInstanceState::UpForReschedule)
+                    | Some(TaskInstanceState::Running)
+                    | Some(TaskInstanceState::Deferred)
+                    | Some(TaskInstanceState::Queued)
+                    | Some(TaskInstanceState::Scheduled)
+                    | None => {}
+                }
+            } else if let Some(captured) =
+                StandardEngineStepRe.captures(task_instance.task_id.as_str())
+            {
+                // A task belonging to a single standard engine step.  We update
+                // the corresponding step's state (if the schedule has been
+                // materialized already).
+                let Some(standard_engine) = rollout.standard_engine.as_mut() else {
+                    trace!(target: tgt, "{}: standard engine schedule not yet available, skipping {}", task_instance.dag_run_id, task_instance.task_id);
+                    continue;
+                };
+                // unwrap() is safe: the regex captured an integer.
+                let step_index = usize::from_str(&captured[1]).unwrap();
+                let task_name = &captured[2];
+                let Some(step) = standard_engine.steps.get_mut(step_index) else {
+                    trace!(target: tgt, "{}: no corresponding standard engine step {}, continuing", task_instance.dag_run_id, step_index);
+                    continue;
+                };
+
+                macro_rules! se_trans_min {
+                    ($input:expr) => {
+                        annotate_standard_engine_step_state(
+                            step,
+                            $input,
+                            &task_instance,
+                            &airflow_api.url,
+                            true,
+                        )
+                    };
+                }
+                macro_rules! se_trans_exact {
+                    ($input:expr) => {
+                        annotate_standard_engine_step_state(
+                            step,
+                            $input,
+                            &task_instance,
+                            &airflow_api.url,
+                            false,
+                        )
+                    };
+                }
+
+                match &task_instance.state {
+                    None => {}
+                    Some(state) => match state {
+                        TaskInstanceState::Removed | TaskInstanceState::Skipped => {}
+                        TaskInstanceState::UpForRetry | TaskInstanceState::Restarting => {
+                            se_trans_min!(StandardEngineStepState::Error);
+                            rollout.state = min(rollout.state, State::Problem);
+                        }
+                        TaskInstanceState::Failed => {
+                            se_trans_min!(StandardEngineStepState::Error);
+                            rollout.state = min(rollout.state, State::Failed);
+                        }
+                        TaskInstanceState::UpstreamFailed => {
+                            se_trans_min!(StandardEngineStepState::PredecessorFailed);
+                            rollout.state = min(rollout.state, State::Failed);
+                        }
+                        TaskInstanceState::UpForReschedule
+                        | TaskInstanceState::Running
+                        | TaskInstanceState::Deferred
+                        | TaskInstanceState::Queued
+                        | TaskInstanceState::Scheduled => {
+                            match task_name.as_ref() {
+                                "collect_step" => se_trans_min!(StandardEngineStepState::Pending),
+                                "wait_until_start_time" => {
+                                    se_trans_min!(StandardEngineStepState::Waiting)
+                                }
+                                "create_proposal_if_none_exists" => {
+                                    se_trans_min!(StandardEngineStepState::Proposing)
+                                }
+                                "collect_upgraded_engines" | "wait_until_no_alerts" => {
+                                    se_trans_min!(StandardEngineStepState::WaitingForAlertsGone)
+                                }
+                                "request_proposal_vote" | "join" => {}
+                                _ => {}
+                            }
+                            update_state_unless_problem!(State::UpgradingCloudEngines);
+                        }
+                        TaskInstanceState::Success => {
+                            match task_name.as_ref() {
+                                "collect_step" => se_trans_min!(StandardEngineStepState::Waiting),
+                                "wait_until_start_time" => {
+                                    if step.actual_start_time.is_none() {
+                                        step.actual_start_time = task_instance.end_date;
+                                    }
+                                    se_trans_exact!(StandardEngineStepState::Proposing);
+                                }
+                                "create_proposal_if_none_exists" => {
+                                    se_trans_exact!(StandardEngineStepState::WaitingForAlertsGone)
+                                }
+                                "collect_upgraded_engines" => {
+                                    se_trans_exact!(StandardEngineStepState::WaitingForAlertsGone)
+                                }
+                                "wait_until_no_alerts" => {
+                                    se_trans_exact!(StandardEngineStepState::Complete)
+                                }
+                                "join" => se_trans_exact!(StandardEngineStepState::Complete),
+                                "request_proposal_vote" => {}
+                                _ => {}
+                            }
+                            update_state_unless_problem!(State::UpgradingCloudEngines);
+                        }
+                    },
                 }
             } else {
                 warn!(target: tgt, "{}: unknown task {}", task_instance.dag_run_id, task_instance.task_id)

@@ -147,10 +147,25 @@ class ApiBn(TypedDict):
     principal: rollout_types.NodeId
 
 
+class RegistryStandardEngineReplicaVersion(TypedDict):
+    # The replica/GuestOS version that CloudEngine subnets following the standard
+    # upgrade train are converging towards.
+    new_replica_version_id: str
+    # The replica/GuestOS version they are converging away from.
+    old_replica_version_id: str
+    # Approximate fraction of engines that should already run the new version,
+    # in the closed interval [0.0, 1.0].
+    deployment_progress: float
+    # Subnet IDs of the engines that should already run the new version given
+    # the current deployment_progress.
+    engines_on_new_version: list[rollout_types.SubnetId]
+
+
 class RegistrySnapshot(TypedDict):
     subnets: list[RegistrySubnet]
     nodes: list[RegistryNode]
     # unassigned_nodes_config
+    standard_engine_replica_version: RegistryStandardEngineReplicaVersion | None
     dcs: list[RegistryDC]
     node_operators: list[RegistryNodeOperator]
     # node_rewards_table
@@ -435,6 +450,66 @@ class DRE:
             if s.get("subnet_type") == "cloud_engine" and s.get("subnet_id")
         ]
 
+    def get_standard_engine_replica_version(
+        self,
+    ) -> RegistryStandardEngineReplicaVersion | None:
+        """
+        Return the current StandardEngineReplicaVersionRecord, or None if the
+        registry does not contain one yet.
+
+        This is the record that CloudEngine subnets following the standard
+        upgrade train (blank `replica_version_id`) converge towards; it holds the
+        `new_replica_version_id`, `old_replica_version_id` and the current
+        `deployment_progress` (the approximate fraction of engines that should
+        already run the new version).
+        """
+        snapshot = self.get_registry()
+        record = snapshot.get("standard_engine_replica_version")
+        if not record:
+            return None
+        return cast(RegistryStandardEngineReplicaVersion, record)
+
+    def get_engines_in_priority_range(
+        self,
+        from_progress: float,
+        to_progress: float,
+        new_replica_version_id: str | None = None,
+    ) -> list[rollout_types.SubnetId]:
+        """
+        Return the engine subnet IDs whose upgrade priority is in the range
+        `(from_progress, to_progress]` for a given standard engine new version.
+
+        These are exactly the Cloud Engines (following the standard upgrade
+        train) that get upgraded to the new version as `deployment_progress` is
+        raised from `from_progress` to `to_progress`.  Uses the dre
+        `engine-versions` command.
+
+        Args:
+        * from_progress: lower bound of the priority range (exclusive, except
+          0.0 which is inclusive so an engine with priority 0.0 is captured).
+        * to_progress: upper bound of the priority range (inclusive).
+        * new_replica_version_id: version to compute priorities against; if
+          None, dre uses the registry's current standard engine new version.
+        """
+        args = [
+            "engine-versions",
+            "--from",
+            str(from_progress),
+            "--to",
+            str(to_progress),
+        ]
+        if new_replica_version_id is not None:
+            args += ["--new-replica-version-id", new_replica_version_id]
+        r = self.run(*args, full_stdout=True)
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        data = json.loads(r.output)
+        return [
+            cast(rollout_types.SubnetId, e["subnet_id"])
+            for e in data.get("engines", [])
+            if e.get("subnet_id")
+        ]
+
     def get_elected_replica_versions(self) -> list[str]:
         """Query the elected GuestOS versions."""
         # `dre get` forwards its arguments verbatim to `ic-admin`, so the
@@ -607,6 +682,82 @@ class AuthenticatedDRE(DRE):
             "--version",
             git_revision,
             *nodesparms,
+            dry_run=dry_run,
+            yes=not dry_run,
+        )
+        if r.exit_code != 0:
+            raise AirflowException("dre exited with status code %d", r.exit_code)
+        if dry_run:
+            return FAKE_PROPOSAL_NUMBER
+        try:
+            return int(r.output.rstrip().splitlines()[-1].split()[1])
+        except ValueError:
+            raise AirflowException(
+                f"dre failed to print the proposal number in "
+                f"its standard output: {r.output.rstrip()}"
+            )
+
+    def propose_to_update_standard_engine_replica_version(
+        self,
+        new_replica_version_id: str,
+        old_replica_version_id: str,
+        deployment_progress: float,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Create a proposal to change the standard engine replica version.
+
+        This adjusts the StandardEngineReplicaVersionRecord that CloudEngine
+        subnets following the standard upgrade train converge towards.  Roughly
+        `deployment_progress` (a fraction in [0.0, 1.0]) of the engines will end
+        up running `new_replica_version_id`; the rest stay on
+        `old_replica_version_id`.
+
+        Args:
+        * new_replica_version_id: the version engines converge towards.
+        * old_replica_version_id: the version engines converge away from; this
+          should be what the previous rollout left as the new version.
+        * deployment_progress: fraction of engines that should run the new
+          version, in the closed interval [0.0, 1.0].
+        * dry_run: if true, tell ic-admin to only simulate the proposal.
+
+        Returns:
+        The proposal number as integer.
+        In dry-run mode, the returned proposal number will be FAKE_PROPOSAL_NUMBER.
+
+        On failure, raises AirflowException.
+        """
+        if not 0.0 <= deployment_progress <= 1.0:
+            raise AirflowException(
+                "deployment_progress must be in the closed interval [0.0, 1.0],"
+                f" got {deployment_progress}"
+            )
+        new_short = new_replica_version_id[:7]
+        proposal_title = (
+            f"Update {deployment_progress * 100:.0f}% of Cloud Engines"
+            f" to replica version {new_short}"
+        )
+        proposal_summary = (
+            f"""Update {deployment_progress * 100:.0f}% of Cloud Engines following"""
+            f""" the standard upgrade train to replica version"""
+            f""" [{new_replica_version_id}]"""
+            f"""({self.network.release_display_url}/{new_replica_version_id})"""
+            f""" (from {old_replica_version_id})."""
+        )
+        r = self.run(
+            "propose",
+            "--forum-post-link=omit",
+            "propose-to-update-standard-engine-replica-version",
+            "--proposal-title",
+            proposal_title,
+            "--summary",
+            proposal_summary,
+            "--new-replica-version-id",
+            new_replica_version_id,
+            "--old-replica-version-id",
+            old_replica_version_id,
+            "--deployment-progress",
+            str(deployment_progress),
             dry_run=dry_run,
             yes=not dry_run,
         )
