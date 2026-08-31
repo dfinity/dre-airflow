@@ -1,14 +1,13 @@
 import datetime
 
 import pendulum
+from airflow import DAG
 from airflow.models.param import Param
 from airflow.utils.trigger_rule import TriggerRule
 from operators.target_topology import (
     RunTopologyToolAndUploadOutputs,
     SendReport,
 )
-
-from airflow import DAG
 
 with DAG(
     dag_id="target_topology",
