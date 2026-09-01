@@ -413,7 +413,7 @@ def standard_engine_planner(
 
     steps.sort(key=lambda s: s["start_at"])
 
-    previous_progress = -1.0
+    previous_progress = 0.0
     for step in steps:
         if step["deployment_progress"] <= previous_progress:
             raise ValueError(

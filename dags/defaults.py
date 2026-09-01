@@ -45,11 +45,11 @@ Monday next week:
 # must strictly increase and the last step must reach 1.0.
 DEFAULT_STANDARD_ENGINE_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """
-Monday:
-  15:00:     0.1
 Tuesday:
-  15:00:     0.5
+  09:00:     0.2
+  15:00:     0.4
 Wednesday:
+  09:00:     0.6
   15:00:     0.8
 Thursday:
   15:00:     1.0""".strip()

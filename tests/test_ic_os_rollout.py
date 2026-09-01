@@ -9,7 +9,11 @@ from dfinity.ic_os_rollout import (
     next_day_of_the_week,
     standard_engine_planner,
 )
-from dfinity.rollout_types import ApiBoundaryNodeRolloutPlanSpec, DaysOfWeek
+from dfinity.rollout_types import (
+    ApiBoundaryNodeRolloutPlanSpec,
+    DaysOfWeek,
+    StandardEngineRolloutPlanSpec,
+)
 
 ALL_DAYS: list[DaysOfWeek] = [
     "Thursday",
@@ -357,7 +361,7 @@ class TestStandardEnginePlanner(unittest.TestCase):
     MONDAY = datetime.datetime(2024, 1, 1, 8, 0)
 
     def test_basic_weeklong_plan(self) -> None:
-        plan = {
+        plan: StandardEngineRolloutPlanSpec = {
             "Monday": {"15:00": 0.1},
             "Tuesday": {"15:00": 0.5},
             "Wednesday": {"15:00": 0.8},
@@ -376,7 +380,7 @@ class TestStandardEnginePlanner(unittest.TestCase):
         self.assertEqual(standard_engine_planner({}, now=self.MONDAY), [])
 
     def test_orders_out_of_order_input(self) -> None:
-        plan = {
+        plan: StandardEngineRolloutPlanSpec = {
             "Wednesday": {"15:00": 0.8},
             "Monday": {"15:00": 0.1},
             "Thursday": {"15:00": 1.0},
@@ -390,12 +394,18 @@ class TestStandardEnginePlanner(unittest.TestCase):
         self.assertEqual(out[0]["deployment_progress"], 1.0)
 
     def test_rejects_non_increasing(self) -> None:
-        plan = {"Monday": {"15:00": 0.5}, "Tuesday": {"15:00": 0.5}}
+        plan: StandardEngineRolloutPlanSpec = {
+            "Monday": {"15:00": 0.5},
+            "Tuesday": {"15:00": 0.5},
+        }
         with self.assertRaises(ValueError):
             standard_engine_planner(plan, now=self.MONDAY)
 
     def test_rejects_decreasing(self) -> None:
-        plan = {"Monday": {"15:00": 0.5}, "Tuesday": {"15:00": 0.2}}
+        plan: StandardEngineRolloutPlanSpec = {
+            "Monday": {"15:00": 0.5},
+            "Tuesday": {"15:00": 0.2},
+        }
         with self.assertRaises(ValueError):
             standard_engine_planner(plan, now=self.MONDAY)
 

@@ -467,7 +467,7 @@ class DRE:
         record = snapshot.get("standard_engine_replica_version")
         if not record:
             return None
-        return cast(RegistryStandardEngineReplicaVersion, record)
+        return record
 
     def get_engines_in_priority_range(
         self,
