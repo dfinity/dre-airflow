@@ -548,17 +548,22 @@ class CreateStandardEngineProposalIdempotently(BaseOperator):
                 " the standard engine version."
             )
 
-        old_replica_version_id = current["new_replica_version_id"]
-
-        if old_replica_version_id == git_revision:
+        if current["new_replica_version_id"] == git_revision:
             # The registry's current new version is already the version this
-            # rollout is deploying.  Nothing to converge away from; just make
-            # sure progress reaches the target.
+            # rollout is deploying, i.e. we are mid-deployment.  We must keep the
+            # record's existing old version (converging to git_revision would be
+            # an invalid new==old transition otherwise); we only adjust progress.
+            old_replica_version_id = current["old_replica_version_id"]
             self.log.info(
                 "The current standard engine new version is already %s (this"
                 " rollout's revision); will only adjust deployment_progress.",
                 git_revision,
             )
+        else:
+            # We are starting a new deployment towards git_revision, converging
+            # away from whatever the record currently points its new version at
+            # (i.e. what the previous rollout deployed).
+            old_replica_version_id = current["new_replica_version_id"]
 
         # Idempotency: if we're already converging to git_revision with progress
         # at or above the target, there's nothing to do.
@@ -576,7 +581,7 @@ class CreateStandardEngineProposalIdempotently(BaseOperator):
             return {
                 "new_replica_version_id": git_revision,
                 "old_replica_version_id": old_replica_version_id,
-                "deployment_progress": target_progress,
+                "deployment_progress": current["deployment_progress"],
                 "needs_vote": False,
                 "proposal_id": dre.FAKE_PROPOSAL_NUMBER,
             }
