@@ -87,7 +87,7 @@ Remarks:
 """
 
 
-STANDARD_ENGINE_PLAN_HELP = """\
+STANDARD_ENGINE_PLAN_HELP = f"""\
 A specification of how the standard engine replica version is upgraded through
 the week, alongside the subnet rollout.
 
@@ -106,8 +106,9 @@ Remarks:
   previous rollout deployed), so it does not need to be specified here.
 * The target `deployment_progress` must strictly increase over time, and the
   last step must reach 1.0 so the deployment completes.
-* The increments only begin after the first batch of subnets has been rolled
-  out, so the version has been exercised on regular subnets first.
+* The increments only begin after the {STANDARD_ENGINE_START_AFTER_BATCH} batch(es)
+  of subnets have been rolled out, so the version has been exercised on regular
+  subnets first.
 * Leave this empty to skip standard engine management entirely.
 
 Example:
