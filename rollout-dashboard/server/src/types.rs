@@ -140,6 +140,7 @@ pub mod v1 {
                     super::v2::guestos::Rollout {
                         state: rollout.state,
                         batches: rollout.batches,
+                        standard_engine: None,
                         conf: rollout.conf,
                     },
                 ),
@@ -308,8 +309,71 @@ pub mod v2 {
         pub use super::super::v1::{
             Batch, RolloutState as State, Subnet, SubnetRolloutState as SubnetState,
         };
+        use chrono::{DateTime, Utc};
         use indexmap::IndexMap;
         use serde::Serialize;
+        use strum::Display;
+
+        #[derive(Serialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Display)]
+        #[serde(rename_all = "snake_case")]
+        /// Represents the state of a single standard engine deployment_progress step.
+        // Ordering matters here.
+        pub enum StandardEngineStepState {
+            /// A predecessor step failed, so this step will not run.
+            PredecessorFailed,
+            /// The step encountered a retryable error.  It continues to execute.
+            Error,
+            /// The step has not started yet.
+            Pending,
+            /// The step is waiting until its scheduled start time.
+            Waiting,
+            /// The step is submitting the proposal that raises deployment_progress.
+            Proposing,
+            /// The proposal has been submitted; the step is monitoring the
+            /// upgraded engines until their alerts subside.
+            WaitingForAlertsGone,
+            /// The proposal has been submitted and the upgraded engines are
+            /// healthy; the step is complete.
+            Complete,
+            /// The state of the step is not known.
+            Unknown,
+        }
+
+        #[derive(Serialize, Debug, Clone)]
+        /// A single step in the standard engine deployment_progress schedule.
+        ///
+        /// Each step raises the `deployment_progress` of the standard engine
+        /// replica version record towards 1.0, so a growing fraction of the Cloud
+        /// Engines following the standard upgrade train run the new version.
+        pub struct StandardEngineStep {
+            /// The time the step was programmed to start at.
+            pub planned_start_time: DateTime<Utc>,
+            /// The actual observed start time of the step.
+            pub actual_start_time: Option<DateTime<Utc>>,
+            /// The time the step finished, if any.
+            pub end_time: Option<DateTime<Utc>>,
+            /// The target deployment_progress this step raises the record to, a
+            /// fraction in the closed interval [0.0, 1.0].
+            pub deployment_progress: f64,
+            pub state: StandardEngineStepState,
+            /// A comment for the step if available; else an empty string.
+            pub comment: String,
+            /// Link to the Airflow task for this step; else an empty string.
+            pub display_url: String,
+        }
+
+        #[derive(Serialize, Debug, Clone)]
+        /// The standard engine (Cloud Engine) portion of the rollout: it drives
+        /// the `deployment_progress` of the standard engine replica version record
+        /// up through the week so a growing fraction of engines run the new
+        /// version.
+        pub struct StandardEngine {
+            /// The replica/GuestOS version engines are converging towards (this
+            /// rollout's Git revision).
+            pub new_replica_version_id: String,
+            /// The ordered list of deployment_progress increments.
+            pub steps: Vec<StandardEngineStep>,
+        }
 
         /// Represents a rollout of GuestOS to mainnet subnets.
         #[derive(Debug, Serialize, Clone, Default)]
@@ -317,6 +381,12 @@ pub mod v2 {
             pub state: State,
             /// Associative array of `{batch ID -> Batch}` planned for the rollout.
             pub batches: IndexMap<usize, Batch>,
+            /// The standard engine (Cloud Engine) deployment_progress schedule, if
+            /// this rollout manages the standard engine version.  `None` if the
+            /// rollout does not touch the standard engine version, and the steps
+            /// list may be empty until the schedule task has produced a plan.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub standard_engine: Option<StandardEngine>,
             /// Configuration associated to the rollout.
             pub conf: IndexMap<String, serde_json::Value>,
         }

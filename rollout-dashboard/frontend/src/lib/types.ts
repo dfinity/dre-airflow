@@ -92,12 +92,59 @@ export type GuestOSBatches = {
     String: GuestOsBatch
 };
 
+// types::v2::guestos::StandardEngineStepState
+const GuestOsStandardEngineStepState = {
+    pending: { icon: "🕐", name: "pending" },
+    waiting: { icon: "⌛", name: "waiting" },
+    proposing: { icon: "📝", name: "proposing deployment progress increase" },
+    waiting_for_alerts_gone: {
+        icon: "📢",
+        name: "monitoring upgraded engines until no more alerts",
+    },
+    complete: { icon: "✅", name: "complete" },
+    error: { icon: "❌", name: "error" },
+    predecessor_failed: { icon: "❌", name: "predecessor failed" },
+    unknown: { icon: "❓", name: "does not appear in Airflow" },
+};
+export function standardEngineStepStateIcon(
+    step: GuestOsStandardEngineStep,
+): String {
+    return GuestOsStandardEngineStepState[step.state].icon;
+};
+export function standardEngineStepStateComment(
+    step: GuestOsStandardEngineStep,
+): string {
+    let s = GuestOsStandardEngineStepState[step.state].name;
+    if (step.comment) {
+        s = s + " • " + step.comment;
+    }
+    return s;
+};
+
+// types::v2::guestos::StandardEngineStep
+export type GuestOsStandardEngineStep = {
+    planned_start_time: Date;
+    actual_start_time: Date | null;
+    end_time: Date | null;
+    deployment_progress: number;
+    state: keyof typeof GuestOsStandardEngineStepState;
+    comment: String;
+    display_url: string;
+};
+
+// types::v2::guestos::StandardEngine
+export type GuestOsStandardEngine = {
+    new_replica_version_id: string;
+    steps: GuestOsStandardEngineStep[];
+};
+
 // types::v2::guestos::Rollout
 export type GuestOsRollout = {
     kind: "rollout_ic_os_to_mainnet_subnets";
     conf: GuestOsRolloutConfiguration;
     state: keyof typeof GuestOsState;
     batches: GuestOSBatches;
+    standard_engine?: GuestOsStandardEngine | null;
 } & DAGInfo;
 
 // End GuestOS rollout to mainnet subnet types.

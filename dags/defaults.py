@@ -39,6 +39,22 @@ Monday next week:
     batch: 30""".strip()
 }
 
+# Decoded to type StandardEngineRolloutPlanSpec.
+# Maps day -> time -> target deployment_progress (fraction in [0.0, 1.0]) that
+# the StandardEngineReplicaVersionRecord should reach at that time.  Progress
+# must strictly increase and the last step must reach 1.0.
+DEFAULT_STANDARD_ENGINE_ROLLOUT_PLANS: dict[str, str] = {
+    "mainnet": """
+Tuesday:
+  09:00:     0.2
+  15:00:     0.4
+Wednesday:
+  09:00:     0.6
+  15:00:     0.8
+Thursday:
+  15:00:     1.0""".strip()
+}
+
 # Decoded to type ApiBoundaryNodeRolloutPlanSpec.
 DEFAULT_API_BOUNDARY_NODES_ROLLOUT_PLANS: dict[str, str] = {
     "mainnet": """

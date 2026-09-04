@@ -6,6 +6,8 @@
         guestOsStateIcon,
         GuestOsStateName,
         rolloutKindName,
+        standardEngineStepStateIcon,
+        standardEngineStepStateComment,
     } from "./types";
     import { cap, activeClass } from "./lib";
     import SubnetBatch from "./SubnetBatch.svelte";
@@ -85,6 +87,62 @@
                 not yet{/if} computed a rollout plan.
         </BlackInfoBlock>
     {/if}
+    {#if rollout.standard_engine && rollout.standard_engine.steps.length > 0}
+        <div class="standard_engine">
+            <div class="standard_engine_title">
+                Standard engine (Cloud Engines) → revision
+                <code
+                    >{rollout.standard_engine.new_replica_version_id.slice(
+                        0,
+                        9,
+                    )}</code
+                >
+            </div>
+            <ul class="standard_engine_steps">
+                {#each rollout.standard_engine.steps as step}
+                    <li class="standard_engine_step">
+                        {#if step.display_url}
+                            <a
+                                rel="external"
+                                href={step.display_url}
+                                target="_blank"
+                                title={standardEngineStepStateComment(step)}
+                                data-sveltekit-preload-data="off"
+                            >
+                                <span class="step_icon"
+                                    >{standardEngineStepStateIcon(step)}</span
+                                >
+                                <span class="step_progress"
+                                    >{Math.round(
+                                        step.deployment_progress * 100,
+                                    )}%</span
+                                >
+                            </a>
+                        {:else}
+                            <span
+                                title={standardEngineStepStateComment(step)}
+                            >
+                                <span class="step_icon"
+                                    >{standardEngineStepStateIcon(step)}</span
+                                >
+                                <span class="step_progress"
+                                    >{Math.round(
+                                        step.deployment_progress * 100,
+                                    )}%</span
+                                >
+                            </span>
+                        {/if}
+                        <span class="step_time text-gray-500">
+                            <Time
+                                timestamp={step.planned_start_time}
+                                format="ddd @ h:mm A"
+                            />
+                        </span>
+                    </li>
+                {/each}
+            </ul>
+        </div>
+    {/if}
 </section>
 
 <style>
@@ -132,5 +190,37 @@
     }
     .rollout .times {
         order: 1;
+    }
+    .standard_engine {
+        display: flex;
+        flex-direction: column;
+        row-gap: 0.3em;
+    }
+    .standard_engine_title {
+        font-weight: bold;
+    }
+    ul.standard_engine_steps {
+        display: flex;
+        gap: 0.6em;
+        flex-direction: row;
+        flex-wrap: wrap;
+        margin: 0;
+        padding: 0;
+        list-style-type: none;
+    }
+    .standard_engine_step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        border: 1px solid #ccc;
+        border-radius: 0.3em;
+        padding: 0.3em 0.5em;
+    }
+    .standard_engine_step .step_progress {
+        font-weight: bold;
+        margin-left: 0.2em;
+    }
+    .standard_engine_step .step_time {
+        font-size: 0.85em;
     }
 </style>

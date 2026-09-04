@@ -3,7 +3,7 @@ IC-OS rollout operators.
 """
 
 import itertools
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 import airflow.providers.slack.operators.slack as slack
 import dfinity.dre as dre
@@ -26,6 +26,7 @@ from dfinity.ic_os_rollout import (
     assign_default_revision,
     check_plan,
     rollout_planner,
+    standard_engine_planner,
     subnet_id_and_git_revision_from_args,
 )
 
@@ -444,6 +445,250 @@ def schedule(
         raise AirflowException("Unsafe rollout plan")
 
     return plan
+
+
+@task
+def standard_engine_schedule(
+    **context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """
+    Parse the standard_engine_plan param into an ordered list of steps.
+
+    Each step tells the rollout to submit, at a specific time, a proposal that
+    raises the StandardEngineReplicaVersionRecord.deployment_progress to a given
+    value.  The steps' new_replica_version_id is the rollout's main git_revision.
+
+    The returned steps use ISO 8601 strings for `start_at` (rather than datetime
+    objects) so the value is trivially serializable to XCom and consumable both
+    by the wait-until-start-time sensor and by the rollout dashboard.
+    """
+    plan_data_structure = yaml.safe_load(
+        context["task"].render_template(  # type: ignore
+            "{{ params.standard_engine_plan }}",
+            context,
+        )
+    )
+
+    if not plan_data_structure:
+        print("No standard engine plan specified.  Nothing to do.")
+        return []
+
+    plan = standard_engine_planner(plan_data_structure)
+
+    steps: list[dict[str, Any]] = []
+    for step in plan:
+        print(
+            f"At {step['start_at']} the standard engine deployment_progress"
+            f" will be raised to {step['deployment_progress'] * 100:.0f}%."
+        )
+        steps.append(
+            {
+                "start_at": step["start_at"].isoformat(),
+                "deployment_progress": step["deployment_progress"],
+            }
+        )
+
+    return steps
+
+
+class CreateStandardEngineProposalIdempotently(BaseOperator):
+    """
+    Submit a `propose-to-update-standard-engine-replica-version` proposal that
+    raises the StandardEngineReplicaVersionRecord.deployment_progress to the
+    target value for this step, upgrading a fraction of the Cloud Engines
+    following the standard upgrade train towards the rollout's git revision.
+
+    The new version is the rollout's git revision.  The old version is whatever
+    the current record's `new_replica_version_id` is (i.e. what the previous
+    rollout left in place).  If there is no current record, the rollout cannot
+    proceed and fails, because there is no known old version to converge away
+    from.
+
+    Idempotent: if a record already targets this new version with a
+    deployment_progress at or above the target, the step is a no-op.
+    """
+
+    template_fields = ("git_revision", "deployment_progress", "simulate_proposal")
+    network: ic_types.ICNetwork
+    git_revision: str
+    deployment_progress: str | float
+    simulate_proposal: bool
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        git_revision: str,
+        deployment_progress: str | float,
+        simulate_proposal: bool,
+        network: ic_types.ICNetwork,
+        **kwargs: Any,
+    ):
+        self.git_revision = git_revision
+        self.deployment_progress = deployment_progress
+        self.simulate_proposal = simulate_proposal
+        self.network = network
+        BaseOperator.__init__(self, task_id=task_id, **kwargs)
+
+    def execute(self, context: Context) -> dict[str, int | str | float | bool]:
+        _, git_revision = subnet_id_and_git_revision_from_args("", self.git_revision)
+        target_progress = float(self.deployment_progress)
+
+        if self.simulate_proposal:
+            self.log.info(f"simulate_proposal={self.simulate_proposal}")
+
+        runner = dre.DRE(network=self.network, subprocess_hook=SubprocessHook())
+        current = runner.get_standard_engine_replica_version()
+
+        if current is None:
+            raise AirflowException(
+                "There is no StandardEngineReplicaVersionRecord in the registry, so"
+                " there is no known old version to converge away from.  A first"
+                " record must be established manually before the rollout can manage"
+                " the standard engine version."
+            )
+
+        if current["new_replica_version_id"] == git_revision:
+            # The registry's current new version is already the version this
+            # rollout is deploying, i.e. we are mid-deployment.  We must keep the
+            # record's existing old version (converging to git_revision would be
+            # an invalid new==old transition otherwise); we only adjust progress.
+            old_replica_version_id = current["old_replica_version_id"]
+            self.log.info(
+                "The current standard engine new version is already %s (this"
+                " rollout's revision); will only adjust deployment_progress.",
+                git_revision,
+            )
+        else:
+            # We are starting a new deployment towards git_revision, converging
+            # away from whatever the record currently points its new version at
+            # (i.e. what the previous rollout deployed).
+            old_replica_version_id = current["new_replica_version_id"]
+
+        # Idempotency: if we're already converging to git_revision with progress
+        # at or above the target, there's nothing to do.
+        if (
+            current["new_replica_version_id"] == git_revision
+            and current["deployment_progress"] >= target_progress
+        ):
+            self.log.info(
+                "Standard engine already at revision %s with deployment_progress"
+                " %s >= target %s.  No proposal needed.",
+                git_revision,
+                current["deployment_progress"],
+                target_progress,
+            )
+            return {
+                "new_replica_version_id": git_revision,
+                "old_replica_version_id": old_replica_version_id,
+                "deployment_progress": current["deployment_progress"],
+                "needs_vote": False,
+                "proposal_id": dre.FAKE_PROPOSAL_NUMBER,
+            }
+
+        self.log.info(
+            "Creating proposal to update the standard engine to revision %s"
+            " (from %s) with deployment_progress %s (simulate %s).",
+            git_revision,
+            old_replica_version_id,
+            target_progress,
+            self.simulate_proposal,
+        )
+
+        authenticated = runner.authenticated()
+        proposal_number = (
+            authenticated.propose_to_update_standard_engine_replica_version(
+                new_replica_version_id=git_revision,
+                old_replica_version_id=old_replica_version_id,
+                deployment_progress=target_progress,
+                dry_run=self.simulate_proposal,
+            )
+        )
+
+        url = f"{self.network.proposal_display_url}/{proposal_number}"
+        return {
+            "new_replica_version_id": git_revision,
+            "old_replica_version_id": old_replica_version_id,
+            "deployment_progress": target_progress,
+            "proposal_id": proposal_number,
+            "proposal_url": url,
+            "needs_vote": True,
+        }
+
+
+class CollectStandardEngineUpgradedSubnets(BaseOperator):
+    """
+    Return the engine subnet IDs that get upgraded to the new standard engine
+    version as `deployment_progress` is raised from the previous step's target
+    to this step's target.
+
+    These are the Cloud Engines (following the standard upgrade train) whose
+    upgrade priority falls in the range `(previous_progress, deployment_progress]`.
+    The returned (flat) list is intended to be used to expand alert-monitoring
+    tasks so we only watch the engines that actually changed version in this step.
+
+    The step's own target and the previous step's target are read from the
+    `standard_engine_schedule` XCom using this step's index, so this task does
+    not need to be dynamically mapped.  Returns an empty list when the step is
+    empty (its index is beyond the end of the plan).
+
+    Uses the dre `engine-versions` command.
+    """
+
+    template_fields = ("git_revision",)
+    network: ic_types.ICNetwork
+    git_revision: str
+    step_index: int
+    schedule_task_id: str
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        git_revision: str,
+        step_index: int,
+        network: ic_types.ICNetwork,
+        schedule_task_id: str = "standard_engine_schedule",
+        **kwargs: Any,
+    ):
+        self.git_revision = git_revision
+        self.step_index = step_index
+        self.schedule_task_id = schedule_task_id
+        self.network = network
+        BaseOperator.__init__(self, task_id=task_id, **kwargs)
+
+    def execute(self, context: Context) -> list[str]:
+        _, git_revision = subnet_id_and_git_revision_from_args("", self.git_revision)
+
+        plan = cast(
+            "list[dict[str, Any]]",
+            context["ti"].xcom_pull(self.schedule_task_id),
+        )
+        if not plan or self.step_index >= len(plan):
+            self.log.info("This standard engine step is empty; no engines to monitor.")
+            return []
+
+        to_progress = float(plan[self.step_index]["deployment_progress"])
+        from_progress = (
+            0.0
+            if self.step_index == 0
+            else float(plan[self.step_index - 1]["deployment_progress"])
+        )
+
+        runner = dre.DRE(network=self.network, subprocess_hook=SubprocessHook())
+        subnets = runner.get_engines_in_priority_range(
+            from_progress=from_progress,
+            to_progress=to_progress,
+            new_replica_version_id=git_revision,
+        )
+        self.log.info(
+            "Engines upgraded in range (%s, %s] to revision %s: %s",
+            from_progress,
+            to_progress,
+            git_revision,
+            subnets,
+        )
+        return subnets
 
 
 def create_api_boundary_nodes_proposal_if_none_exists(
