@@ -25,6 +25,7 @@ from dfinity.ic_os_rollout import (
     SubnetRolloutPlanWithRevision,
 )
 from dfinity.ic_types import IC_NETWORKS
+from dfinity.rollout_types import ProposalInfo
 
 from airflow import DAG, __version__
 
@@ -308,14 +309,14 @@ for network_name, network in IC_NETWORKS.items():
                 mode="reschedule",
             )
             def wait_until_proposal_is_accepted(
-                proposal_info: dict[str, Any], **kwargs: Any
+                proposal_info: ProposalInfo, **kwargs: Any
             ) -> PokeReturnValue:
                 # An idempotent no-op (the engine is already at or above the
                 # target deployment_progress) yields a fake proposal that never
                 # needs a vote, so there is nothing to wait for.
                 if (
                     proposal_info["proposal_id"] == FAKE_PROPOSAL_NUMBER
-                    or not proposal_info.get("needs_vote", True)
+                    or not proposal_info["needs_vote"]
                 ):
                     print(
                         "No real proposal to wait for; the standard engine is"
@@ -378,7 +379,7 @@ for network_name, network in IC_NETWORKS.items():
                     % step_index,
                     retries=retries,
                 ).expand(_ignored=proceed)
-                >> wait_until_proposal_is_accepted.expand(  # type: ignore
+                >> wait_until_proposal_is_accepted.expand(
                     proposal_info=create_proposal.output
                 )
                 >> upgraded_engines
@@ -394,9 +395,7 @@ for network_name, network in IC_NETWORKS.items():
                     retries=retries,
                     network=network,
                 ).expand(
-                    subnet_id=engine_subnet_ids(  # type: ignore
-                        upgraded_engines.output
-                    )
+                    subnet_id=engine_subnet_ids(upgraded_engines.output)  # type: ignore
                 )
                 >> join
             )
