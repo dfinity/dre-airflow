@@ -10,3 +10,4 @@ plugins/dags/*
 tests/logs
 tests/airflow.cfg
 tests/airflow.db
+.serena/*

@@ -627,6 +627,12 @@ class CollectStandardEngineUpgradedSubnets(BaseOperator):
     The returned (flat) list is intended to be used to expand alert-monitoring
     tasks so we only watch the engines that actually changed version in this step.
 
+    Each returned item is a mapping with the engine's `subnet_id` and its
+    `expected_replica_count` (the current number of replicas on that subnet,
+    queried from Prometheus).  The count lets a downstream
+    `WaitForReplicaRevisionUpdated` task (mapped via `expand_kwargs`) know how
+    many nodes must reach the new revision.
+
     The step's own target and the previous step's target are read from the
     `standard_engine_schedule` XCom using this step's index, so this task does
     not need to be dynamically mapped.  Returns an empty list when the step is
@@ -657,7 +663,7 @@ class CollectStandardEngineUpgradedSubnets(BaseOperator):
         self.network = network
         BaseOperator.__init__(self, task_id=task_id, **kwargs)
 
-    def execute(self, context: Context) -> list[str]:
+    def execute(self, context: Context) -> list[dict[str, Any]]:
         _, git_revision = subnet_id_and_git_revision_from_args("", self.git_revision)
 
         plan = cast(
@@ -688,7 +694,36 @@ class CollectStandardEngineUpgradedSubnets(BaseOperator):
             git_revision,
             subnets,
         )
-        return subnets
+
+        # For each engine subnet, remember the current number of replicas so a
+        # downstream WaitForReplicaRevisionUpdated (mapped via expand_kwargs)
+        # knows how many nodes must reach the new revision.
+        result: list[dict[str, Any]] = []
+        for subnet_id in subnets:
+            try:
+                replica_count = int(
+                    prom.query_prometheus_servers(
+                        self.network.prometheus_urls,
+                        f'sum(ic_replica_info{{ic_subnet="{subnet_id}"}})'
+                        " by (ic_subnet)",
+                    )[0]["value"]
+                )
+            except IndexError:
+                raise RuntimeError(
+                    f"No replicas have been found with subnet {subnet_id}"
+                )
+            self.log.info(
+                "Engine subnet %s currently has %s replicas.",
+                subnet_id,
+                replica_count,
+            )
+            result.append(
+                {
+                    "subnet_id": subnet_id,
+                    "expected_replica_count": replica_count,
+                }
+            )
+        return result
 
 
 def create_api_boundary_nodes_proposal_if_none_exists(

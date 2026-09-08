@@ -329,8 +329,14 @@ pub mod v2 {
             Waiting,
             /// The step is submitting the proposal that raises deployment_progress.
             Proposing,
-            /// The proposal has been submitted; the step is monitoring the
-            /// upgraded engines until their alerts subside.
+            /// The proposal has been submitted; the step is waiting for it to be
+            /// voted in and executed.
+            WaitingForAcceptance,
+            /// The proposal has executed; the step is waiting for the upgraded
+            /// engines to adopt the new replica revision.
+            WaitingForAdoption,
+            /// The upgraded engines have adopted the new revision; the step is
+            /// monitoring them until their alerts subside.
             WaitingForAlertsGone,
             /// The proposal has been submitted and the upgraded engines are
             /// healthy; the step is complete.
