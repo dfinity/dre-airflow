@@ -16,7 +16,9 @@ from airflow.decorators import task
 from airflow.models.baseoperator import chain
 from airflow.models.param import Param
 from airflow.operators.empty import EmptyOperator
+from airflow.sensors.base import PokeReturnValue
 from airflow.utils.task_group import TaskGroup
+from dfinity.dre import FAKE_PROPOSAL_NUMBER
 from dfinity.ic_os_rollout import (
     MAX_BATCHES,
     SubnetIdWithRevision,
@@ -298,13 +300,47 @@ for network_name, network in IC_NETWORKS.items():
             )
             proceed >> join
 
+            @task.sensor(
+                task_id="wait_until_proposal_is_accepted",
+                retries=retries,
+                poke_interval=120,
+                timeout=86400 * 7,
+                mode="reschedule",
+            )
+            def wait_until_proposal_is_accepted(
+                proposal_info: dict[str, Any], **kwargs: Any
+            ) -> PokeReturnValue:
+                # An idempotent no-op (the engine is already at or above the
+                # target deployment_progress) yields a fake proposal that never
+                # needs a vote, so there is nothing to wait for.
+                if (
+                    proposal_info["proposal_id"] == FAKE_PROPOSAL_NUMBER
+                    or not proposal_info.get("needs_vote", True)
+                ):
+                    print(
+                        "No real proposal to wait for; the standard engine is"
+                        " already at or above the target deployment progress."
+                    )
+                    return PokeReturnValue(is_done=True)
+                simulate = cast(bool, kwargs["params"]["simulate"])
+                return PokeReturnValue(
+                    is_done=ic_os_sensor.has_proposal_executed(
+                        proposal_info, network, simulate
+                    )
+                )
+
+            @task(trigger_rule="none_failed_min_one_success")
+            def engine_subnet_ids(engines: list[dict[str, Any]]) -> list[str]:
+                return [e["subnet_id"] for e in engines]
+
             # Collect the engines upgraded in this step so we can monitor their
-            # alerts.  This runs after the proposal so the version has been
-            # elected/voted and the engines have begun upgrading.  It is not
-            # mapped: it reads its own and the previous step's target progress
-            # from the schedule XCom, and returns a flat list of subnet IDs.  It
-            # runs unconditionally (like join) so an empty step still lets the
-            # alert wait (and the chain) proceed.
+            # alerts.  This runs after the proposal has been accepted so the
+            # version has been elected/voted and the engines have begun
+            # upgrading.  It is not mapped: it reads its own and the previous
+            # step's target progress from the schedule XCom, and returns, per
+            # engine subnet, its subnet ID and current replica count.  It runs
+            # unconditionally (like join) so an empty step still lets the
+            # downstream waits (and the chain) proceed.
             upgraded_engines = ic_os_rollout.CollectStandardEngineUpgradedSubnets(
                 task_id="collect_upgraded_engines",
                 git_revision="{{ params.git_revision }}",
@@ -312,6 +348,16 @@ for network_name, network in IC_NETWORKS.items():
                 retries=retries,
                 network=network,
                 trigger_rule="none_failed_min_one_success",
+            )
+
+            create_proposal = (
+                ic_os_rollout.CreateStandardEngineProposalIdempotently.partial(
+                    task_id="create_proposal_if_none_exists",
+                    git_revision="{{ params.git_revision }}",
+                    simulate_proposal=cast(bool, "{{ params.simulate }}"),
+                    retries=retries,
+                    network=network,
+                ).expand(deployment_progress=proceed)
             )
 
             (
@@ -325,26 +371,33 @@ for network_name, network in IC_NETWORKS.items():
                     % step_index,
                     simulate="{{ params.simulate }}",
                 ).expand(_ignored=proceed)
-                >> ic_os_rollout.CreateStandardEngineProposalIdempotently.partial(
-                    task_id="create_proposal_if_none_exists",
-                    git_revision="{{ params.git_revision }}",
-                    simulate_proposal=cast(bool, "{{ params.simulate }}"),
-                    retries=retries,
-                    network=network,
-                ).expand(deployment_progress=proceed)
+                >> create_proposal
                 >> ic_os_rollout.RequestProposalVote.partial(
                     task_id="request_proposal_vote",
                     source_task_id="standard_engine.step_%d.create_proposal_if_none_exists"
                     % step_index,
                     retries=retries,
                 ).expand(_ignored=proceed)
+                >> wait_until_proposal_is_accepted.expand(  # type: ignore
+                    proposal_info=create_proposal.output
+                )
                 >> upgraded_engines
+                >> ic_os_sensor.WaitForReplicaRevisionUpdated.partial(
+                    task_id="wait_for_replica_revision",
+                    git_revision="{{ params.git_revision }}",
+                    retries=retries,
+                    network=network,
+                ).expand_kwargs(upgraded_engines.output)
                 >> ic_os_sensor.WaitUntilNoAlertsOnSubnet.partial(
                     task_id="wait_until_no_alerts",
                     git_revision="{{ params.git_revision }}",
                     retries=retries,
                     network=network,
-                ).expand(subnet_id=upgraded_engines.output)
+                ).expand(
+                    subnet_id=engine_subnet_ids(  # type: ignore
+                        upgraded_engines.output
+                    )
+                )
                 >> join
             )
 

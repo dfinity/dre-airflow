@@ -97,6 +97,14 @@ const GuestOsStandardEngineStepState = {
     pending: { icon: "🕐", name: "pending" },
     waiting: { icon: "⌛", name: "waiting" },
     proposing: { icon: "📝", name: "proposing deployment progress increase" },
+    waiting_for_acceptance: {
+        icon: "🗳️",
+        name: "waiting for the proposal to be accepted",
+    },
+    waiting_for_adoption: {
+        icon: "⏳",
+        name: "waiting for the engines to adopt the new revision",
+    },
     waiting_for_alerts_gone: {
         icon: "📢",
         name: "monitoring upgraded engines until no more alerts",

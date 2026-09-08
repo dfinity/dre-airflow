@@ -719,7 +719,13 @@ impl Parser {
                                 "create_proposal_if_none_exists" => {
                                     se_trans_min!(StandardEngineStepState::Proposing)
                                 }
-                                "collect_upgraded_engines" | "wait_until_no_alerts" => {
+                                "wait_until_proposal_is_accepted" => {
+                                    se_trans_min!(StandardEngineStepState::WaitingForAcceptance)
+                                }
+                                "collect_upgraded_engines" | "wait_for_replica_revision" => {
+                                    se_trans_min!(StandardEngineStepState::WaitingForAdoption)
+                                }
+                                "wait_until_no_alerts" => {
                                     se_trans_min!(StandardEngineStepState::WaitingForAlertsGone)
                                 }
                                 "request_proposal_vote" | "join" => {}
@@ -737,9 +743,15 @@ impl Parser {
                                     se_trans_exact!(StandardEngineStepState::Proposing);
                                 }
                                 "create_proposal_if_none_exists" => {
-                                    se_trans_exact!(StandardEngineStepState::WaitingForAlertsGone)
+                                    se_trans_exact!(StandardEngineStepState::WaitingForAcceptance)
+                                }
+                                "wait_until_proposal_is_accepted" => {
+                                    se_trans_exact!(StandardEngineStepState::WaitingForAdoption)
                                 }
                                 "collect_upgraded_engines" => {
+                                    se_trans_exact!(StandardEngineStepState::WaitingForAdoption)
+                                }
+                                "wait_for_replica_revision" => {
                                     se_trans_exact!(StandardEngineStepState::WaitingForAlertsGone)
                                 }
                                 "wait_until_no_alerts" => {
