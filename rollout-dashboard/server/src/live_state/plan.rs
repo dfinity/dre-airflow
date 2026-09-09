@@ -1,4 +1,6 @@
-use crate::airflow_client::{EventLogsResponseFilters, EventLogsResponseItem};
+use crate::airflow_client::{
+    EventLogsQueryFilter, EventLogsQueryOrder, EventLogsResponseItem, OrderBy, PagingParameters,
+};
 
 use super::super::airflow_client::{AirflowClient, AirflowError, TaskInstancesResponseItem};
 use chrono::{DateTime, Utc};
@@ -10,6 +12,7 @@ use std::{fmt::Display, str::FromStr, sync::Arc};
 use super::python::PythonDeserializer;
 
 const LOG_TARGET: &str = "live_state::plan";
+const MAX_AUDIT_LOGS_TO_INSPECT_PER_OUTDATED_TASK: usize = 50;
 
 pub enum PlanQueryResult<P> {
     NotFound,
@@ -298,15 +301,12 @@ pub async fn fetch_audit_logs(
     // different order.
     Ok(airflow_api
         .event_logs(
-            10,
-            0,
-            &EventLogsResponseFilters {
-                dag_id: Some(&dag_id.to_string()),
-                run_id: Some(&dag_run_id.to_string()),
-                task_id: Some(&task_instance_id.to_string()),
-                ..Default::default()
-            },
-            Some("-event_log_id".to_string()),
+            PagingParameters::new(MAX_AUDIT_LOGS_TO_INSPECT_PER_OUTDATED_TASK, 0),
+            EventLogsQueryFilter::default()
+                .dag_id(dag_id.to_string())
+                .run_id(dag_run_id.to_string())
+                .task_id(task_instance_id.to_string())
+                .order_by(OrderBy::Descending(EventLogsQueryOrder::EventLogId)),
         )
         .await?
         .event_logs)
