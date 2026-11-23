@@ -32,7 +32,7 @@ Thursday:
   9:00:      [yinp6, bkfrj, jtdsg]
   11:00:     [mpubz, x33ed, gmq5v]
   13:00:     [3hhby, nl6hn, pzp6e]
-  14:00:     [x4jtx, 3zsyy]
+  14:00:     [x4jtx]
 Monday next week:
   7:00:
     subnets: [tdb26]
