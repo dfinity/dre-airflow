@@ -1,6 +1,8 @@
-use crate::airflow_client::EventLogsResponseItem;
+use crate::airflow_client::{
+    EventLogsQueryOrder, EventLogsResponseItem, OrderBy, PagingParameters,
+};
 
-use super::super::airflow_client::{AirflowClient, AirflowError, EventLogsResponseFilters};
+use super::super::airflow_client::{AirflowClient, AirflowError, EventLogsQueryFilter};
 use super::{DagID, DagRunID};
 use chrono::{DateTime, Utc};
 use log::{debug, trace};
@@ -81,14 +83,11 @@ impl AirflowIncrementalLogInspector {
             // Airflow event log as a deciding factor.
             let event_logs = airflow_api
                 .event_logs(
-                    100000,
-                    0,
-                    &EventLogsResponseFilters {
-                        after: last_event_log_update,
-                        dag_id: Some(&dag_id.to_string()),
-                        ..Default::default()
-                    },
-                    None,
+                    PagingParameters::default(),
+                    EventLogsQueryFilter::default()
+                        .after(last_event_log_update.unwrap())
+                        .dag_id(dag_id.to_string())
+                        .order_by(OrderBy::Ascending(EventLogsQueryOrder::EventLogId)),
                 )
                 .await?;
 
@@ -221,14 +220,10 @@ impl AirflowIncrementalLogInspector {
         } else {
             let event_logs = airflow_api
                 .event_logs(
-                    1,
-                    0,
-                    &EventLogsResponseFilters {
-                        after: last_event_log_update,
-                        dag_id: Some(&dag_id.to_string()),
-                        ..Default::default()
-                    },
-                    Some("-event_log_id".to_string()),
+                    PagingParameters::new(1, 0),
+                    EventLogsQueryFilter::default()
+                        .dag_id(dag_id.to_string())
+                        .order_by(OrderBy::Descending(EventLogsQueryOrder::EventLogId)),
                 )
                 .await?;
             if !event_logs.event_logs.is_empty() {
